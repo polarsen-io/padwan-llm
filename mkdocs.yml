@@ -1,0 +1,63 @@
+site_name: Polarsen LLM
+site_description: Unified async client for OpenAI, Gemini, Mistral, and Grok APIs
+site_url: https://polarsen.github.io/polarsen-llm
+repo_url: https://github.com/Polarsen/polarsen-llm
+repo_name: Polarsen/polarsen-llm
+
+theme:
+  name: material
+  logo: static/logo.png
+  favicon: static/logo.png
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.expand
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.integrate
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
+  - md_in_html
+
+plugins:
+  - search
+
+nav:
+  - Introduction: index.md
+  - Getting Started: getting-started.md
+  - Clients:
+      - OpenAI: clients/openai.md
+      - Gemini: clients/gemini.md
+      - Mistral: clients/mistral.md
+      - Grok: clients/grok.md
+  - CLI: cli.md
