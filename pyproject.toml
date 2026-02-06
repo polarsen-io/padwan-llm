@@ -1,0 +1,66 @@
+[project]
+name = "polarsen-llm"
+version = "0.1.0"
+authors = [
+    { email = "julien.brayere@obitrain.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "niquests>=3.17.0",
+]
+
+[project.optional-dependencies]
+cli = ["piou[tui]>=0.28.2"]
+
+[project.scripts]
+polarsen-llm = "src.__main__:main"
+polarsen-cli = "src.cli:main_tui"
+
+[build-system]
+requires = ["uv_build>=0.9.18,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+module-name = "src"
+
+[tool.uv]
+default-groups = ["cli"]
+
+#[tool.uv.sources]
+#piou = { path = "../../piou", editable = true }
+
+[dependency-groups]
+cli = [
+    "piou[tui]>=0.28.2",
+    "piou[tui-reload]>=0.29.1",
+]
+dev = [
+    "google-genai>=1.0.0",
+    "openai>=1.0.0",
+    "prek>=0.2.30",
+    "pyright>=1.1.400",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.11.0",
+]
+research = [
+    "jupyter>=1.1.1",
+    "pandas>=2.3.3",
+    "python-dotenv>=1.2.1",
+]
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --cov=src --cov-report=term-missing"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["src/__init__.py"]
