@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, get_args
 
 from .._base import LLMError, Provider
-from ..openai.client import OpenAIClient, _check_resp
+from ..openai.client import OpenAICompatibleClient, _check_resp
 
 if TYPE_CHECKING:
     from .types import EmbeddingRequest, EmbeddingResponse, TranscriptionResponse
@@ -42,9 +42,21 @@ __all__ = (
 )
 
 
+_MISTRAL_PREFIXES = (
+    "mistral-",
+    "pixtral-",
+    "ministral-",
+    "open-mistral-",
+    "devstral-",
+    "codestral-",
+    "magistral-",
+    "voxtral-",
+)
+
+
 def is_mistral_model(model_name: str) -> bool:
-    """Check if the model name is a Mistral model."""
-    return model_name.startswith("mistral-") or model_name in MISTRAL_MODELS
+    """Check if the model name looks like a Mistral model based on known prefixes."""
+    return model_name.startswith(_MISTRAL_PREFIXES)
 
 
 MISTRAL_MODELS: set[str] = set(get_args(MistralModel))
@@ -53,15 +65,15 @@ MISTRAL_ENDPOINT = "https://api.mistral.ai/v1/"
 
 
 @dataclasses.dataclass
-class MistralClient(OpenAIClient):
-    """Mistral API client with structured output support.
+class MistralClient(OpenAICompatibleClient):
+    """Mistral API client.
 
-    Inherits from OpenAIClient since Mistral uses an OpenAI-compatible API.
+    Inherits from OpenAICompatibleClient since Mistral uses an OpenAI-compatible API.
     """
 
     provider: ClassVar[Provider] = "mistral"
-    model: MistralModel | None = "mistral-large-latest"  # pyright: ignore[reportIncompatibleVariableOverride]
-    base_url: str = MISTRAL_ENDPOINT  # pyright: ignore[reportIncompatibleVariableOverride]
+    model: str | None = "mistral-large-latest"
+    base_url: str = MISTRAL_ENDPOINT
 
     def _get_default_api_key(self) -> str:
         api_key = os.environ.get("MISTRAL_API_KEY")
@@ -72,7 +84,7 @@ class MistralClient(OpenAIClient):
     async def fetch_embeddings(
         self,
         input: str | list[str],
-        model: MistralEmbeddingModel = "mistral-embed",
+        model: str = "mistral-embed",
     ) -> list[list[float]]:
         """Fetch embeddings from Mistral.
 
@@ -83,7 +95,7 @@ class MistralClient(OpenAIClient):
         Returns:
             List of embedding vectors (one per input text).
         """
-        body: "EmbeddingRequest" = {"model": model, "input": input}
+        body: EmbeddingRequest = {"model": model, "input": input}
         resp = await self.session.post("/embeddings", json=body)
         data = cast("EmbeddingResponse", _check_resp(resp))
         return [item["embedding"] for item in data["data"]]
@@ -94,7 +106,7 @@ class MistralClient(OpenAIClient):
         file: str | Path | bytes | None = None,
         file_id: str | None = None,
         file_url: str | None = None,
-        model: MistralAudioModel = "voxtral-mini-latest",
+        model: str = "voxtral-mini-latest",
         language: str | None = None,
         temperature: float | None = None,
         diarize: bool = False,

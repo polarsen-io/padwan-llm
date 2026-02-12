@@ -53,7 +53,7 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
     """API key. If None, reads from provider's environment variable."""
 
     _api_key: str = field(init=False, repr=False)
-    base_url: str | None = field(init=False, default=None, repr=False)
+    base_url: str = field(init=False, default="", repr=False)
     _session: niquests.AsyncSession | None = field(init=False, default=None, repr=False)
 
     @property

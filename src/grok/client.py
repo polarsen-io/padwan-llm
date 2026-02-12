@@ -5,7 +5,7 @@ import os
 from typing import ClassVar, Literal, get_args
 
 from .._base import LLMError, Provider
-from ..openai.client import OpenAIClient
+from ..openai.client import OpenAICompatibleClient
 
 GrokModel = Literal[
     "grok-3",
@@ -17,8 +17,10 @@ __all__ = ("GrokClient", "GROK_MODELS", "GROK_ENDPOINT", "GrokModel", "is_grok_m
 
 
 def is_grok_model(model_name: str | None) -> bool:
-    """Check if the model is a Grok model."""
-    return model_name in GROK_MODELS
+    """Check if the model name looks like a Grok model based on known prefixes."""
+    if model_name is None:
+        return False
+    return model_name.startswith("grok-")
 
 
 GROK_MODELS: set[str] = set(get_args(GrokModel))
@@ -27,15 +29,15 @@ GROK_ENDPOINT = "https://api.x.ai/v1/"
 
 
 @dataclasses.dataclass
-class GrokClient(OpenAIClient):
-    """Grok API client with structured output support.
+class GrokClient(OpenAICompatibleClient):
+    """Grok API client.
 
-    Inherits from OpenAIClient since Grok uses an OpenAI-compatible API.
+    Inherits from OpenAICompatibleClient since Grok uses an OpenAI-compatible API.
     """
 
     provider: ClassVar[Provider] = "grok"
-    model: GrokModel | None = "grok-3"  # pyright: ignore[reportIncompatibleVariableOverride]
-    base_url: str = GROK_ENDPOINT  # pyright: ignore[reportIncompatibleVariableOverride]
+    model: str | None = "grok-3"
+    base_url: str = GROK_ENDPOINT
 
     def _get_default_api_key(self) -> str:
         api_key = os.environ.get("GROK_API_KEY")

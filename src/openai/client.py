@@ -40,6 +40,7 @@ OpenAIModel = Literal[
 ]
 
 __all__ = (
+    "OpenAICompatibleClient",
     "OpenAIClient",
     "OPENAI_MODELS",
     "OPENAI_ENDPOINT",
@@ -49,7 +50,7 @@ __all__ = (
 
 
 def _check_resp(resp: niquests.Response) -> dict:
-    """Check OpenAI HTTP response, extracting error details."""
+    """Check OpenAI-compatible HTTP response, extracting error details."""
     try:
         resp.raise_for_status()
     except niquests.exceptions.HTTPError as e:
@@ -64,9 +65,14 @@ def _check_resp(resp: niquests.Response) -> dict:
     return resp.json()
 
 
+_OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
+
+
 def is_openai_model(model_name: str | None) -> bool:
-    """Check if the model is an OpenAI model."""
-    return model_name in OPENAI_MODELS
+    """Check if the model name looks like an OpenAI model based on known prefixes."""
+    if model_name is None:
+        return False
+    return model_name.startswith(_OPENAI_PREFIXES)
 
 
 OPENAI_MODELS: set[str] = set(get_args(OpenAIModel))
@@ -75,12 +81,16 @@ OPENAI_ENDPOINT = "https://api.openai.com/v1/"
 
 
 @dataclasses.dataclass
-class OpenAIClient(LLMClientBase[Retry]):
-    """OpenAI API client with structured output support."""
+class OpenAICompatibleClient(LLMClientBase[Retry]):
+    """Base client for OpenAI-compatible APIs.
 
-    provider: ClassVar[Provider] = "openai"
-    model: OpenAIModel | None = "gpt-4o"  # pyright: ignore[reportIncompatibleVariableOverride]
-    base_url: str = OPENAI_ENDPOINT  # pyright: ignore[reportIncompatibleVariableOverride]
+    Can be used directly for arbitrary OpenAI-compatible endpoints (Ollama,
+    Together AI, vLLM, etc.) or subclassed by named providers like OpenAIClient,
+    MistralClient, and GrokClient.
+    """
+
+    provider: ClassVar[Provider] = "openai_compat"
+    base_url: str = ""
     _retry: Retry = Retry(
         total=3,
         backoff_factor=0.5,
@@ -89,19 +99,16 @@ class OpenAIClient(LLMClientBase[Retry]):
     )
 
     def _get_default_api_key(self) -> str:
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            raise LLMError(self.provider, "OPENAI_API_KEY not set")
-        return api_key
+        raise LLMError(self.provider, "api_key is required")
 
     def _set_auth_headers(self, session: niquests.AsyncSession) -> None:
         session.headers["Authorization"] = f"Bearer {self._api_key}"
 
     async def complete(
         self,
-        body: "CreateChatCompletionRequest",
-    ) -> tuple["CreateChatCompletionResponse", UsageToken]:
-        """Fetch structured completion from OpenAI."""
+        body: CreateChatCompletionRequest,
+    ) -> tuple[CreateChatCompletionResponse, UsageToken]:
+        """Fetch structured completion from an OpenAI-compatible endpoint."""
         resp = await self.session.post(
             "/chat/completions",
             json=body,
@@ -124,9 +131,9 @@ class OpenAIClient(LLMClientBase[Retry]):
 
     async def stream(
         self,
-        body: "CreateChatCompletionRequest",
-    ) -> AsyncIterator["CreateChatCompletionStreamResponse"]:
-        """Stream chat completions from OpenAI, yielding response chunks as they arrive via SSE."""
+        body: CreateChatCompletionRequest,
+    ) -> AsyncIterator[CreateChatCompletionStreamResponse]:
+        """Stream chat completions, yielding response chunks as they arrive via SSE."""
         resp = await self.session.post(
             "/chat/completions",
             json={**body, "stream": True},
@@ -146,7 +153,7 @@ class OpenAIClient(LLMClientBase[Retry]):
     async def complete_chat(self, messages: list[Message]) -> tuple[str, UsageToken]:
         """Send a chat conversation and return the complete response."""
         body: CreateChatCompletionRequest = {
-            "model": self.model or "gpt-4o",
+            "model": self.model or "",
             "messages": cast(list, messages),
             "temperature": self.temperature,
         }
@@ -154,26 +161,40 @@ class OpenAIClient(LLMClientBase[Retry]):
         text = data["choices"][0]["message"]["content"] or ""
         return text, token
 
-    def stream_chat(self, messages: list[Message]) -> "OpenAIChatStream":
+    def stream_chat(self, messages: list[Message]) -> OpenAIChatStream:
         """Stream a chat conversation, yielding text chunks.
 
-        Handles OpenAI-specific body building and response extraction.
         Usage is available on the returned stream object after iteration.
         """
         return OpenAIChatStream(self, messages)
 
 
+@dataclasses.dataclass
+class OpenAIClient(OpenAICompatibleClient):
+    """OpenAI API client."""
+
+    provider: ClassVar[Provider] = "openai"
+    model: str | None = "gpt-4o"
+    base_url: str = OPENAI_ENDPOINT
+
+    def _get_default_api_key(self) -> str:
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise LLMError(self.provider, "OPENAI_API_KEY not set")
+        return api_key
+
+
 class OpenAIChatStream(ChatStream):
     """ChatStream implementation for OpenAI-compatible APIs."""
 
-    def __init__(self, client: OpenAIClient, messages: list[Message]) -> None:
+    def __init__(self, client: OpenAICompatibleClient, messages: list[Message]) -> None:
         self._client = client
         self._messages = messages
         self.usage: UsageToken | None = None
 
     async def __aiter__(self) -> AsyncIterator[str]:
         body: CreateChatCompletionRequest = {
-            "model": self._client.model or "gpt-4o",
+            "model": self._client.model or "",
             "messages": cast(list, self._messages),
             "temperature": self._client.temperature,
             "stream_options": {"include_usage": True},
@@ -185,7 +206,7 @@ class OpenAIChatStream(ChatStream):
             if usage := self._extract_usage(chunk):
                 self.usage = usage
 
-    def _extract_text(self, chunk: "CreateChatCompletionStreamResponse") -> str | None:
+    def _extract_text(self, chunk: CreateChatCompletionStreamResponse) -> str | None:
         """Extract text content from an OpenAI stream response chunk."""
         if choices := chunk.get("choices"):
             if delta := choices[0].get("delta"):
@@ -193,7 +214,7 @@ class OpenAIChatStream(ChatStream):
         return None
 
     def _extract_usage(
-        self, chunk: "CreateChatCompletionStreamResponse"
+        self, chunk: CreateChatCompletionStreamResponse
     ) -> UsageToken | None:
         """Extract usage info from an OpenAI stream response chunk (final chunk)."""
         if usage := chunk.get("usage"):

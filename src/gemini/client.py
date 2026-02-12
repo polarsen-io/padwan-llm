@@ -106,7 +106,7 @@ class GeminiRetry(Retry):
                 if detail.get("@type") == "type.googleapis.com/google.rpc.RetryInfo":
                     delay_str = detail.get("retryDelay", "")
                     return math.ceil(float(delay_str.rstrip("s")))
-        except (json.JSONDecodeError, ValueError, KeyError):
+        except json.JSONDecodeError, ValueError, KeyError:
             pass
         return None
 
@@ -116,8 +116,8 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
     """Gemini API client with structured output support."""
 
     provider: ClassVar[Provider] = "gemini"
-    model: GeminiModel | None = "gemini-2.0-flash"  # pyright: ignore[reportIncompatibleVariableOverride]
-    base_url: str = GEMINI_ENDPOINT  # pyright: ignore[reportIncompatibleVariableOverride]
+    model: str | None = "gemini-2.0-flash"
+    base_url: str = GEMINI_ENDPOINT
     _retry: GeminiRetry = GeminiRetry(
         total=3,
         backoff_factor=0.5,
@@ -135,12 +135,12 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
         session.headers["x-goog-api-key"] = self._api_key
 
     async def complete(
-        self, body: CompletionBody, model: GeminiModel
-    ) -> tuple["GenerateContentResponseDict", UsageToken]:
+        self, body: CompletionBody, model: str | None = None
+    ) -> tuple[GenerateContentResponseDict, UsageToken]:
         """Fetch structured completion from Gemini."""
         _model = model or self.model
         resp = await self.session.post(
-            "/models/{model}:generateContent".format(model=_model),
+            f"/models/{_model}:generateContent",
             json=body,
         )
         data = cast("GenerateContentResponseDict", _check_resp(resp))
@@ -159,7 +159,7 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
     async def create_batch(
         self,
         requests: list[BatchRequest],
-        model: GeminiModel | None = None,
+        model: str | None = None,
         display_name: str | None = None,
     ) -> BatchJob:
         """Create a batch job for multiple requests.
@@ -327,7 +327,7 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
         text = data["candidates"][0]["content"]["parts"][0]["text"]
         return text, token
 
-    def stream_chat(self, messages: list[Message]) -> "GeminiChatStream":
+    def stream_chat(self, messages: list[Message]) -> GeminiChatStream:
         """Stream a chat conversation, yielding text chunks.
 
         Handles Gemini-specific body building and response extraction.
