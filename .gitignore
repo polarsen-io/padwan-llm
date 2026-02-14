@@ -162,6 +162,7 @@ cython_debug/
 
 *.ipynb
 scratch/
+cli/
 
 CLAUDE.md
 .claude/

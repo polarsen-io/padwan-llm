@@ -5,7 +5,7 @@ The Gemini client provides access to Google's Gemini models.
 ## Configuration
 
 ```python
-from src.gemini import GeminiClient
+from padwan_llm.gemini import GeminiClient
 
 client = GeminiClient(
     api_key="...",           # or set GEMINI_API_KEY env var
@@ -13,53 +13,82 @@ client = GeminiClient(
 )
 ```
 
-## Available Models
-
-- `gemini-2.0-flash` - Fast, efficient model
-- `gemini-2.0-flash-thinking` - Enhanced reasoning
-- `gemini-1.5-pro` - Previous generation pro model
-- `gemini-1.5-flash` - Previous generation flash model
-
 ## Usage
 
 ### Basic Chat
 
 ```python
+from padwan_llm.conversation import Message
+
 async with GeminiClient() as client:
-    response = await client.chat("Hello!")
-    print(response.content)
+    text, usage = await client.complete_chat([
+        Message(role="user", content="Hello!")
+    ])
+    print(text)
 ```
 
 ### Streaming
 
 ```python
+from padwan_llm.conversation import Message
+
 async with GeminiClient() as client:
-    async for chunk in client.stream("Tell me a story"):
-        print(chunk.content, end="")
+    stream = client.stream_chat([
+        Message(role="user", content="Tell me a story")
+    ])
+    async for chunk in stream:
+        print(chunk, end="")
 ```
 
 ## Batch Processing
 
-Gemini supports batch processing for large-scale requests:
+Gemini supports batch processing for large-scale requests via methods on `GeminiClient`.
+
+### Creating a batch
 
 ```python
-from src.gemini import GeminiBatch
+from padwan_llm.gemini import GeminiClient, BatchRequest
 
-batch = GeminiBatch(api_key="...")
-results = await batch.process([
-    "Question 1",
-    "Question 2",
-    "Question 3",
-])
+async with GeminiClient() as client:
+    requests = [
+        BatchRequest(
+            contents=[{"role": "user", "parts": [{"text": "Question 1"}]}],
+            key="q1",
+        ),
+        BatchRequest(
+            contents=[{"role": "user", "parts": [{"text": "Question 2"}]}],
+            key="q2",
+        ),
+    ]
+    job = await client.create_batch(requests, display_name="my-batch")
+    print(job.name)  # e.g. "batches/123456"
 ```
 
-## Response Format
+`BatchRequest` accepts optional `generation_config` and `system_instruction` fields. If `key` is omitted, requests are auto-keyed as `request-0`, `request-1`, etc.
+
+### Polling for results
 
 ```python
-@dataclass
-class ChatResponse:
-    content: str
-    model: str
-    usage: Usage | None
-    finish_reason: str | None
+from padwan_llm.gemini import BatchResult
+
+job = await client.get_batch(job.name)
+if job.succeeded:
+    for resp in job.inlined_responses or []:
+        result = BatchResult.from_inlined_response(resp)
+        print(result.key, result.content)
 ```
+
+### Listing and cancelling
+
+```python
+jobs, next_token = await client.list_batches(page_size=10)
+await client.cancel_batch("batches/123456")
+```
+
+### Batch types reference
+
+| Type | Description |
+|------|-------------|
+| `BatchRequest` | Single request: `contents`, `generation_config`, `system_instruction`, `key` |
+| `BatchJob` | Job state: `name`, `state`, `dest`, `stats`, `is_terminal`, `succeeded` |
+| `BatchResult` | Parsed result: `key`, `content`, `input_tokens`, `output_tokens`, `total_tokens` |

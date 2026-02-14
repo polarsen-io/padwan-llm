@@ -60,4 +60,3 @@ nav:
       - Gemini: clients/gemini.md
       - Mistral: clients/mistral.md
       - Grok: clients/grok.md
-  - CLI: cli.md

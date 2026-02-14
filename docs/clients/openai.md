@@ -1,11 +1,11 @@
 # OpenAI Client
 
-The OpenAI client provides access to GPT models through the OpenAI API.
+The OpenAI client provides access to GPT models through the OpenAI API. It also serves as the base for other OpenAI-compatible providers (Grok, Mistral, etc.).
 
 ## Configuration
 
 ```python
-from src.openai import OpenAIClient
+from padwan_llm.openai import OpenAIClient
 
 client = OpenAIClient(
     api_key="sk-...",  # or set OPENAI_API_KEY env var
@@ -13,50 +13,54 @@ client = OpenAIClient(
 )
 ```
 
-## Available Models
-
-- `gpt-4o` - Most capable model
-- `gpt-4o-mini` - Faster, cheaper variant
-- `gpt-4-turbo` - Previous generation
-- `gpt-3.5-turbo` - Legacy model
-
 ## Usage
 
 ### Basic Chat
 
 ```python
+from padwan_llm.conversation import Message
+
 async with OpenAIClient() as client:
-    response = await client.chat("Hello!")
-    print(response.content)
+    text, usage = await client.complete_chat([
+        Message(role="user", content="Hello!")
+    ])
+    print(text)
 ```
 
 ### Streaming
 
 ```python
+from padwan_llm.conversation import Message
+
 async with OpenAIClient() as client:
-    async for chunk in client.stream("Tell me a story"):
-        print(chunk.content, end="")
+    stream = client.stream_chat([
+        Message(role="user", content="Tell me a story")
+    ])
+    async for chunk in stream:
+        print(chunk, end="")
 ```
 
 ### With System Prompt
 
 ```python
-from src import Conversation
+from padwan_llm import ConversationState
 
-conv = Conversation(system="You are a helpful assistant.")
-conv.add_user("Hello!")
+state = ConversationState(system="You are a helpful assistant.")
+state.add_user_message("Hello!")
 
 async with OpenAIClient() as client:
-    response = await client.chat(conv)
+    text, usage = await client.complete_chat(state.messages)
+    state.add_assistant_message(text)
+    state.accumulate_usage(usage)
 ```
 
-## Response Format
+## Method Outputs
 
 ```python
-@dataclass
-class ChatResponse:
-    content: str
-    model: str
-    usage: Usage | None
-    finish_reason: str | None
+text, usage = await client.complete_chat(messages)
+
+stream = client.stream_chat(messages)
+async for chunk in stream:
+    ...
+usage = stream.usage
 ```
