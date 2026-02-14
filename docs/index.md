@@ -1,4 +1,4 @@
-# Polarsen LLM
+# Padwan LLM
 
 Unified async client for OpenAI, Gemini, Mistral, and Grok APIs.
 
@@ -28,7 +28,7 @@ uv run padwan-llm "Hello!" -m gpt-4o-mini
 ```
 
 ```python
-from polarsen_llm import LLMClient
+from padwan_llm import LLMClient
 
 async with LLMClient("gpt-4o") as client:
     response = await client.chat("Hello, world!")
@@ -38,13 +38,13 @@ async with LLMClient("gpt-4o") as client:
 ## Installation
 
 ```bash
-pip install polarsen-llm
+pip install padwan-llm
 ```
 
 Or with uv:
 
 ```bash
-uv add polarsen-llm
+uv add padwan-llm
 ```
 
 ## CLI / TUI

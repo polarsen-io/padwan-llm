@@ -1,8 +1,8 @@
-site_name: Polarsen LLM
+site_name: Padwan LLM
 site_description: Unified async client for OpenAI, Gemini, Mistral, and Grok APIs
-site_url: https://polarsen.github.io/polarsen-llm
-repo_url: https://github.com/Polarsen/polarsen-llm
-repo_name: Polarsen/polarsen-llm
+site_url: https://polarsen-io.github.io/padwan-llm
+repo_url: https://github.com/polarsen-io/padwan-llm
+repo_name: polarsen-io/padwan-llm
 
 theme:
   name: material
