@@ -6,8 +6,13 @@ from unittest.mock import MagicMock
 import pytest
 from niquests.exceptions import HTTPError
 
+from typing import TYPE_CHECKING
+
 from padwan_llm.errors import QuotaExceededError, TooManyRequestsError
 from padwan_llm.openai.client import OpenAIClient, OpenAIChatStream, _check_resp
+
+if TYPE_CHECKING:
+    from padwan_llm.openai.types import CreateChatCompletionStreamResponse
 
 
 @pytest.mark.parametrize(
@@ -58,7 +63,9 @@ class TestOpenAIChatStreamExtraction:
             pytest.param({}, None, id="empty"),
         ],
     )
-    def test_extract_text(self, chunk: dict, expected: str | None):
+    def test_extract_text(
+        self, chunk: CreateChatCompletionStreamResponse, expected: str | None
+    ):
         assert self.stream._extract_text(chunk) == expected
 
     @pytest.mark.parametrize(
@@ -90,5 +97,7 @@ class TestOpenAIChatStreamExtraction:
             pytest.param({}, None, id="no-usage"),
         ],
     )
-    def test_extract_usage(self, chunk: dict, expected: dict | None):
+    def test_extract_usage(
+        self, chunk: CreateChatCompletionStreamResponse, expected: dict | None
+    ):
         assert self.stream._extract_usage(chunk) == expected

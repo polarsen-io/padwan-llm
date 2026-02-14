@@ -5,8 +5,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from padwan_llm.conversation import Message
 from padwan_llm.errors import LLMError, QuotaExceededError, TooManyRequestsError
 from padwan_llm.gemini.batch import BatchJob, BatchResult
+from padwan_llm.gemini.models import BatchState, InlinedResponse
 from padwan_llm.gemini.client import (
     GeminiClient,
     GeminiChatStream,
@@ -75,13 +77,13 @@ def test_check_resp(status, json_data, ctx, make_resp):
 
 class TestGeminiChatStream:
     def test_build_body_skips_system(self):
-        messages = [
+        messages: list[Message] = [
             {"role": "system", "content": "Be helpful"},
             {"role": "user", "content": "Hi"},
             {"role": "assistant", "content": "Hello"},
         ]
         body = GeminiChatStream.build_body(messages, 0.5)
-        assert body["temperature"] == 0.5
+        assert body.get("temperature") == 0.5
         assert len(body["contents"]) == 2
         assert body["contents"][0]["role"] == "user"
         assert body["contents"][1]["role"] == "model"
@@ -150,7 +152,7 @@ class TestGeminiChatStream:
         pytest.param("JOB_STATE_PENDING", False, False, id="pending"),
     ],
 )
-def test_batch_job_states(state: str, is_terminal: bool, succeeded: bool):
+def test_batch_job_states(state: BatchState, is_terminal: bool, succeeded: bool):
     job = BatchJob(name="batches/123", state=state)
     assert job.is_terminal is is_terminal
     assert job.succeeded is succeeded
@@ -195,7 +197,7 @@ def test_batch_job_inlined_responses(dest, expected):
     ],
 )
 def test_batch_result_from_inlined_response(
-    resp: dict, expected_content: str, expected_total: int
+    resp: InlinedResponse, expected_content: str, expected_total: int
 ):
     result = BatchResult.from_inlined_response(resp)
     assert result.content == expected_content

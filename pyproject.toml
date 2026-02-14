@@ -58,4 +58,4 @@ update_changelog_on_bump = true
 
 [tool.coverage.run]
 source = ["padwan_llm"]
-omit = ["padwan_llm/__init__.py"]
+omit = ["padwan_llm/__init__.py", "padwan_llm/*/types.py"]

@@ -168,7 +168,7 @@ def test_is_model(func, model, expected: bool):
 def test_llm_client_routing(model: str, expected_type: type | None, ctx):
     with ctx:
         client = LLMClient(model, api_key="fake-key")
-        assert isinstance(client, expected_type)
+        assert isinstance(client, expected_type)  # type: ignore[arg-type]
 
 
 def test_llm_client_passes_params():
