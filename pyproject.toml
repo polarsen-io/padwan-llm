@@ -2,7 +2,7 @@
 name = "padwan-llm"
 version = "0.1.0"
 authors = [
-    { email = "julien.brayere@obitrain.com" }
+    { email = "julien.brayere@polarsen.io" }
 ]
 requires-python = ">=3.14"
 dependencies = [
