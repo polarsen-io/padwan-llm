@@ -1,4 +1,6 @@
 import dataclasses
+from dataclasses import field
+from functools import partial
 import json
 import os
 from collections.abc import AsyncIterator
@@ -46,13 +48,13 @@ __all__ = (
 )
 
 
-def _check_resp(resp: niquests.Response) -> dict:
-    """Check OpenAI-compatible HTTP response, extracting error details."""
+async def _check_resp_status(resp: niquests.Response | niquests.AsyncResponse) -> None:
+    """Check HTTP status and raise appropriate errors without consuming the body."""
     try:
         resp.raise_for_status()
     except niquests.exceptions.HTTPError as e:
         try:
-            data = resp.json()
+            data = await resp.json()
         except Exception:
             raise e
         if resp.status_code == HTTPStatus.TOO_MANY_REQUESTS:
@@ -62,7 +64,12 @@ def _check_resp(resp: niquests.Response) -> dict:
         if resp.status_code == HTTPStatus.PAYMENT_REQUIRED:
             raise QuotaExceededError(body=data)
         raise e
-    return resp.json()
+
+
+async def _check_resp(resp: niquests.Response | niquests.AsyncResponse) -> dict:
+    """Check OpenAI-compatible HTTP response and return the parsed JSON body."""
+    await _check_resp_status(resp)
+    return await resp.json()
 
 
 _OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
@@ -91,11 +98,14 @@ class OpenAIClient(LLMClientBase[Retry]):
     provider: ClassVar[Provider] = "openai"
     model: str | None = "gpt-4o"
     base_url: str = OPENAI_ENDPOINT
-    _retry: Retry = Retry(
-        total=3,
-        backoff_factor=0.5,
-        status_forcelist=[500, 502, 503, 504],
-        allowed_methods=["POST"],
+    _retry: Retry = field(
+        default_factory=partial(
+            Retry,
+            total=3,
+            backoff_factor=0.5,
+            status_forcelist=[500, 502, 503, 504],
+            allowed_methods=["POST"],
+        )
     )
 
     def _get_default_api_key(self) -> str:
@@ -116,7 +126,7 @@ class OpenAIClient(LLMClientBase[Retry]):
             "/chat/completions",
             json=body,
         )
-        data = cast("CreateChatCompletionResponse", _check_resp(resp))
+        data = cast("CreateChatCompletionResponse", await _check_resp(resp))
 
         usage: CompletionUsage | None = data.get("usage")
         if usage is None:
@@ -127,7 +137,7 @@ class OpenAIClient(LLMClientBase[Retry]):
             "output": usage["completion_tokens"],
         }
         if details := usage.get("prompt_tokens_details"):
-            if cached := details.get("cached_tokens"):
+            if (cached := details.get("cached_tokens")) is not None:
                 token["cached"] = cached
 
         return data, token
@@ -142,7 +152,7 @@ class OpenAIClient(LLMClientBase[Retry]):
             json={**body, "stream": True},
             stream=True,
         )
-        _check_resp(resp)
+        await _check_resp_status(resp)
 
         async for line in resp.iter_lines(decode_unicode=True):  # pyright: ignore[reportGeneralTypeIssues]
             if not line:
@@ -151,12 +161,19 @@ class OpenAIClient(LLMClientBase[Retry]):
                 data_str = line[6:]  # Remove "data: " prefix
                 if data_str == "[DONE]":
                     break
-                yield cast("CreateChatCompletionStreamResponse", json.loads(data_str))
+                try:
+                    yield cast(
+                        "CreateChatCompletionStreamResponse", json.loads(data_str)
+                    )
+                except json.JSONDecodeError as e:
+                    raise LLMError(self.provider, f"Stream parse error: {e}") from e
 
     async def complete_chat(self, messages: list[Message]) -> tuple[str, UsageToken]:
         """Send a chat conversation and return the complete response."""
+        if not self.model:
+            raise LLMError(self.provider, "No model specified")
         body: CreateChatCompletionRequest = {
-            "model": self.model or "",
+            "model": self.model,
             "messages": cast(list, messages),
             "temperature": self.temperature,
         }
@@ -181,8 +198,10 @@ class OpenAIChatStream(ChatStream):
         self.usage: UsageToken | None = None
 
     async def __aiter__(self) -> AsyncIterator[str]:
+        if not self._client.model:
+            raise LLMError(self._client.provider, "No model specified")
         body: CreateChatCompletionRequest = {
-            "model": self._client.model or "",
+            "model": self._client.model,
             "messages": cast(list, self._messages),
             "temperature": self._client.temperature,
             "stream_options": {"include_usage": True},
@@ -212,7 +231,7 @@ class OpenAIChatStream(ChatStream):
                 "output": usage.get("completion_tokens", 0),
             }
             if details := usage.get("prompt_tokens_details"):
-                if cached := details.get("cached_tokens"):
+                if (cached := details.get("cached_tokens")) is not None:
                     token["cached"] = cached
             return token
         return None

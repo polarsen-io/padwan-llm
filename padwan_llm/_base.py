@@ -49,7 +49,7 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
     """Sampling temperature."""
     timeout: float = 60
     """Request timeout in seconds."""
-    api_key: str | None = None
+    api_key: str | None = field(default=None, repr=False)
     """API key. If None, reads from provider's environment variable."""
 
     _api_key: str = field(init=False, repr=False)
@@ -57,9 +57,14 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
     _session: niquests.AsyncSession | None = field(init=False, default=None, repr=False)
 
     @property
-    def max_retries(self) -> int:
-        """Maximum retry attempts, derived from _retry config."""
-        return self._retry.total or 0
+    def max_retries(self) -> int | None:
+        """Maximum retry attempts, derived from _retry config. None means unlimited, 0 means disabled."""
+        total = self._retry.total
+        if total is False:
+            return 0
+        if total is None:
+            return None
+        return int(total)
 
     def __post_init__(self) -> None:
         self._api_key = self.api_key or self._get_default_api_key()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import nullcontext
 from unittest.mock import MagicMock
 
@@ -12,6 +13,7 @@ from padwan_llm.gemini.models import BatchState, InlinedResponse
 from padwan_llm.gemini.client import (
     GeminiClient,
     GeminiChatStream,
+    GeminiRetry,
     _check_resp,
     _parse_retry_delay,
 )
@@ -68,11 +70,45 @@ def test_parse_retry_delay(delay_str: str, expected: int):
         ),
     ],
 )
-def test_check_resp(status, json_data, ctx, make_resp):
+async def test_check_resp(status, json_data, ctx, make_resp):
     resp = make_resp(status, json_data)
     with ctx:
-        result = _check_resp(resp)
+        result = await _check_resp(resp)
         assert result == json_data
+
+
+@pytest.mark.parametrize(
+    "body, expected",
+    [
+        pytest.param(
+            json.dumps(
+                {
+                    "error": {
+                        "details": [
+                            {
+                                "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                                "retryDelay": "30.5s",
+                            }
+                        ]
+                    }
+                }
+            ).encode(),
+            31,
+            id="extracts-delay",
+        ),
+        pytest.param(b"not json", None, id="invalid-json"),
+        pytest.param(
+            json.dumps({"error": {"details": []}}).encode(),
+            None,
+            id="no-retry-info",
+        ),
+    ],
+)
+def test_gemini_retry_get_retry_after(body: bytes, expected: float | None):
+    retry = GeminiRetry()
+    resp = MagicMock()
+    resp.data = body
+    assert retry.get_retry_after(resp) == expected
 
 
 class TestGeminiChatStream:

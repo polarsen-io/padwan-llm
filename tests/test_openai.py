@@ -41,10 +41,10 @@ if TYPE_CHECKING:
         ),
     ],
 )
-def test_check_resp(status, json_data, headers, ctx, make_resp):
+async def test_check_resp(status, json_data, headers, ctx, make_resp):
     resp = make_resp(status, json_data, headers)
     with ctx:
-        result = _check_resp(resp)
+        result = await _check_resp(resp)
         assert result == json_data
 
 

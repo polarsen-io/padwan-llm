@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import dataclasses
+from dataclasses import field
+from functools import partial
 import json
 import math
 import os
@@ -51,13 +53,13 @@ def _parse_retry_delay(delay_str: str) -> int:
     return math.ceil(float(delay_str.rstrip("s")))
 
 
-def _check_resp(resp: niquests.Response) -> dict:
-    """Check Gemini HTTP response, extracting retry delay from body."""
+async def _check_resp_status(resp: niquests.Response | niquests.AsyncResponse) -> None:
+    """Check HTTP status and raise appropriate errors without consuming the body."""
     try:
         resp.raise_for_status()
     except niquests.exceptions.HTTPError as e:
         try:
-            data = resp.json()
+            data = await resp.json()
         except Exception:
             raise e
         if resp.status_code == HTTPStatus.TOO_MANY_REQUESTS:
@@ -72,7 +74,12 @@ def _check_resp(resp: niquests.Response) -> dict:
             raise TooManyRequestsError(retry_delay=retry_delay, response=resp)
         error_msg = data.get("error", {}).get("message", "")
         raise LLMError("gemini", f"{resp.status_code} {error_msg}") from e
-    return resp.json()
+
+
+async def _check_resp(resp: niquests.Response | niquests.AsyncResponse) -> dict:
+    """Check Gemini HTTP response and return the parsed JSON body."""
+    await _check_resp_status(resp)
+    return await resp.json()
 
 
 def is_gemini_model(model_name: str | None) -> bool:
@@ -123,11 +130,14 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
     provider: ClassVar[Provider] = "gemini"
     model: str | None = "gemini-2.0-flash"
     base_url: str = GEMINI_ENDPOINT
-    _retry: GeminiRetry = GeminiRetry(
-        total=3,
-        backoff_factor=0.5,
-        status_forcelist=[500, 502, 503, 504],
-        allowed_methods=["POST"],
+    _retry: GeminiRetry = field(
+        default_factory=partial(
+            GeminiRetry,
+            total=3,
+            backoff_factor=0.5,
+            status_forcelist=[500, 502, 503, 504],
+            allowed_methods=["POST"],
+        )
     )
 
     def _get_default_api_key(self) -> str:
@@ -144,11 +154,13 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
     ) -> tuple[GenerateContentResponseDict, UsageToken]:
         """Fetch structured completion from Gemini."""
         _model = model or self.model
+        if not _model:
+            raise LLMError(self.provider, "No model specified")
         resp = await self.session.post(
             f"/models/{_model}:generateContent",
             json=body,
         )
-        data = cast("GenerateContentResponseDict", _check_resp(resp))
+        data = cast("GenerateContentResponseDict", await _check_resp(resp))
 
         usage: GenerateContentResponseUsageMetadataDict = data.get("usageMetadata", {})
         token: UsageToken = {
@@ -156,7 +168,7 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             "input": usage.get("promptTokenCount", 0),
             "output": usage.get("candidatesTokenCount", 0),
         }
-        if cached := usage.get("cachedContentTokenCount"):
+        if (cached := usage.get("cachedContentTokenCount")) is not None:
             token["cached"] = cached
 
         return data, token
@@ -178,6 +190,8 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             BatchJob with the job name for polling via get_batch().
         """
         _model = model or self.model
+        if not _model:
+            raise LLMError(self.provider, "No model specified")
         batch_requests = []
 
         for idx, req in enumerate(requests):
@@ -207,7 +221,7 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             f"/models/{_model}:batchGenerateContent",
             json=payload,
         )
-        data = _check_resp(resp)
+        data = await _check_resp(resp)
         return self._parse_batch_job(data)
 
     async def get_batch(self, job_name: str) -> BatchJob:
@@ -223,7 +237,7 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             job_name = f"batches/{job_name}"
 
         resp = await self.session.get(f"/{job_name}")
-        data = _check_resp(resp)
+        data = await _check_resp(resp)
         return self._parse_batch_job(data)
 
     async def list_batches(
@@ -245,7 +259,7 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             params["pageToken"] = page_token
 
         resp = await self.session.get("/batches", params=params)
-        data = _check_resp(resp)
+        data = await _check_resp(resp)
 
         jobs = [self._parse_batch_job(op) for op in data.get("operations", [])]
         return jobs, data.get("nextPageToken")
@@ -260,7 +274,7 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             job_name = f"batches/{job_name}"
 
         resp = await self.session.post(f"/{job_name}:cancel")
-        _check_resp(resp)
+        await _check_resp(resp)
 
     def _parse_batch_job(self, data: dict) -> BatchJob:
         """Parse raw API response into BatchJob dataclass."""
@@ -300,6 +314,8 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
 
     async def stream(self, body: StreamBody) -> AsyncIterator[dict]:
         """Stream chat completions from Gemini, yielding response chunks as they arrive via SSE."""
+        if not self.model:
+            raise LLMError(self.provider, "No model specified for streaming")
         _temperature = body.get("temperature", self.temperature)
 
         payload: dict = {
@@ -315,7 +331,7 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             json=payload,
             stream=True,
         )
-        _check_resp(resp)
+        await _check_resp_status(resp)
         resp.encoding = "utf-8"
 
         async for line in resp.iter_lines(decode_unicode=True):  # pyright: ignore[reportGeneralTypeIssues]
@@ -323,7 +339,10 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
                 continue
             if line.startswith("data: "):
                 data_str = line[6:]  # Remove "data: " prefix
-                yield json.loads(data_str)
+                try:
+                    yield json.loads(data_str)
+                except json.JSONDecodeError as e:
+                    raise LLMError(self.provider, f"Stream parse error: {e}") from e
 
     async def complete_chat(self, messages: list[Message]) -> tuple[str, UsageToken]:
         """Send a chat conversation and return the complete response."""
@@ -408,7 +427,7 @@ class GeminiChatStream(ChatStream):
                 "input": usage.get("promptTokenCount", 0),
                 "output": usage.get("candidatesTokenCount", 0),
             }
-            if cached := usage.get("cachedContentTokenCount"):
+            if (cached := usage.get("cachedContentTokenCount")) is not None:
                 token["cached"] = cached
             return token
         return None

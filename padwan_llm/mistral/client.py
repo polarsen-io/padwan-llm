@@ -96,7 +96,7 @@ class MistralClient(OpenAIClient):
         """
         body: EmbeddingRequest = {"model": model, "input": input}
         resp = await self.session.post("/embeddings", json=body)
-        data = cast("EmbeddingResponse", _check_resp(resp))
+        data = cast("EmbeddingResponse", await _check_resp(resp))
         return [item["embedding"] for item in data["data"]]
 
     async def transcribe(
@@ -164,4 +164,4 @@ class MistralClient(OpenAIClient):
 
             resp = await self.session.post("/audio/transcriptions", json=body)
 
-        return cast("TranscriptionResponse", _check_resp(resp))
+        return cast("TranscriptionResponse", await _check_resp(resp))
