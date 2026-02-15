@@ -1,3 +1,9 @@
+## 0.1.3 (2026-02-15)
+
+### Fix
+
+- multiple bug fixes and hardening across all providers
+
 ## 0.1.2 (2026-02-15)
 
 ### Fix
