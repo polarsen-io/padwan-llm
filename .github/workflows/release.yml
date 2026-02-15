@@ -55,8 +55,7 @@ jobs:
           tag_name: ${{ steps.get_version.outputs.VERSION }}
           body_path: RELEASE_NOTES.md
           files: dist/*
-        env:
-          GH_TOKEN: ${{ secrets.POLARSEN_BOT_PAT }}
+          token: ${{ secrets.POLARSEN_BOT_PAT }}
 
       - name: Publish to PyPI
         run: uv publish
