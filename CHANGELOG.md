@@ -1,3 +1,9 @@
+## 0.1.7 (2026-02-17)
+
+### Fix
+
+- make _check_resp and _check_resp_status synchronous
+
 ## 0.1.6 (2026-02-15)
 
 ### Fix
