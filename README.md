@@ -1,6 +1,9 @@
 # Padwan LLM
 
-Lightweight, unified async client for OpenAI, Gemini, Mistral, Grok, and any OpenAI-compatible API. Single dependency ([niquests](https://github.com/jawah/niquests)), automatic HTTP/2 and HTTP/3 negotiation.
+Lightweight, unified async client for OpenAI, Gemini, Mistral, Grok, and any OpenAI-compatible API.
+Single dependency ([niquests](https://github.com/jawah/niquests)), automatic HTTP/2 and HTTP/3 negotiation.
+
+For the full interactive CLI/TUI, use the separate [`padwan-cli`](https://github.com/polarsen-io/padwan-cli) package.
 
 ## Installation
 
@@ -47,8 +50,6 @@ padwan-llm "Hello!" -m gpt-4o-mini
 # Or without installing:
 uvx padwan-llm "Hello!" -m gpt-4o-mini
 ```
-
-For the full interactive CLI/TUI, use the separate `padwan-cli` package.
 
 ## Supported Models
 
