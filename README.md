@@ -5,6 +5,8 @@ Single dependency ([niquests](https://github.com/jawah/niquests)), automatic HTT
 
 For the full interactive CLI/TUI, use the separate [`padwan-cli`](https://github.com/polarsen-io/padwan-cli) package.
 
+<img alt="Chat demo" src="https://github.com/polarsen-io/padwan-cli/raw/master/docs/static/chat.gif" width="800"/>
+
 ## Installation
 
 ```bash
