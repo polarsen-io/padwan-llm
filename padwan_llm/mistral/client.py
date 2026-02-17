@@ -4,7 +4,7 @@ import dataclasses
 import mimetypes
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, get_args
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, get_args
 
 from .._base import LLMError, Provider
 from ..openai.client import OpenAIClient, _check_resp
@@ -96,7 +96,7 @@ class MistralClient(OpenAIClient):
         """
         body: EmbeddingRequest = {"model": model, "input": input}
         resp = await self.session.post("/embeddings", json=body)
-        data = cast("EmbeddingResponse", await _check_resp(resp))
+        data: EmbeddingResponse = _check_resp(resp)
         return [item["embedding"] for item in data["data"]]
 
     async def transcribe(
@@ -164,4 +164,5 @@ class MistralClient(OpenAIClient):
 
             resp = await self.session.post("/audio/transcriptions", json=body)
 
-        return cast("TranscriptionResponse", await _check_resp(resp))
+        result: TranscriptionResponse = _check_resp(resp)
+        return result

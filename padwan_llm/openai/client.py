@@ -1,4 +1,5 @@
 import dataclasses
+import typing
 from dataclasses import field
 from functools import partial
 import json
@@ -48,13 +49,13 @@ __all__ = (
 )
 
 
-async def _check_resp_status(resp: niquests.Response | niquests.AsyncResponse) -> None:
+def _check_resp_status(resp: niquests.Response) -> niquests.Response:
     """Check HTTP status and raise appropriate errors without consuming the body."""
     try:
-        resp.raise_for_status()
+        return resp.raise_for_status()
     except niquests.exceptions.HTTPError as e:
         try:
-            data = await resp.json()
+            data = resp.json()
         except Exception:
             raise e
         if resp.status_code == HTTPStatus.TOO_MANY_REQUESTS:
@@ -66,10 +67,9 @@ async def _check_resp_status(resp: niquests.Response | niquests.AsyncResponse) -
         raise e
 
 
-async def _check_resp(resp: niquests.Response | niquests.AsyncResponse) -> dict:
+def _check_resp(resp: niquests.Response) -> typing.Any:
     """Check OpenAI-compatible HTTP response and return the parsed JSON body."""
-    await _check_resp_status(resp)
-    return await resp.json()
+    return (_check_resp_status(resp)).json()
 
 
 _OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
@@ -126,7 +126,7 @@ class OpenAIClient(LLMClientBase[Retry]):
             "/chat/completions",
             json=body,
         )
-        data = cast("CreateChatCompletionResponse", await _check_resp(resp))
+        data: CreateChatCompletionResponse = _check_resp(resp)
 
         usage: CompletionUsage | None = data.get("usage")
         if usage is None:
@@ -152,7 +152,7 @@ class OpenAIClient(LLMClientBase[Retry]):
             json={**body, "stream": True},
             stream=True,
         )
-        await _check_resp_status(resp)
+        _check_resp_status(resp)
 
         async for line in resp.iter_lines(decode_unicode=True):  # pyright: ignore[reportGeneralTypeIssues]
             if not line:
