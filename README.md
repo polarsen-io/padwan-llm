@@ -5,7 +5,7 @@ Single dependency ([niquests](https://github.com/jawah/niquests)), automatic HTT
 
 For the full interactive CLI/TUI, use the separate [`padwan-cli`](https://github.com/polarsen-io/padwan-cli) package.
 
-<img alt="Chat demo" src="https://github.com/polarsen-io/padwan-cli/raw/master/docs/static/chat.gif" width="800"/>
+<img alt="Chat demo" src="https://github.com/polarsen-io/padwan-cli/raw/master/docs/static/chat.gif" width="500"/>
 
 ## Installation
 
@@ -29,10 +29,10 @@ async with LLMClient(model="gpt-4o") as client:
 ```python
 from padwan_llm import LLMClient, ConversationState
 
-state = ConversationState(system="You are helpful.")
+state = ConversationState(system="You are a concise assistant, helping me in my daily tasks.")
 
 async with LLMClient(model="gpt-4o") as client:
-    state.add_user_message("Hello!")
+    state.add_user_message("What's python?")
 
     chat_stream = client.stream_chat(state.messages)
     async for text in chat_stream:
