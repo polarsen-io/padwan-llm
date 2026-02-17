@@ -70,10 +70,10 @@ def test_parse_retry_delay(delay_str: str, expected: int):
         ),
     ],
 )
-async def test_check_resp(status, json_data, ctx, make_resp):
+def test_check_resp(status, json_data, ctx, make_resp):
     resp = make_resp(status, json_data)
     with ctx:
-        result = await _check_resp(resp)
+        result = _check_resp(resp)
         assert result == json_data
 
 

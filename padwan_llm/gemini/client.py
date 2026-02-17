@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import typing
 from dataclasses import field
 from functools import partial
 import json
@@ -53,13 +54,13 @@ def _parse_retry_delay(delay_str: str) -> int:
     return math.ceil(float(delay_str.rstrip("s")))
 
 
-async def _check_resp_status(resp: niquests.Response | niquests.AsyncResponse) -> None:
+def _check_resp_status(resp: niquests.Response) -> niquests.Response:
     """Check HTTP status and raise appropriate errors without consuming the body."""
     try:
-        resp.raise_for_status()
+        return resp.raise_for_status()
     except niquests.exceptions.HTTPError as e:
         try:
-            data = await resp.json()
+            data = resp.json()
         except Exception:
             raise e
         if resp.status_code == HTTPStatus.TOO_MANY_REQUESTS:
@@ -76,10 +77,9 @@ async def _check_resp_status(resp: niquests.Response | niquests.AsyncResponse) -
         raise LLMError("gemini", f"{resp.status_code} {error_msg}") from e
 
 
-async def _check_resp(resp: niquests.Response | niquests.AsyncResponse) -> dict:
+def _check_resp(resp: niquests.Response) -> typing.Any:
     """Check Gemini HTTP response and return the parsed JSON body."""
-    await _check_resp_status(resp)
-    return await resp.json()
+    return (_check_resp_status(resp)).json()
 
 
 def is_gemini_model(model_name: str | None) -> bool:
@@ -160,7 +160,7 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             f"/models/{_model}:generateContent",
             json=body,
         )
-        data = cast("GenerateContentResponseDict", await _check_resp(resp))
+        data: GenerateContentResponseDict = _check_resp(resp)
 
         usage: GenerateContentResponseUsageMetadataDict = data.get("usageMetadata", {})
         token: UsageToken = {
@@ -221,7 +221,7 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             f"/models/{_model}:batchGenerateContent",
             json=payload,
         )
-        data = await _check_resp(resp)
+        data = _check_resp(resp)
         return self._parse_batch_job(data)
 
     async def get_batch(self, job_name: str) -> BatchJob:
@@ -237,7 +237,7 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             job_name = f"batches/{job_name}"
 
         resp = await self.session.get(f"/{job_name}")
-        data = await _check_resp(resp)
+        data = _check_resp(resp)
         return self._parse_batch_job(data)
 
     async def list_batches(
@@ -259,12 +259,12 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             params["pageToken"] = page_token
 
         resp = await self.session.get("/batches", params=params)
-        data = await _check_resp(resp)
+        data = _check_resp(resp)
 
         jobs = [self._parse_batch_job(op) for op in data.get("operations", [])]
         return jobs, data.get("nextPageToken")
 
-    async def cancel_batch(self, job_name: str) -> None:
+    async def cancel_batch(self, job_name: str) -> dict:
         """Cancel a pending or running batch job.
 
         Args:
@@ -274,7 +274,7 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             job_name = f"batches/{job_name}"
 
         resp = await self.session.post(f"/{job_name}:cancel")
-        await _check_resp(resp)
+        return _check_resp(resp)
 
     def _parse_batch_job(self, data: dict) -> BatchJob:
         """Parse raw API response into BatchJob dataclass."""
@@ -331,7 +331,7 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             json=payload,
             stream=True,
         )
-        await _check_resp_status(resp)
+        _check_resp_status(resp)
         resp.encoding = "utf-8"
 
         async for line in resp.iter_lines(decode_unicode=True):  # pyright: ignore[reportGeneralTypeIssues]
