@@ -9,7 +9,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-OUTPUT_FILE="src/openai/types.py"
+OUTPUT_FILE="padwan_llm/openai/types.py"
 STATS_URL="https://github.com/openai/openai-python/blob/main/.stats.yml"
 
 # Fetch .stats.yml from GitHub
@@ -52,5 +52,25 @@ sed -i 's/top_logprobs: NotRequired\[int\]$/top_logprobs: NotRequired[int | None
 
 # Remove typing_extensions import (not needed on Python 3.14)
 sed -i '/from typing_extensions import/d' "$OUTPUT_FILE"
+
+# Append Error/ErrorResponse types (not included by --openapi-scopes paths)
+ERRORS_SPEC=$(uvx yq -y '{
+  openapi: .openapi, info: .info, paths: {},
+  components: {schemas: {
+    Error: .components.schemas.Error,
+    ErrorResponse: .components.schemas.ErrorResponse
+  }}
+}' "$TEMP_SPEC")
+
+echo "$ERRORS_SPEC" | uvx --from 'datamodel-code-generator[ruff]' datamodel-codegen \
+    --input-file-type openapi \
+    --output-model-type typing.TypedDict \
+    --target-python-version 3.14 \
+    --use-standard-collections \
+    --use-union-operator \
+    --collapse-root-models \
+    --strip-default-none \
+    --formatters ruff-format ruff-check \
+  | grep -v '^#\|^from typing' >> "$OUTPUT_FILE"
 
 echo "Done! Generated: $OUTPUT_FILE"

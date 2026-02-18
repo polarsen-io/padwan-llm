@@ -1,6 +1,6 @@
 [project]
 name = "padwan-llm"
-version = "0.1.7"
+version = "0.2.0"
 authors = [
     { email = "julien.brayere@polarsen.io" }
 ]
@@ -49,6 +49,9 @@ testpaths = ["tests"]
 addopts = "-v --cov=padwan_llm --cov-report=term-missing"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore:'_UnionGenericAlias' is deprecated:DeprecationWarning",
+]
 
 [tool.commitizen]
 name = "cz_conventional_commits"

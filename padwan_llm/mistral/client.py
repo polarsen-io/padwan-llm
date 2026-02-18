@@ -84,7 +84,7 @@ class MistralClient(OpenAIClient):
         self,
         input: str | list[str],
         model: str = "mistral-embed",
-    ) -> list[list[float]]:
+    ) -> EmbeddingResponse:
         """Fetch embeddings from Mistral.
 
         Args:
@@ -97,7 +97,7 @@ class MistralClient(OpenAIClient):
         body: EmbeddingRequest = {"model": model, "input": input}
         resp = await self.session.post("/embeddings", json=body)
         data: EmbeddingResponse = _check_resp(resp)
-        return [item["embedding"] for item in data["data"]]
+        return data
 
     async def transcribe(
         self,

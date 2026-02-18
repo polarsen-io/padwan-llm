@@ -92,8 +92,9 @@ Generate text embeddings using the `mistral-embed` model.
 
 ```python
 async with MistralClient() as client:
-    vectors = await client.fetch_embeddings("Hello, world!")
+    resp = await client.fetch_embeddings("Hello, world!")
     # Or batch multiple texts
-    vectors = await client.fetch_embeddings(["text 1", "text 2"])
-    # vectors is a list[list[float]], one embedding per input
+    resp = await client.fetch_embeddings(["text 1", "text 2"])
+    # resp is an EmbeddingResponse; extract vectors from resp["data"]
+    vectors = [item["embedding"] for item in resp["data"]]
 ```

@@ -18,10 +18,15 @@ __all__ = (
 
 class LLMError(Exception):
     def __init__(
-        self, provider: Provider, message: str, cause: Exception | None = None
+        self,
+        provider: Provider,
+        message: str,
+        cause: Exception | None = None,
+        body: dict | None = None,
     ):
         self.provider = provider
         self.cause = cause
+        self.body = body
         super().__init__(f"[{provider}] {message}")
 
 
