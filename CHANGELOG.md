@@ -1,3 +1,10 @@
+## 0.2.0 (2026-02-18)
+
+### Feat
+
+- expand thinking config, improve error handling, regenerate types
+- add thinking config for Gemini and error body propagation
+
 ## 0.1.7 (2026-02-17)
 
 ### Fix
