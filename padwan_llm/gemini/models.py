@@ -101,7 +101,14 @@ class SystemInstruction(TypedDict):
 
 
 class ThinkingConfig(TypedDict, total=False):
+    includeThoughts: bool
     thinkingBudget: int
+    thinkingLevel: Literal[
+        "THINKING_LEVEL_UNSPECIFIED",
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+    ]
 
 
 class GenerationConfig(TypedDict, total=False):

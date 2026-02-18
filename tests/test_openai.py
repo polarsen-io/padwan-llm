@@ -4,11 +4,10 @@ from contextlib import nullcontext
 from unittest.mock import MagicMock
 
 import pytest
-from niquests.exceptions import HTTPError
 
 from typing import TYPE_CHECKING
 
-from padwan_llm.errors import QuotaExceededError, TooManyRequestsError
+from padwan_llm.errors import LLMError, QuotaExceededError, TooManyRequestsError
 from padwan_llm.openai.client import OpenAIClient, OpenAIChatStream, _check_resp
 
 if TYPE_CHECKING:
@@ -36,9 +35,7 @@ if TYPE_CHECKING:
             pytest.raises(QuotaExceededError),
             id="402-quota",
         ),
-        pytest.param(
-            500, {"error": "server"}, None, pytest.raises(HTTPError), id="500"
-        ),
+        pytest.param(500, {"error": "server"}, None, pytest.raises(LLMError), id="500"),
     ],
 )
 def test_check_resp(status, json_data, headers, ctx, make_resp):

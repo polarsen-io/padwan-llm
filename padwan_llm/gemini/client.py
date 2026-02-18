@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from google.genai.types import (
         GenerateContentResponseDict,
         GenerateContentResponseUsageMetadataDict,
+        GoogleRpcStatusDict,
     )
 
 GeminiModel = Literal[
@@ -63,9 +64,10 @@ def _check_resp_status(resp: niquests.Response) -> niquests.Response:
             data = resp.json()
         except Exception:
             raise e
+        error = cast("GoogleRpcStatusDict", data.get("error", {}))
         if resp.status_code == HTTPStatus.TOO_MANY_REQUESTS:
             retry_delay: int | None = None
-            for detail in data.get("error", {}).get("details", []):
+            for detail in error.get("details") or []:
                 if detail.get("@type") == "type.googleapis.com/google.rpc.QuotaFailure":
                     raise QuotaExceededError(body=data)
                 if detail.get("@type") == "type.googleapis.com/google.rpc.RetryInfo":
@@ -73,8 +75,9 @@ def _check_resp_status(resp: niquests.Response) -> niquests.Response:
             if retry_delay is None:
                 raise e
             raise TooManyRequestsError(retry_delay=retry_delay, response=resp)
-        error_msg = data.get("error", {}).get("message", "")
-        raise LLMError("gemini", f"{resp.status_code} {error_msg}", body=data) from e
+        raise LLMError(
+            "gemini", f"{resp.status_code} {error.get('message', '')}", body=data
+        ) from e
 
 
 def _check_resp(resp: niquests.Response) -> typing.Any:
