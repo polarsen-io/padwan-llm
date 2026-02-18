@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal, cast, get_args
 import niquests
 from urllib3.util.retry import Retry
 
+from .batch import BatchJob, BatchRequest, BatchResult
 from .._base import ChatStream, LLMClientBase, LLMError, Provider
 from ..conversation import Message
 from ..errors import QuotaExceededError, TooManyRequestsError
@@ -187,6 +188,109 @@ class OpenAIClient(LLMClientBase[Retry]):
         Usage is available on the returned stream object after iteration.
         """
         return OpenAIChatStream(self, messages)
+
+    async def upload_batch_file(
+        self,
+        requests: list[BatchRequest],
+        model: str | None = None,
+    ) -> str:
+        """Serialize batch requests to JSONL and upload via POST /files.
+
+        Each line in the JSONL file is an OpenAI batch request object with
+        `custom_id`, `method`, `url`, and `body` fields. Returns the file ID.
+        """
+        _model = model or self.model
+        if not _model:
+            raise LLMError(self.provider, "No model specified")
+        lines: list[str] = []
+        for idx, req in enumerate(requests):
+            line = {
+                "custom_id": req.custom_id or f"request-{idx}",
+                "method": "POST",
+                "url": "/v1/chat/completions",
+                "body": {**req.body, "model": _model},
+            }
+            lines.append(json.dumps(line))
+        content = "\n".join(lines)
+
+        resp = await self.session.post(
+            "/files",
+            data={"purpose": "batch"},
+            files={"file": ("batch.jsonl", content, "application/jsonl")},
+        )
+        data = _check_resp(resp)
+        return data["id"]
+
+    async def create_batch(
+        self,
+        requests: list[BatchRequest],
+        model: str | None = None,
+        metadata: dict[str, str] | None = None,
+        completion_window: str = "24h",
+    ) -> BatchJob:
+        """Create an OpenAI batch from a list of requests.
+
+        Uploads the requests as a JSONL file, then creates a batch
+        referencing that file. The `completion_window` defaults to "24h"
+        (currently the only value OpenAI supports).
+        """
+        file_id = await self.upload_batch_file(requests, model)
+        payload: dict = {
+            "input_file_id": file_id,
+            "endpoint": "/v1/chat/completions",
+            "completion_window": completion_window,
+        }
+        if metadata:
+            payload["metadata"] = metadata
+        resp = await self.session.post("/batches", json=payload)
+        data = _check_resp(resp)
+        return BatchJob.load(data)
+
+    async def get_batch(self, batch_id: str) -> BatchJob:
+        """Get the current status of a batch."""
+        resp = await self.session.get(f"/batches/{batch_id}")
+        data = _check_resp(resp)
+        return BatchJob.load(data)
+
+    async def list_batches(
+        self,
+        limit: int = 20,
+        after: str | None = None,
+    ) -> tuple[list[BatchJob], str | None]:
+        """List batches with cursor-based pagination.
+
+        Returns a tuple of (jobs, next_cursor). Pass `next_cursor` as `after`
+        to fetch the next page.
+        """
+        params: dict[str, str] = {"limit": str(limit)}
+        if after:
+            params["after"] = after
+        resp = await self.session.get("/batches", params=params)
+        data = _check_resp(resp)
+        jobs = [BatchJob.load(item) for item in data.get("data", [])]
+        next_cursor: str | None = None
+        if data.get("has_more"):
+            next_cursor = data.get("last_id")
+        return jobs, next_cursor
+
+    async def cancel_batch(self, batch_id: str) -> BatchJob:
+        """Cancel a batch that is in progress."""
+        resp = await self.session.post(f"/batches/{batch_id}/cancel")
+        data = _check_resp(resp)
+        return BatchJob.load(data)
+
+    async def get_batch_results(self, output_file_id: str) -> list[BatchResult]:
+        """Download and parse the output JSONL file for a completed batch."""
+        resp = await self.session.get(f"/files/{output_file_id}/content")
+        _check_resp_status(resp)
+        text = resp.text or ""
+        results: list[BatchResult] = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            results.append(BatchResult.from_line(json.loads(line)))
+        return results
 
 
 class OpenAIChatStream(ChatStream):

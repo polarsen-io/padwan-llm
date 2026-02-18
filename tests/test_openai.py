@@ -9,6 +9,7 @@ from niquests.exceptions import HTTPError
 from typing import TYPE_CHECKING
 
 from padwan_llm.errors import QuotaExceededError, TooManyRequestsError
+from padwan_llm.openai.batch import BatchJob, BatchResult
 from padwan_llm.openai.client import OpenAIClient, OpenAIChatStream, _check_resp
 
 if TYPE_CHECKING:
@@ -101,3 +102,113 @@ class TestOpenAIChatStreamExtraction:
         self, chunk: CreateChatCompletionStreamResponse, expected: dict | None
     ):
         assert self.stream._extract_usage(chunk) == expected
+
+
+class TestBatchResultFromLine:
+    @pytest.mark.parametrize(
+        "data, expected",
+        [
+            pytest.param(
+                {
+                    "custom_id": "req-1",
+                    "response": {
+                        "status_code": 200,
+                        "body": {
+                            "choices": [{"message": {"content": "Hello!"}, "index": 0}],
+                            "usage": {
+                                "prompt_tokens": 10,
+                                "completion_tokens": 5,
+                                "total_tokens": 15,
+                            },
+                        },
+                    },
+                },
+                BatchResult(
+                    custom_id="req-1",
+                    content="Hello!",
+                    input_tokens=10,
+                    output_tokens=5,
+                    total_tokens=15,
+                ),
+                id="full-response",
+            ),
+            pytest.param(
+                {
+                    "custom_id": "req-2",
+                    "response": {
+                        "status_code": 200,
+                        "body": {"choices": [], "usage": {}},
+                    },
+                },
+                BatchResult(custom_id="req-2", content=""),
+                id="empty-choices",
+            ),
+            pytest.param(
+                {
+                    "custom_id": "req-3",
+                    "response": {
+                        "status_code": 200,
+                        "body": {
+                            "choices": [{"message": {"content": None}, "index": 0}],
+                            "usage": {"prompt_tokens": 5, "total_tokens": 5},
+                        },
+                    },
+                },
+                BatchResult(
+                    custom_id="req-3",
+                    content="",
+                    input_tokens=5,
+                    total_tokens=5,
+                ),
+                id="null-content",
+            ),
+            pytest.param(
+                {"custom_id": "req-4", "error": {"code": "server_error"}},
+                BatchResult(custom_id="req-4", content=""),
+                id="error-response",
+            ),
+        ],
+    )
+    def test_from_line(self, data: dict, expected: BatchResult):
+        assert BatchResult.from_line(data) == expected
+
+
+class TestBatchJobProperties:
+    @pytest.mark.parametrize(
+        "status, expected",
+        [
+            pytest.param("completed", True, id="completed"),
+            pytest.param("failed", True, id="failed"),
+            pytest.param("expired", True, id="expired"),
+            pytest.param("cancelled", True, id="cancelled"),
+            pytest.param("in_progress", False, id="in_progress"),
+            pytest.param("validating", False, id="validating"),
+            pytest.param("finalizing", False, id="finalizing"),
+            pytest.param("cancelling", False, id="cancelling"),
+        ],
+    )
+    def test_is_terminal(self, status: str, expected: bool):
+        job = BatchJob(
+            id="batch_123",
+            status=status,  # pyright: ignore[reportArgumentType]
+            endpoint="/v1/chat/completions",
+            input_file_id="file-abc",
+        )
+        assert job.is_terminal is expected
+
+    @pytest.mark.parametrize(
+        "status, expected",
+        [
+            pytest.param("completed", True, id="completed"),
+            pytest.param("failed", False, id="failed"),
+            pytest.param("in_progress", False, id="in_progress"),
+        ],
+    )
+    def test_succeeded(self, status: str, expected: bool):
+        job = BatchJob(
+            id="batch_123",
+            status=status,  # pyright: ignore[reportArgumentType]
+            endpoint="/v1/chat/completions",
+            input_file_id="file-abc",
+        )
+        assert job.succeeded is expected
