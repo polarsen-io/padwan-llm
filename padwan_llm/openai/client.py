@@ -64,7 +64,12 @@ def _check_resp_status(resp: niquests.Response) -> niquests.Response:
             raise TooManyRequestsError(retry_delay=retry_delay, response=resp)
         if resp.status_code == HTTPStatus.PAYMENT_REQUIRED:
             raise QuotaExceededError(body=data)
-        raise e
+        msg = (
+            data.get("error", {}).get("message", "")
+            if isinstance(data, dict)
+            else str(data)
+        )
+        raise LLMError("openai", f"{resp.status_code} {msg}", body=data) from e
 
 
 def _check_resp(resp: niquests.Response) -> typing.Any:

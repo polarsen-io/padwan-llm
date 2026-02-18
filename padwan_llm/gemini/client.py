@@ -74,7 +74,7 @@ def _check_resp_status(resp: niquests.Response) -> niquests.Response:
                 raise e
             raise TooManyRequestsError(retry_delay=retry_delay, response=resp)
         error_msg = data.get("error", {}).get("message", "")
-        raise LLMError("gemini", f"{resp.status_code} {error_msg}") from e
+        raise LLMError("gemini", f"{resp.status_code} {error_msg}", body=data) from e
 
 
 def _check_resp(resp: niquests.Response) -> typing.Any:
