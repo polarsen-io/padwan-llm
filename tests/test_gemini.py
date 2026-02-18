@@ -1,15 +1,30 @@
 from __future__ import annotations
 
 import json
+import re
 from contextlib import nullcontext
+from typing import get_type_hints
 from unittest.mock import MagicMock
 
 import pytest
+from google.genai.types import (
+    ContentDict,
+    GenerationConfigDict,
+    PartDict,
+    ThinkingConfigDict,
+)
 
 from padwan_llm.conversation import Message
 from padwan_llm.errors import LLMError, QuotaExceededError, TooManyRequestsError
 from padwan_llm.gemini.batch import BatchJob, BatchResult
-from padwan_llm.gemini.models import BatchState, InlinedResponse
+from padwan_llm.gemini.models import (
+    BatchState,
+    Content,
+    GenerationConfig,
+    InlinedResponse,
+    Part,
+    ThinkingConfig,
+)
 from padwan_llm.gemini.client import (
     GeminiClient,
     GeminiChatStream,
@@ -238,3 +253,26 @@ def test_batch_result_from_inlined_response(
     result = BatchResult.from_inlined_response(resp)
     assert result.content == expected_content
     assert result.total_tokens == expected_total
+
+
+def _camel_to_snake(name: str) -> str:
+    return re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", name).lower()
+
+
+@pytest.mark.parametrize(
+    "local_type, sdk_type",
+    [
+        pytest.param(Part, PartDict, id="Part"),
+        pytest.param(Content, ContentDict, id="Content"),
+        pytest.param(ThinkingConfig, ThinkingConfigDict, id="ThinkingConfig"),
+        pytest.param(GenerationConfig, GenerationConfigDict, id="GenerationConfig"),
+    ],
+)
+def test_sdk_compat(local_type: type, sdk_type: type):
+    """Verify every field in our local models maps to a field in the SDK type."""
+    sdk_keys = set(get_type_hints(sdk_type))
+    for key in get_type_hints(local_type):
+        snake = _camel_to_snake(key)
+        assert snake in sdk_keys, (
+            f"{local_type.__name__}.{key} ({snake}) not in {sdk_type.__name__}"
+        )
