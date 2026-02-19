@@ -2,6 +2,14 @@
 
 Unified async client for OpenAI, Gemini, Mistral, and Grok APIs.
 
+## Why
+
+Most LLM client libraries pull in heavy dependencies (pydantic, httpx) and lock you into a single provider's SDK. Padwan LLM takes a different approach:
+
+- **Single runtime dependency** — only [niquests](https://github.com/jawah/niquests), no pydantic, no httpx. Zero overhead beyond the HTTP layer.
+- **TypedDict-only** — all request/response types are plain `TypedDict`s, no validation framework required. No runtime cost, full editor support.
+- **Multi-provider, extensible** — supports the major providers (OpenAI, Gemini, Mistral, Grok) with a shared base class that makes adding new ones straightforward.
+
 ## Features
 
 - **Unified interface** - Single API for multiple LLM providers
