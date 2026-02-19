@@ -78,7 +78,7 @@ class BatchJob:
     def load(cls, data: dict) -> BatchJob:
         """Parse a raw OpenAI batch API response into a BatchJob."""
         errors_data = data.get("errors")
-        errors = errors_data.get("data") if errors_data else None
+        errors = errors_data.get("data") if isinstance(errors_data, dict) else None
         return cls(
             id=data["id"],
             status=data["status"],

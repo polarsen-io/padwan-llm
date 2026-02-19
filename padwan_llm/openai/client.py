@@ -42,6 +42,7 @@ OpenAIModel = Literal[
 ]
 
 __all__ = (
+    "_OpenAIBase",
     "OpenAIClient",
     "OPENAI_MODELS",
     "OPENAI_ENDPOINT",
@@ -91,11 +92,11 @@ OPENAI_ENDPOINT = "https://api.openai.com/v1/"
 
 
 @dataclasses.dataclass
-class OpenAIClient(LLMClientBase[Retry]):
-    """OpenAI API client.
+class _OpenAIBase(LLMClientBase[Retry]):
+    """OpenAI-compatible base client with chat and auth logic.
 
-    Also serves as the base for other OpenAI-compatible providers (Grok,
-    Mistral, etc.) since they share the same protocol.
+    Shared by OpenAIClient, GrokClient, and MistralClient. Does not include
+    batch methods — those live on the concrete provider clients.
     """
 
     provider: ClassVar[Provider] = "openai"
@@ -157,11 +158,12 @@ class OpenAIClient(LLMClientBase[Retry]):
         )
         _check_resp_status(resp)
 
-        async for line in resp.iter_lines(decode_unicode=True):  # pyright: ignore[reportGeneralTypeIssues]
-            if not line:
+        async for raw_line in resp.iter_lines(decode_unicode=True):  # pyright: ignore[reportGeneralTypeIssues]
+            if not raw_line:
                 continue
+            line = raw_line.decode() if isinstance(raw_line, bytes) else raw_line
             if line.startswith("data: "):
-                data_str = line[6:]  # Remove "data: " prefix
+                data_str = line[6:]
                 if data_str == "[DONE]":
                     break
                 try:
@@ -190,6 +192,59 @@ class OpenAIClient(LLMClientBase[Retry]):
         Usage is available on the returned stream object after iteration.
         """
         return OpenAIChatStream(self, messages)
+
+
+@dataclasses.dataclass
+class OpenAIChatStream(ChatStream):
+    """ChatStream implementation for OpenAI-compatible APIs."""
+
+    _client: _OpenAIBase
+    _messages: list[Message]
+    usage: UsageToken | None = None
+
+    async def __aiter__(self) -> AsyncIterator[str]:
+        if not self._client.model:
+            raise LLMError(self._client.provider, "No model specified")
+        body: CreateChatCompletionRequest = {
+            "model": self._client.model,
+            "messages": cast(list, self._messages),
+            "temperature": self._client.temperature,
+            "stream_options": {"include_usage": True},
+        }
+
+        async for chunk in self._client.stream(body):
+            if text := self._extract_text(chunk):
+                yield text
+            if usage := self._extract_usage(chunk):
+                self.usage = usage
+
+    def _extract_text(self, chunk: CreateChatCompletionStreamResponse) -> str | None:
+        """Extract text content from an OpenAI stream response chunk."""
+        if choices := chunk.get("choices"):
+            if delta := choices[0].get("delta"):
+                return delta.get("content")
+        return None
+
+    def _extract_usage(
+        self, chunk: CreateChatCompletionStreamResponse
+    ) -> UsageToken | None:
+        """Extract usage info from an OpenAI stream response chunk (final chunk)."""
+        if usage := chunk.get("usage"):
+            token: UsageToken = {
+                "total": usage.get("total_tokens", 0),
+                "input": usage.get("prompt_tokens", 0),
+                "output": usage.get("completion_tokens", 0),
+            }
+            if details := usage.get("prompt_tokens_details"):
+                if (cached := details.get("cached_tokens")) is not None:
+                    token["cached"] = cached
+            return token
+        return None
+
+
+@dataclasses.dataclass
+class OpenAIClient(_OpenAIBase):
+    """OpenAI API client with chat and batch support."""
 
     async def upload_batch_file(
         self,
@@ -293,51 +348,3 @@ class OpenAIClient(LLMClientBase[Retry]):
                 continue
             results.append(BatchResult.from_line(json.loads(line)))
         return results
-
-
-class OpenAIChatStream(ChatStream):
-    """ChatStream implementation for OpenAI-compatible APIs."""
-
-    def __init__(self, client: OpenAIClient, messages: list[Message]) -> None:
-        self._client = client
-        self._messages = messages
-        self.usage: UsageToken | None = None
-
-    async def __aiter__(self) -> AsyncIterator[str]:
-        if not self._client.model:
-            raise LLMError(self._client.provider, "No model specified")
-        body: CreateChatCompletionRequest = {
-            "model": self._client.model,
-            "messages": cast(list, self._messages),
-            "temperature": self._client.temperature,
-            "stream_options": {"include_usage": True},
-        }
-
-        async for chunk in self._client.stream(body):
-            if text := self._extract_text(chunk):
-                yield text
-            if usage := self._extract_usage(chunk):
-                self.usage = usage
-
-    def _extract_text(self, chunk: CreateChatCompletionStreamResponse) -> str | None:
-        """Extract text content from an OpenAI stream response chunk."""
-        if choices := chunk.get("choices"):
-            if delta := choices[0].get("delta"):
-                return delta.get("content")
-        return None
-
-    def _extract_usage(
-        self, chunk: CreateChatCompletionStreamResponse
-    ) -> UsageToken | None:
-        """Extract usage info from an OpenAI stream response chunk (final chunk)."""
-        if usage := chunk.get("usage"):
-            token: UsageToken = {
-                "total": usage.get("total_tokens", 0),
-                "input": usage.get("prompt_tokens", 0),
-                "output": usage.get("completion_tokens", 0),
-            }
-            if details := usage.get("prompt_tokens_details"):
-                if (cached := details.get("cached_tokens")) is not None:
-                    token["cached"] = cached
-            return token
-        return None

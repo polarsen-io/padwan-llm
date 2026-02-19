@@ -46,7 +46,8 @@ bump = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --cov=padwan_llm --cov-report=term-missing"
+addopts = "-v --cov=padwan_llm --cov-report=term-missing -m 'not e2e'"
+markers = ["e2e: end-to-end tests requiring real API keys"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
