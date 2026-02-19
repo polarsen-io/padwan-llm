@@ -59,6 +59,26 @@ Auto-detected providers: **OpenAI**, **Gemini**, **Mistral**, **Grok**.
 
 Any OpenAI-compatible API (Groq, Together AI, Ollama, vLLM, ...) is supported via `OpenAIClient`.
 
+## Testing
+
+Unit tests run by default (no API keys needed):
+
+```bash
+uv run pytest
+```
+
+E2e tests require API keys. Create a `.env` file or pass one with `--env-file`:
+
+```bash
+# Using a .env file in the project root
+uv run pytest tests/e2e/ -m e2e
+
+# Using a custom .env file
+uv run pytest tests/e2e/ -m e2e --env-file path/to/.env
+```
+
+Tests for providers whose API key is missing are automatically skipped.
+
 ## Environment Variables
 
 ```bash

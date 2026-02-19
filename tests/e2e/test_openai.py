@@ -11,7 +11,10 @@ pytestmark = [pytest.mark.e2e, skip_no_openai]
 async def test_batch_lifecycle() -> None:
     async with OpenAIClient() as client:
         req = BatchRequest(
-            body={"messages": [{"role": "user", "content": "Say hello"}]},
+            body={
+                "messages": [{"role": "user", "content": "Say hello"}],
+                "model": "gpt-4o-mini",
+            },
             custom_id="e2e-openai-1",
         )
         job = await client.create_batch([req], model="gpt-4o-mini")

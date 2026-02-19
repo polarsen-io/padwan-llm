@@ -13,7 +13,10 @@ pytestmark = [pytest.mark.e2e, skip_no_grok]
 async def test_batch_lifecycle() -> None:
     async with GrokClient() as client:
         req = GrokBatchRequest(
-            body={"messages": [{"role": "user", "content": "Say hello"}]},
+            body={
+                "messages": [{"role": "user", "content": "Say hello"}],
+                "model": "grok-4-1-fast-non-reasoning",
+            },
             custom_id="e2e-grok-1",
         )
         job = await client.create_batch(
@@ -36,7 +39,10 @@ async def test_batch_completion() -> None:
     """Submit a small batch and poll until results are available."""
     async with GrokClient() as client:
         req = GrokBatchRequest(
-            body={"messages": [{"role": "user", "content": "Reply with only 'hi'"}]},
+            body={
+                "messages": [{"role": "user", "content": "Reply with only 'hi'"}],
+                "model": "grok-4-1-fast-non-reasoning",
+            },
             custom_id="e2e-grok-poll",
         )
         job = await client.create_batch(
