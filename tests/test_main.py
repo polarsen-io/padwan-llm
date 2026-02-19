@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Coroutine
 from unittest.mock import AsyncMock, MagicMock, patch
 

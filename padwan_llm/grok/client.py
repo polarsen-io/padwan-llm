@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import dataclasses
 import os
 from typing import ClassVar, Literal, get_args
