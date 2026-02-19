@@ -18,7 +18,7 @@ Unified async client for OpenAI, Gemini, Mistral, and Grok APIs.
 | OpenAI   | ✅   | ✅        | ✅    | ❌            | ❌         |
 | Gemini   | ✅   | ✅        | ✅    | ❌            | ❌         |
 | Mistral  | ✅   | ✅        | ❌    | ✅            | ✅         |
-| Grok     | ✅   | ✅        | ❌    | ❌            | ❌         |
+| Grok     | ✅   | ✅        | ✅    | ❌            | ❌         |
 
 ## Quick Example
 

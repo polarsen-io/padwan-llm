@@ -100,6 +100,14 @@ async with GrokClient() as client:
     job = await client.cancel_batch("batch-abc")
 ```
 
+### Batch types reference
+
+| Type | Fields |
+|------|--------|
+| `GrokBatchRequest` | Single request: `body`, `custom_id` |
+| `GrokBatchJob` | Job state: `batch_id`, `name`, `num_requests`, `num_pending`, `num_success`, `num_error`, `num_cancelled`, `is_terminal`, `succeeded` |
+| `GrokBatchResult` | Parsed result: `custom_id`, `content`, `input_tokens`, `output_tokens`, `total_tokens`, `error_message` |
+
 ## Method Outputs
 
 ```python
