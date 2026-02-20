@@ -14,7 +14,7 @@ from urllib3 import HTTPResponse
 from urllib3.util.retry import Retry
 
 from .batch import BatchJob, BatchRequest
-from .models import CompletionBody, StreamBody
+from .models import BatchJobResponse, CompletionBody, ListBatchesResponse, StreamBody
 from .._base import ChatStream, LLMClientBase, Provider
 from ..conversation import Message
 from ..errors import QuotaExceededError, TooManyRequestsError, LLMError
@@ -222,7 +222,7 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             f"/models/{_model}:batchGenerateContent",
             json=payload,
         )
-        data = _check_resp(resp)
+        data: BatchJobResponse = _check_resp(resp)
         return self._parse_batch_job(data)
 
     async def get_batch(self, job_name: str) -> BatchJob:
@@ -238,7 +238,7 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             job_name = f"batches/{job_name}"
 
         resp = await self.session.get(f"/{job_name}")
-        data = _check_resp(resp)
+        data: BatchJobResponse = _check_resp(resp)
         return self._parse_batch_job(data)
 
     async def list_batches(
@@ -260,12 +260,12 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             params["pageToken"] = page_token
 
         resp = await self.session.get("/batches", params=params)
-        data = _check_resp(resp)
+        data: ListBatchesResponse = _check_resp(resp)
 
         jobs = [self._parse_batch_job(op) for op in data.get("operations", [])]
         return jobs, data.get("nextPageToken")
 
-    async def cancel_batch(self, job_name: str) -> dict:
+    async def cancel_batch(self, job_name: str) -> BatchJobResponse:
         """Cancel a pending or running batch job.
 
         Args:
@@ -275,9 +275,10 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
             job_name = f"batches/{job_name}"
 
         resp = await self.session.post(f"/{job_name}:cancel")
-        return _check_resp(resp)
+        data: BatchJobResponse = _check_resp(resp)
+        return data
 
-    def _parse_batch_job(self, data: dict) -> BatchJob:
+    def _parse_batch_job(self, data: BatchJobResponse) -> BatchJob:
         """Parse raw API response into BatchJob dataclass."""
         from .models import BatchDestination, BatchState
 

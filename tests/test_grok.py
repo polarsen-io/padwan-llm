@@ -1,6 +1,8 @@
 import pytest
+from typing import cast
 
 from padwan_llm.grok.batch import GrokBatchJob, GrokBatchResult
+from padwan_llm.grok.types import BatchResponse, BatchResultItem
 
 
 class TestGrokBatchJobLoad:
@@ -42,7 +44,7 @@ class TestGrokBatchJobLoad:
         ],
     )
     def test_load(self, data: dict, expected: GrokBatchJob):
-        assert GrokBatchJob.load(data) == expected
+        assert GrokBatchJob.load(cast(BatchResponse, data)) == expected
 
 
 class TestGrokBatchJobProperties:
@@ -173,4 +175,4 @@ class TestGrokBatchResult:
         ],
     )
     def test_from_response(self, data: dict, expected: GrokBatchResult):
-        assert GrokBatchResult.from_response(data) == expected
+        assert GrokBatchResult.from_response(cast(BatchResultItem, data)) == expected

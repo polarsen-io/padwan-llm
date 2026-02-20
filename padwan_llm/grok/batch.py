@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..openai.types import CreateChatCompletionRequest
+    from .types import BatchResponse, BatchResultItem
 
 __all__ = (
     "GrokBatchJob",
@@ -54,7 +55,7 @@ class GrokBatchJob:
         return self.is_terminal and self.num_error == 0 and self.num_cancelled == 0
 
     @classmethod
-    def load(cls, data: dict) -> GrokBatchJob:
+    def load(cls, data: BatchResponse) -> GrokBatchJob:
         """Parse a raw xAI batch API response into a GrokBatchJob."""
         state = data.get("state", {})
         return cls(
@@ -90,7 +91,7 @@ class GrokBatchResult:
     error_message: str | None = None
 
     @classmethod
-    def from_response(cls, data: dict) -> GrokBatchResult:
+    def from_response(cls, data: BatchResultItem) -> GrokBatchResult:
         """Parse a single entry from the batch results list.
 
         The response is nested as

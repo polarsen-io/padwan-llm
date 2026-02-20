@@ -12,6 +12,7 @@ import niquests
 from urllib3.util.retry import Retry
 
 from .batch import BatchJob, BatchRequest, BatchResult
+from .types import Batch, ListBatchesResponse, OpenAIFile
 from .._base import ChatStream, LLMClientBase, LLMError, Provider
 from ..conversation import Message
 from ..errors import QuotaExceededError, TooManyRequestsError
@@ -275,7 +276,7 @@ class OpenAIClient(_OpenAIBase):
             data={"purpose": "batch"},
             files={"file": ("batch.jsonl", content, "application/jsonl")},
         )
-        data = _check_resp(resp)
+        data: OpenAIFile = _check_resp(resp)
         return data["id"]
 
     async def create_batch(
@@ -300,13 +301,13 @@ class OpenAIClient(_OpenAIBase):
         if metadata:
             payload["metadata"] = metadata
         resp = await self.session.post("/batches", json=payload)
-        data = _check_resp(resp)
+        data: Batch = _check_resp(resp)
         return BatchJob.load(data)
 
     async def get_batch(self, batch_id: str) -> BatchJob:
         """Get the current status of a batch."""
         resp = await self.session.get(f"/batches/{batch_id}")
-        data = _check_resp(resp)
+        data: Batch = _check_resp(resp)
         return BatchJob.load(data)
 
     async def list_batches(
@@ -323,7 +324,7 @@ class OpenAIClient(_OpenAIBase):
         if after:
             params["after"] = after
         resp = await self.session.get("/batches", params=params)
-        data = _check_resp(resp)
+        data: ListBatchesResponse = _check_resp(resp)
         jobs = [BatchJob.load(item) for item in data.get("data", [])]
         next_cursor: str | None = None
         if data.get("has_more"):
@@ -333,7 +334,7 @@ class OpenAIClient(_OpenAIBase):
     async def cancel_batch(self, batch_id: str) -> BatchJob:
         """Cancel a batch that is in progress."""
         resp = await self.session.post(f"/batches/{batch_id}/cancel")
-        data = _check_resp(resp)
+        data: Batch = _check_resp(resp)
         return BatchJob.load(data)
 
     async def get_batch_results(self, output_file_id: str) -> list[BatchResult]:

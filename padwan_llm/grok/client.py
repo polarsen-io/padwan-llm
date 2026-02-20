@@ -7,8 +7,11 @@ from .types import (
     AddBatchRequestsBody,
     BatchRequestItem,
     BatchRequestPayload,
+    BatchResponse,
     ChatGetCompletion,
     CreateBatchBody,
+    ListBatchResultsResponse,
+    ListBatchesResponse,
 )
 from .._base import LLMError, Provider
 from ..openai.client import _OpenAIBase, _check_resp, _check_resp_status
@@ -68,7 +71,7 @@ class GrokClient(_OpenAIBase):
         if name:
             payload["name"] = name
         resp = await self.session.post("/batches", json=payload)
-        data = _check_resp(resp)
+        data: BatchResponse = _check_resp(resp)
         job = GrokBatchJob.load(data)
 
         if requests:
@@ -112,7 +115,7 @@ class GrokClient(_OpenAIBase):
         https://docs.x.ai/developers/rest-api-reference/inference/batches#get-batch-details
         """
         resp = await self.session.get(f"/batches/{batch_id}")
-        data = _check_resp(resp)
+        data: BatchResponse = _check_resp(resp)
         return GrokBatchJob.load(data)
 
     async def list_batches(
@@ -131,7 +134,7 @@ class GrokClient(_OpenAIBase):
         if pagination_token:
             params["pagination_token"] = pagination_token
         resp = await self.session.get("/batches", params=params)
-        data = _check_resp(resp)
+        data: ListBatchesResponse = _check_resp(resp)
         jobs = [GrokBatchJob.load(item) for item in data.get("batches", [])]
         next_token: str | None = data.get("pagination_token")
         return jobs, next_token
@@ -142,7 +145,7 @@ class GrokClient(_OpenAIBase):
         https://docs.x.ai/developers/rest-api-reference/inference/batches#cancel-a-batch
         """
         resp = await self.session.post(f"/batches/{batch_id}:cancel")
-        data = _check_resp(resp)
+        data: BatchResponse = _check_resp(resp)
         return GrokBatchJob.load(data)
 
     async def get_batch_results(
@@ -161,7 +164,7 @@ class GrokClient(_OpenAIBase):
         if pagination_token:
             params["pagination_token"] = pagination_token
         resp = await self.session.get(f"/batches/{batch_id}/results", params=params)
-        data = _check_resp(resp)
+        data: ListBatchResultsResponse = _check_resp(resp)
         results = [
             GrokBatchResult.from_response(item) for item in data.get("results", [])
         ]

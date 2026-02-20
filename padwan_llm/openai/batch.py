@@ -1,5 +1,7 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, TypedDict
+from typing import TYPE_CHECKING, Literal
+
+from .types import Batch, BatchError, BatchRequestCounts
 
 if TYPE_CHECKING:
     from .types import CreateChatCompletionRequest
@@ -27,17 +29,6 @@ TERMINAL_STATUSES: frozenset[str] = frozenset(
 )
 
 
-class RequestCounts(TypedDict):
-    total: int
-    completed: int
-    failed: int
-
-
-class BatchError(TypedDict):
-    code: str
-    message: str
-
-
 @dataclass
 class BatchRequest:
     """A single request to include in an OpenAI batch."""
@@ -60,7 +51,7 @@ class BatchJob:
     completed_at: int | None = None
     failed_at: int | None = None
     expired_at: int | None = None
-    request_counts: RequestCounts | None = None
+    request_counts: BatchRequestCounts | None = None
     metadata: dict[str, str] | None = None
     errors: list[BatchError] | None = None
 
@@ -75,7 +66,7 @@ class BatchJob:
         return self.status == "completed"
 
     @classmethod
-    def load(cls, data: dict) -> BatchJob:
+    def load(cls, data: Batch) -> BatchJob:
         """Parse a raw OpenAI batch API response into a BatchJob."""
         errors_data = data.get("errors")
         errors = errors_data.get("data") if isinstance(errors_data, dict) else None

@@ -45,13 +45,16 @@ uvx --from 'datamodel-code-generator[ruff]' datamodel-codegen \
     --strip-default-none \
     --formatters ruff-format ruff-check \
     --openapi-scopes paths \
-    --openapi-include-paths '/chat/completions'
+    --openapi-include-paths '/chat/completions' '/files' '/batches'
 
 # Fix TypedDict inheritance issue: child cannot narrow type (int | None -> int)
 sed -i 's/top_logprobs: NotRequired\[int\]$/top_logprobs: NotRequired[int | None]/' "$OUTPUT_FILE"
 
 # Remove typing_extensions import (not needed on Python 3.14)
 sed -i '/from typing_extensions import/d' "$OUTPUT_FILE"
+
+# Remove closed=True (PEP 728, not in Python 3.14 stdlib yet)
+sed -i 's/, closed=True//' "$OUTPUT_FILE"
 
 # Append Error/ErrorResponse types (not included by --openapi-scopes paths)
 ERRORS_SPEC=$(uvx yq -y '{

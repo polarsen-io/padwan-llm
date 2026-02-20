@@ -58,17 +58,17 @@ class BatchState(TypedDict, total=False):
     num_cancelled: int
 
 
-class BatchResponse(TypedDict, total=False):
+class BatchResponse(TypedDict):
     """Response from GET /v1/batches/{batch_id} and other batch endpoints.
 
     https://docs.x.ai/developers/rest-api-reference/inference/batches#get-batch-details
     """
 
     batch_id: str
-    name: str
-    state: BatchState
-    create_time: str
-    expire_time: str
+    name: NotRequired[str]
+    state: NotRequired[BatchState]
+    create_time: NotRequired[str]
+    expire_time: NotRequired[str]
 
 
 # GET /v1/batches
