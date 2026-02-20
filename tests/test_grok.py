@@ -1,8 +1,26 @@
 import pytest
-from typing import cast
+from typing import cast, get_type_hints
+
+from google.protobuf.descriptor import Descriptor
+from xai_sdk.proto.v6.batch_pb2 import (
+    Batch,
+    CreateBatchRequest,
+    ListBatchesResponse as SdkListBatchesResponse,
+    ListBatchResultsResponse as SdkListBatchResultsResponse,
+    BatchState as SdkBatchState,
+)
+from xai_sdk.proto.v6.chat_pb2 import GetCompletionsRequest
 
 from padwan_llm.grok.batch import GrokBatchJob, GrokBatchResult
-from padwan_llm.grok.types import BatchResponse, BatchResultItem
+from padwan_llm.grok.types import (
+    BatchResponse,
+    BatchResultItem,
+    BatchState,
+    ChatGetCompletion,
+    CreateBatchBody,
+    ListBatchesResponse,
+    ListBatchResultsResponse,
+)
 
 
 class TestGrokBatchJobLoad:
@@ -176,3 +194,42 @@ class TestGrokBatchResult:
     )
     def test_from_response(self, data: dict, expected: GrokBatchResult):
         assert GrokBatchResult.from_response(cast(BatchResultItem, data)) == expected
+
+
+def _proto_fields(descriptor: Descriptor) -> set[str]:
+    """Extract field names from a protobuf message Descriptor."""
+    return {f.name for f in descriptor.fields}
+
+
+@pytest.mark.parametrize(
+    "local_type, sdk_descriptor",
+    [
+        pytest.param(BatchState, SdkBatchState.DESCRIPTOR, id="BatchState"),
+        pytest.param(BatchResponse, Batch.DESCRIPTOR, id="BatchResponse-Batch"),
+        pytest.param(
+            CreateBatchBody, CreateBatchRequest.DESCRIPTOR, id="CreateBatchBody"
+        ),
+        pytest.param(
+            ListBatchesResponse,
+            SdkListBatchesResponse.DESCRIPTOR,
+            id="ListBatchesResponse",
+        ),
+        pytest.param(
+            ListBatchResultsResponse,
+            SdkListBatchResultsResponse.DESCRIPTOR,
+            id="ListBatchResultsResponse",
+        ),
+        pytest.param(
+            ChatGetCompletion,
+            GetCompletionsRequest.DESCRIPTOR,
+            id="ChatGetCompletion",
+        ),
+    ],
+)
+def test_sdk_compat(local_type: type, sdk_descriptor: Descriptor):
+    """Verify every field in our local types maps to a field in the xai-sdk protobuf."""
+    sdk_keys = _proto_fields(sdk_descriptor)
+    for key in get_type_hints(local_type):
+        assert key in sdk_keys, (
+            f"{local_type.__name__}.{key} not in {sdk_descriptor.name}"
+        )
