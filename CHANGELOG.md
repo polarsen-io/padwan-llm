@@ -1,3 +1,11 @@
+## 0.3.0 (2026-02-20)
+
+### Feat
+
+- **grok**: add xAI-native batch API support
+- **openai**: add batch dataclasses module
+- **openai**: add Batch API support
+
 ## 0.2.0 (2026-02-18)
 
 ### Feat

@@ -1,6 +1,6 @@
 [project]
 name = "padwan-llm"
-version = "0.2.0"
+version = "0.3.0"
 authors = [
     { email = "julien.brayere@polarsen.io" }
 ]
