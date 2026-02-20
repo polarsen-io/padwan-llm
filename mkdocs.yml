@@ -6,8 +6,8 @@ repo_name: polarsen-io/padwan-llm
 
 theme:
   name: material
-  logo: static/logo.png
-  favicon: static/logo.png
+  logo: static/logo-hood.png
+  favicon: static/logo-hood.png
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default

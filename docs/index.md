@@ -27,6 +27,7 @@ Most LLM client libraries pull in heavy dependencies (pydantic, httpx) and lock 
 | Gemini   | ✅   | ✅        | ✅    | ❌            | ❌         |
 | Mistral  | ✅   | ✅        | ❌    | ✅            | ✅         |
 | Grok     | ✅   | ✅        | ✅    | ❌            | ❌         |
+| [OpenAI-Compatible](clients/openai-compatible.md) | ✅ | ✅ | ➕ | ➕ | ➕ |
 
 ## Quick Example
 
