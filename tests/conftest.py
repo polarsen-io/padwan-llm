@@ -1,9 +1,18 @@
-from __future__ import annotations
-
 from unittest.mock import MagicMock
 
 import pytest
+from dotenv import load_dotenv
 from niquests.exceptions import HTTPError
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--env-file", default=".env", help="Path to .env file for e2e tests"
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    load_dotenv(config.getoption("--env-file"))
 
 
 @pytest.fixture

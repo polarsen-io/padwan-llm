@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import abc
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field

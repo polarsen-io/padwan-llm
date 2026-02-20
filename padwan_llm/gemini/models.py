@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any, Literal, NotRequired, TypedDict
 
 __all__ = (
@@ -15,6 +13,7 @@ __all__ = (
     "BatchStats",
     "BatchJobMetadata",
     "BatchJobResponse",
+    "ListBatchesResponse",
     "InlinedResponse",
     "BatchDestination",
     "BatchRequestPayload",
@@ -63,6 +62,13 @@ class BatchJobResponse(TypedDict, total=False):
     name: str
     metadata: BatchJobMetadata
     error: dict
+
+
+class ListBatchesResponse(TypedDict, total=False):
+    """Response from GET /batches."""
+
+    operations: list[BatchJobResponse]
+    nextPageToken: str
 
 
 class InlinedResponse(TypedDict):

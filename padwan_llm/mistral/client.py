@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import dataclasses
 import mimetypes
 import os
@@ -7,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, get_args
 
 from .._base import LLMError, Provider
-from ..openai.client import OpenAIClient, _check_resp
+from ..openai.client import _OpenAIBase, _check_resp
 
 if TYPE_CHECKING:
     from .types import EmbeddingRequest, EmbeddingResponse, TranscriptionResponse
@@ -67,7 +65,7 @@ MISTRAL_ENDPOINT = "https://api.mistral.ai/v1/"
 
 
 @dataclasses.dataclass
-class MistralClient(OpenAIClient):
+class MistralClient(_OpenAIBase):
     """Mistral API client."""
 
     provider: ClassVar[Provider] = "mistral"

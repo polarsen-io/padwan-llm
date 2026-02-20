@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, ClassVar, Literal, cast, get_args
 import niquests
 from urllib3.util.retry import Retry
 
+from .batch import BatchJob, BatchRequest, BatchResult
+from .types import Batch, ListBatchesResponse, OpenAIFile
 from .._base import ChatStream, LLMClientBase, LLMError, Provider
 from ..conversation import Message
 from ..errors import QuotaExceededError, TooManyRequestsError
@@ -41,6 +43,7 @@ OpenAIModel = Literal[
 ]
 
 __all__ = (
+    "_OpenAIBase",
     "OpenAIClient",
     "OPENAI_MODELS",
     "OPENAI_ENDPOINT",
@@ -90,11 +93,11 @@ OPENAI_ENDPOINT = "https://api.openai.com/v1/"
 
 
 @dataclasses.dataclass
-class OpenAIClient(LLMClientBase[Retry]):
-    """OpenAI API client.
+class _OpenAIBase(LLMClientBase[Retry]):
+    """OpenAI-compatible base client with chat and auth logic.
 
-    Also serves as the base for other OpenAI-compatible providers (Grok,
-    Mistral, etc.) since they share the same protocol.
+    Shared by OpenAIClient, GrokClient, and MistralClient. Does not include
+    batch methods — those live on the concrete provider clients.
     """
 
     provider: ClassVar[Provider] = "openai"
@@ -156,11 +159,12 @@ class OpenAIClient(LLMClientBase[Retry]):
         )
         _check_resp_status(resp)
 
-        async for line in resp.iter_lines(decode_unicode=True):  # pyright: ignore[reportGeneralTypeIssues]
-            if not line:
+        async for raw_line in resp.iter_lines(decode_unicode=True):  # pyright: ignore[reportGeneralTypeIssues]
+            if not raw_line:
                 continue
+            line = raw_line.decode() if isinstance(raw_line, bytes) else raw_line
             if line.startswith("data: "):
-                data_str = line[6:]  # Remove "data: " prefix
+                data_str = line[6:]
                 if data_str == "[DONE]":
                     break
                 try:
@@ -191,13 +195,13 @@ class OpenAIClient(LLMClientBase[Retry]):
         return OpenAIChatStream(self, messages)
 
 
+@dataclasses.dataclass
 class OpenAIChatStream(ChatStream):
     """ChatStream implementation for OpenAI-compatible APIs."""
 
-    def __init__(self, client: OpenAIClient, messages: list[Message]) -> None:
-        self._client = client
-        self._messages = messages
-        self.usage: UsageToken | None = None
+    _client: _OpenAIBase
+    _messages: list[Message]
+    usage: UsageToken | None = None
 
     async def __aiter__(self) -> AsyncIterator[str]:
         if not self._client.model:
@@ -237,3 +241,111 @@ class OpenAIChatStream(ChatStream):
                     token["cached"] = cached
             return token
         return None
+
+
+@dataclasses.dataclass
+class OpenAIClient(_OpenAIBase):
+    """OpenAI API client with chat and batch support."""
+
+    async def upload_batch_file(
+        self,
+        requests: list[BatchRequest],
+        model: str | None = None,
+    ) -> str:
+        """Serialize batch requests to JSONL and upload via POST /files.
+
+        Each line in the JSONL file is an OpenAI batch request object with
+        `custom_id`, `method`, `url`, and `body` fields. Returns the file ID.
+        """
+        _model = model or self.model
+        if not _model:
+            raise LLMError(self.provider, "No model specified")
+        lines: list[str] = []
+        for idx, req in enumerate(requests):
+            line = {
+                "custom_id": req.custom_id or f"request-{idx}",
+                "method": "POST",
+                "url": "/v1/chat/completions",
+                "body": {**req.body, "model": _model},
+            }
+            lines.append(json.dumps(line))
+        content = "\n".join(lines)
+
+        resp = await self.session.post(
+            "/files",
+            data={"purpose": "batch"},
+            files={"file": ("batch.jsonl", content, "application/jsonl")},
+        )
+        data: OpenAIFile = _check_resp(resp)
+        return data["id"]
+
+    async def create_batch(
+        self,
+        requests: list[BatchRequest],
+        model: str | None = None,
+        metadata: dict[str, str] | None = None,
+        completion_window: str = "24h",
+    ) -> BatchJob:
+        """Create an OpenAI batch from a list of requests.
+
+        Uploads the requests as a JSONL file, then creates a batch
+        referencing that file. The `completion_window` defaults to "24h"
+        (currently the only value OpenAI supports).
+        """
+        file_id = await self.upload_batch_file(requests, model)
+        payload: dict = {
+            "input_file_id": file_id,
+            "endpoint": "/v1/chat/completions",
+            "completion_window": completion_window,
+        }
+        if metadata:
+            payload["metadata"] = metadata
+        resp = await self.session.post("/batches", json=payload)
+        data: Batch = _check_resp(resp)
+        return BatchJob.load(data)
+
+    async def get_batch(self, batch_id: str) -> BatchJob:
+        """Get the current status of a batch."""
+        resp = await self.session.get(f"/batches/{batch_id}")
+        data: Batch = _check_resp(resp)
+        return BatchJob.load(data)
+
+    async def list_batches(
+        self,
+        limit: int = 20,
+        after: str | None = None,
+    ) -> tuple[list[BatchJob], str | None]:
+        """List batches with cursor-based pagination.
+
+        Returns a tuple of (jobs, next_cursor). Pass `next_cursor` as `after`
+        to fetch the next page.
+        """
+        params: dict[str, str] = {"limit": str(limit)}
+        if after:
+            params["after"] = after
+        resp = await self.session.get("/batches", params=params)
+        data: ListBatchesResponse = _check_resp(resp)
+        jobs = [BatchJob.load(item) for item in data.get("data", [])]
+        next_cursor: str | None = None
+        if data.get("has_more"):
+            next_cursor = data.get("last_id")
+        return jobs, next_cursor
+
+    async def cancel_batch(self, batch_id: str) -> BatchJob:
+        """Cancel a batch that is in progress."""
+        resp = await self.session.post(f"/batches/{batch_id}/cancel")
+        data: Batch = _check_resp(resp)
+        return BatchJob.load(data)
+
+    async def get_batch_results(self, output_file_id: str) -> list[BatchResult]:
+        """Download and parse the output JSONL file for a completed batch."""
+        resp = await self.session.get(f"/files/{output_file_id}/content")
+        _check_resp_status(resp)
+        text = resp.text or ""
+        results: list[BatchResult] = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            results.append(BatchResult.from_line(json.loads(line)))
+        return results

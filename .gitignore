@@ -167,3 +167,6 @@ cli/
 CLAUDE.md
 .claude/
 .scratch/
+
+# Test fixtures (binary audio files)
+tests/fixtures/
