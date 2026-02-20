@@ -1,4 +1,8 @@
-# Padwan LLM
+<p align="center">
+  <img src="docs/static/logo-hood.png" alt="Padwan LLM" width="120">
+</p>
+
+<h1 align="center">Padwan LLM</h1>
 
 Lightweight, unified async client for OpenAI, Gemini, Mistral, Grok, and any OpenAI-compatible API.
 Single dependency ([niquests](https://github.com/jawah/niquests)), automatic HTTP/2 and HTTP/3 negotiation.
