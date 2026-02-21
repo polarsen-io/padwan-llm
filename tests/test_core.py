@@ -3,7 +3,12 @@ from contextlib import nullcontext
 import pytest
 
 from padwan_llm.client import LLMClient
-from padwan_llm.conversation import ConversationState, Message
+from padwan_llm.conversation import (
+    ConversationState,
+    Message,
+    ToolResultMessage,
+)
+from padwan_llm.models import ChatResponse, ToolCall, ToolCallFunction
 from padwan_llm.errors import LLMError
 from padwan_llm.gemini.client import GeminiClient, is_gemini_model
 from padwan_llm.grok.client import GrokClient, is_grok_model
@@ -87,6 +92,36 @@ class TestConversationState:
             state.accumulate_usage(u)
         assert state.total_usage == expected_total
         assert state.last_usage == expected_last
+
+    def test_add_assistant_response_text_only(self):
+        state = ConversationState()
+        resp = ChatResponse(content="Hello", finish_reason="stop")
+        msg = state.add_assistant_response(resp)
+        assert msg["role"] == "assistant"
+        assert msg["content"] == "Hello"
+        assert "tool_calls" not in msg
+
+    def test_add_assistant_response_with_tools(self):
+        state = ConversationState()
+        tc = ToolCall(
+            id="call_1",
+            type="function",
+            function=ToolCallFunction(name="get_weather", arguments='{"city":"Paris"}'),
+        )
+        resp = ChatResponse(content=None, finish_reason="tool_calls", tool_calls=[tc])
+        msg = state.add_assistant_response(resp)
+        assert msg["role"] == "assistant"
+        assert msg["content"] is None
+        assert isinstance(msg, dict)
+        assert msg.get("tool_calls") == [tc]
+
+    def test_add_tool_result(self):
+        state = ConversationState()
+        msg = state.add_tool_result("call_1", '{"temp": 20}')
+        assert msg == ToolResultMessage(
+            role="tool", tool_call_id="call_1", content='{"temp": 20}'
+        )
+        assert state.messages == [msg]
 
     @pytest.mark.parametrize(
         "system, expected_after_clear",

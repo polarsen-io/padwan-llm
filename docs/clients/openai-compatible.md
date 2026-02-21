@@ -28,10 +28,10 @@ async with OpenAIClient(
     base_url="https://api.groq.com/openai/v1/",
     api_key="gsk-...",
 ) as client:
-    text, usage = await client.complete_chat([
+    response, usage = await client.complete_chat([
         {"role": "user", "content": "Hello!"}
     ])
-    print(text)
+    print(response["content"])
 ```
 
 ### Streaming
@@ -62,7 +62,7 @@ async with OpenAIClient(
     base_url="http://localhost:11434/v1/",
     api_key="ollama",  # Ollama doesn't require a real key
 ) as client:
-    text, usage = await client.complete_chat([
+    response, usage = await client.complete_chat([
         {"role": "user", "content": "Hello!"}
     ])
 ```
@@ -75,7 +75,7 @@ async with OpenAIClient(
     base_url="https://api.together.xyz/v1/",
     api_key="...",
 ) as client:
-    text, usage = await client.complete_chat([
+    response, usage = await client.complete_chat([
         {"role": "user", "content": "Hello!"}
     ])
 ```
@@ -88,7 +88,7 @@ async with OpenAIClient(
     base_url="http://localhost:8000/v1/",
     api_key="token-abc123",
 ) as client:
-    text, usage = await client.complete_chat([
+    response, usage = await client.complete_chat([
         {"role": "user", "content": "Hello!"}
     ])
 ```

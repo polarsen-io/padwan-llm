@@ -25,9 +25,11 @@ pytestmark = pytest.mark.e2e
 async def test_complete_chat(model: str) -> None:
     client = LLMClient(model=model)
     async with client:
-        text, usage = await client.complete_chat(PROMPT)
+        response, usage = await client.complete_chat(PROMPT)
 
-    assert "hello" in text.lower()
+    assert response["content"] is not None
+    assert "hello" in response["content"].lower()
+    assert response["finish_reason"] == "stop"
     assert usage["total"] > 0
     assert usage["input"] > 0
     assert usage["output"] > 0

@@ -21,10 +21,10 @@ client = MistralClient(
 from padwan_llm.conversation import Message
 
 async with MistralClient() as client:
-    text, usage = await client.complete_chat([
+    response, usage = await client.complete_chat([
         Message(role="user", content="Hello!")
     ])
-    print(text)
+    print(response["content"])
 ```
 
 ### Streaming
@@ -49,8 +49,8 @@ state = ConversationState(system="You are a helpful assistant.")
 state.add_user_message("Hello!")
 
 async with MistralClient() as client:
-    text, usage = await client.complete_chat(state.messages)
-    state.add_assistant_message(text)
+    response, usage = await client.complete_chat(state.messages)
+    state.add_assistant_message(response["content"])
     state.accumulate_usage(usage)
 ```
 
