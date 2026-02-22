@@ -33,6 +33,7 @@ from ..models import (
 )
 
 # Gemini uses SCREAMING_CASE finish reasons; map to our normalized values.
+# https://ai.google.dev/api/generate-content#FinishReason
 _GEMINI_FINISH_REASON_MAP: dict[str, FinishReason] = {
     "STOP": "stop",
     "MAX_TOKENS": "length",
@@ -429,7 +430,7 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
         Handles Gemini-specific body building and response extraction.
         Usage and tool_calls are available on the returned stream object after iteration.
         """
-        return GeminiChatStream(self, list(messages), list(tools) if tools else None)
+        return GeminiChatStream(self, messages, tools)
 
 
 class GeminiChatStream(ChatStream, GeminiToolMixin):
@@ -438,8 +439,8 @@ class GeminiChatStream(ChatStream, GeminiToolMixin):
     def __init__(
         self,
         client: GeminiClient,
-        messages: list[ChatMessage],
-        tools: list[ToolDefinition] | None = None,
+        messages: Sequence[ChatMessage],
+        tools: Sequence[ToolDefinition] | None = None,
     ) -> None:
         self._client = client
         self._messages = messages

@@ -27,6 +27,7 @@ from ..models import (
 )
 
 # Normalize provider-specific finish reasons to our FinishReason values.
+# https://platform.openai.com/docs/api-reference/chat/object#chat/object-choices
 _OPENAI_FINISH_REASON_MAP: dict[str, FinishReason] = {
     "stop": "stop",
     "length": "length",
@@ -231,7 +232,7 @@ class _OpenAIBase(LLMClientBase[Retry], OpenAIToolMixin):
 
         Usage and tool_calls are available on the returned stream object after iteration.
         """
-        return OpenAIChatStream(self, list(messages), list(tools) if tools else None)
+        return OpenAIChatStream(self, messages, tools)
 
 
 @dataclasses.dataclass
@@ -239,8 +240,8 @@ class OpenAIChatStream(ChatStream, OpenAIToolMixin):
     """ChatStream implementation for OpenAI-compatible APIs."""
 
     _client: _OpenAIBase
-    _messages: list[ChatMessage]
-    _tools: list[ToolDefinition] | None = None
+    _messages: Sequence[ChatMessage]
+    _tools: Sequence[ToolDefinition] | None = None
     usage: UsageToken | None = None
     tool_calls: list[ToolCall] | None = None
 
