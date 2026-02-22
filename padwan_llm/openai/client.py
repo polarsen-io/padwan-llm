@@ -26,6 +26,17 @@ from ..models import (
     UsageToken,
 )
 
+# Normalize provider-specific finish reasons to our FinishReason values.
+_OPENAI_FINISH_REASON_MAP: dict[str, FinishReason] = {
+    "stop": "stop",
+    "length": "length",
+    "tool_calls": "tool_calls",
+    "content_filter": "content_filter",
+    "function_call": "tool_calls",
+    "model_length": "length",
+    "error": "error",
+}
+
 if TYPE_CHECKING:
     from .types import (
         CompletionUsage,
@@ -200,9 +211,10 @@ class _OpenAIBase(LLMClientBase[Retry], OpenAIToolMixin):
         data, token = await self.complete(body)
         choice = data["choices"][0]
         message = choice["message"]
+        raw_reason = choice.get("finish_reason", "stop")
         response: ChatResponse = {
             "content": message.get("content"),
-            "finish_reason": cast("FinishReason", choice["finish_reason"]),
+            "finish_reason": _OPENAI_FINISH_REASON_MAP.get(raw_reason, "other"),
         }
         if raw_tool_calls := message.get("tool_calls"):
             response["tool_calls"] = self._extract_tool_calls(

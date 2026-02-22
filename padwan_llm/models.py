@@ -45,7 +45,14 @@ class ToolDefinition(TypedDict):
     parameters: dict[str, Any]
 
 
-FinishReason = Literal["stop", "length", "tool_calls", "content_filter"]
+FinishReason = Literal[
+    "stop",
+    "length",
+    "tool_calls",
+    "content_filter",
+    "error",
+    "other",
+]
 
 
 class ChatResponse(TypedDict):

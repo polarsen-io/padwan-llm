@@ -130,7 +130,7 @@ GeminiPart = Part | FunctionCallPart | FunctionResponsePart
 
 class Content(TypedDict):
     role: Literal["user", "model"]
-    parts: list[Part]
+    parts: list[GeminiPart]
 
 
 class SystemInstruction(TypedDict):
@@ -169,6 +169,7 @@ class StreamBody(TypedDict):
     contents: list[Content]
     temperature: NotRequired[float]
     systemInstruction: NotRequired[SystemInstruction]
+    tools: NotRequired[list[GeminiTool]]
 
 
 class CompletionBody(TypedDict):

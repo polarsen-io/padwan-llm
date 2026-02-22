@@ -26,10 +26,24 @@ from ..conversation import AssistantToolMessage, ChatMessage, ToolResultMessage
 from ..errors import QuotaExceededError, TooManyRequestsError, LLMError
 from ..models import (
     ChatResponse,
+    FinishReason,
     ToolCall,
     ToolDefinition,
     UsageToken,
 )
+
+# Gemini uses SCREAMING_CASE finish reasons; map to our normalized values.
+_GEMINI_FINISH_REASON_MAP: dict[str, FinishReason] = {
+    "STOP": "stop",
+    "MAX_TOKENS": "length",
+    "SAFETY": "content_filter",
+    "RECITATION": "content_filter",
+    "LANGUAGE": "content_filter",
+    "BLOCKLIST": "content_filter",
+    "PROHIBITED_CONTENT": "content_filter",
+    "SPII": "content_filter",
+    "OTHER": "other",
+}
 
 if TYPE_CHECKING:
     from google.genai.types import (
@@ -380,30 +394,30 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
             raise LLMError(self.provider, "No content in response")
         parts = cast(list[dict[str, typing.Any]], content.get("parts") or [])
 
-        # Check for function calls in parts
+        raw_reason = candidates[0].get("finishReason", "STOP")
         tool_calls = self._extract_gemini_tool_calls(parts)
-        if tool_calls:
-            response: ChatResponse = {
-                "content": None,
-                "finish_reason": "tool_calls",
-                "tool_calls": tool_calls,
-            }
-            # Also extract any text content alongside function calls
-            for part in parts:
-                if text := part.get("text"):
-                    response["content"] = text
-                    break
-            return response, token
 
-        # Text-only response
-        text = None
+        # Extract text from parts (may coexist with function calls)
+        text: str | None = None
         for part in parts:
             if (t := part.get("text")) is not None:
                 text = t
                 break
-        if text is None:
+
+        if tool_calls:
+            finish_reason: FinishReason = "tool_calls"
+        else:
+            finish_reason = _GEMINI_FINISH_REASON_MAP.get(raw_reason, "other")
+
+        response: ChatResponse = {
+            "content": text,
+            "finish_reason": finish_reason,
+        }
+        if tool_calls:
+            response["tool_calls"] = tool_calls
+        if text is None and not tool_calls:
             raise LLMError(self.provider, "No text content in response")
-        return ChatResponse(content=text, finish_reason="stop"), token
+        return response, token
 
     def stream_chat(
         self,
@@ -439,7 +453,10 @@ class GeminiChatStream(ChatStream, GeminiToolMixin):
         async for chunk in self._client.stream(body):
             if text := self._extract_text(chunk):
                 yield text
-            pending_tool_calls.extend(self._extract_tool_calls_from_chunk(chunk))
+            new_calls = self._extract_tool_calls_from_chunk(
+                chunk, id_offset=len(pending_tool_calls)
+            )
+            pending_tool_calls.extend(new_calls)
             if usage := self._extract_usage(chunk):
                 self.usage = usage
         if pending_tool_calls:
@@ -485,11 +502,13 @@ class GeminiChatStream(ChatStream, GeminiToolMixin):
                 "parts": [{"text": text} for text in system_parts]
             }
         if tools:
-            body["tools"] = GeminiToolMixin._tools_to_gemini(tools)  # type: ignore[typeddict-unknown-key]
+            body["tools"] = GeminiToolMixin._tools_to_gemini(tools)
         return body
 
     @staticmethod
-    def _extract_tool_calls_from_chunk(chunk: dict) -> list[ToolCall]:
+    def _extract_tool_calls_from_chunk(
+        chunk: dict, id_offset: int = 0
+    ) -> list[ToolCall]:
         """Extract function call tool calls from a Gemini stream chunk."""
         candidates = chunk.get("candidates")
         if not candidates:
@@ -498,14 +517,15 @@ class GeminiChatStream(ChatStream, GeminiToolMixin):
         if not content:
             return []
         parts = content.get("parts", [])
-        return GeminiToolMixin._extract_gemini_tool_calls(parts)
+        return GeminiToolMixin._extract_gemini_tool_calls(parts, id_offset)
 
     def _extract_text(self, chunk: dict) -> str | None:
         """Extract text content from a Gemini stream response chunk."""
         if candidates := chunk.get("candidates"):
             if content := candidates[0].get("content"):
-                if parts := content.get("parts"):
-                    return parts[0].get("text")
+                for part in content.get("parts", []):
+                    if (text := part.get("text")) is not None:
+                        return text
         return None
 
     def _extract_usage(self, chunk: dict) -> UsageToken | None:

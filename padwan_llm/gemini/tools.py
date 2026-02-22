@@ -30,17 +30,19 @@ class GeminiToolMixin:
     @staticmethod
     def _extract_gemini_tool_calls(
         parts: Sequence[dict[str, typing.Any]],
+        id_offset: int = 0,
     ) -> list[ToolCall]:
         """Extract ToolCall objects from Gemini response parts containing functionCall.
 
         Generates synthetic IDs (call_0, call_1, ...) since Gemini doesn't provide them.
+        The `id_offset` shifts IDs to avoid collisions when accumulating across stream chunks.
         """
         result: list[ToolCall] = []
         for i, part in enumerate(parts):
             if fc := part.get("functionCall"):
                 result.append(
                     ToolCall(
-                        id=f"call_{i}",
+                        id=f"call_{id_offset + i}",
                         type="function",
                         function=ToolCallFunction(
                             name=fc["name"],
@@ -66,7 +68,7 @@ class GeminiToolMixin:
             "parts": [
                 {
                     "functionResponse": {
-                        "name": msg["tool_call_id"],
+                        "name": msg["name"],
                         "response": response_data,
                     }
                 }

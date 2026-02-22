@@ -28,10 +28,15 @@ class AssistantToolMessage(TypedDict):
 
 
 class ToolResultMessage(TypedDict):
-    """The result of a tool invocation, sent back to the model."""
+    """The result of a tool invocation, sent back to the model.
+
+    The `name` field carries the function name, required by Gemini's functionResponse.
+    OpenAI uses `tool_call_id` for correlation and ignores `name`.
+    """
 
     role: Literal["tool"]
     tool_call_id: str
+    name: str
     content: str
 
 
@@ -87,9 +92,13 @@ class ConversationState:
         self.messages.append(msg)
         return msg
 
-    def add_tool_result(self, tool_call_id: str, content: str) -> ToolResultMessage:
+    def add_tool_result(
+        self, tool_call_id: str, name: str, content: str
+    ) -> ToolResultMessage:
         """Add a tool result message to the conversation history."""
-        msg = ToolResultMessage(role="tool", tool_call_id=tool_call_id, content=content)
+        msg = ToolResultMessage(
+            role="tool", tool_call_id=tool_call_id, name=name, content=content
+        )
         self.messages.append(msg)
         return msg
 

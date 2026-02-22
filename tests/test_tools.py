@@ -425,6 +425,7 @@ class TestGeminiBuildBodyToolMessages:
             ToolResultMessage(
                 role="tool",
                 tool_call_id="call_1",
+                name="get_weather",
                 content='{"temperature": 20}',
             ),
         ]
@@ -444,6 +445,7 @@ class TestGeminiBuildBodyToolMessages:
         tool_resp = body["contents"][2]
         assert tool_resp["role"] == "user"
         assert "functionResponse" in tool_resp["parts"][0]
+        assert tool_resp["parts"][0]["functionResponse"]["name"] == "get_weather"
         assert tool_resp["parts"][0]["functionResponse"]["response"] == {
             "temperature": 20
         }
@@ -467,6 +469,7 @@ class TestGeminiBuildBodyToolMessages:
             ToolResultMessage(
                 role="tool",
                 tool_call_id="call_1",
+                name="get_weather",
                 content="plain text result",
             ),
         ]

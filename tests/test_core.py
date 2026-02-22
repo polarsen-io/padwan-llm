@@ -117,9 +117,12 @@ class TestConversationState:
 
     def test_add_tool_result(self):
         state = ConversationState()
-        msg = state.add_tool_result("call_1", '{"temp": 20}')
+        msg = state.add_tool_result("call_1", "get_weather", '{"temp": 20}')
         assert msg == ToolResultMessage(
-            role="tool", tool_call_id="call_1", content='{"temp": 20}'
+            role="tool",
+            tool_call_id="call_1",
+            name="get_weather",
+            content='{"temp": 20}',
         )
         assert state.messages == [msg]
 
