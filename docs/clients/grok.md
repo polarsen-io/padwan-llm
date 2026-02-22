@@ -21,10 +21,10 @@ client = GrokClient(
 from padwan_llm.conversation import Message
 
 async with GrokClient() as client:
-    text, usage = await client.complete_chat([
+    response, usage = await client.complete_chat([
         Message(role="user", content="Hello!")
     ])
-    print(text)
+    print(response["content"])
 ```
 
 ### Streaming
@@ -49,8 +49,8 @@ state = ConversationState(system="You are a helpful assistant.")
 state.add_user_message("Hello!")
 
 async with GrokClient() as client:
-    text, usage = await client.complete_chat(state.messages)
-    state.add_assistant_message(text)
+    response, usage = await client.complete_chat(state.messages)
+    state.add_assistant_message(response["content"])
     state.accumulate_usage(usage)
 ```
 
@@ -111,7 +111,7 @@ async with GrokClient() as client:
 ## Method Outputs
 
 ```python
-text, usage = await client.complete_chat(messages)
+response, usage = await client.complete_chat(messages)
 
 stream = client.stream_chat(messages)
 async for chunk in stream:

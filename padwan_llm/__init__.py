@@ -1,16 +1,33 @@
 from ._base import ChatStream, LLMClientBase
 from .client import LLMClient
-from .conversation import ConversationState, Message
+from .conversation import (
+    AssistantToolMessage,
+    ChatMessage,
+    ConversationState,
+    Message,
+    ToolResultMessage,
+)
 from .errors import LLMError, Provider
 from .gemini import GEMINI_MODELS, GeminiClient, GeminiModel, is_gemini_model
 from .grok import GROK_MODELS, GrokClient, GrokModel, is_grok_model
 from .mistral import MISTRAL_MODELS, MistralClient, MistralModel, is_mistral_model
-from .models import UsageToken
+from .models import (
+    ChatResponse,
+    FinishReason,
+    ToolCall,
+    ToolCallFunction,
+    ToolDefinition,
+    UsageToken,
+)
 from .openai import OPENAI_MODELS, OpenAIClient, OpenAIModel, is_openai_model
 
 __all__ = (
+    "AssistantToolMessage",
+    "ChatMessage",
+    "ChatResponse",
     "ChatStream",
     "ConversationState",
+    "FinishReason",
     "GeminiClient",
     "GeminiModel",
     "GrokClient",
@@ -24,6 +41,10 @@ __all__ = (
     "OpenAIClient",
     "OpenAIModel",
     "Provider",
+    "ToolCall",
+    "ToolCallFunction",
+    "ToolDefinition",
+    "ToolResultMessage",
     "UsageToken",
     "GEMINI_MODELS",
     "GROK_MODELS",

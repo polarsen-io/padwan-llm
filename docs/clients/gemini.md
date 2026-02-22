@@ -21,10 +21,10 @@ client = GeminiClient(
 from padwan_llm.conversation import Message
 
 async with GeminiClient() as client:
-    text, usage = await client.complete_chat([
+    response, usage = await client.complete_chat([
         Message(role="user", content="Hello!")
     ])
-    print(text)
+    print(response["content"])
 ```
 
 ### Streaming

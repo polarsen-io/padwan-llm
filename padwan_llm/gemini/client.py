@@ -5,7 +5,7 @@ from functools import partial
 import json
 import math
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from http import HTTPStatus
 from typing import TYPE_CHECKING, ClassVar, Literal, cast, get_args
 
@@ -14,11 +14,37 @@ from urllib3 import HTTPResponse
 from urllib3.util.retry import Retry
 
 from .batch import BatchJob, BatchRequest
-from .models import BatchJobResponse, CompletionBody, ListBatchesResponse, StreamBody
+from .models import (
+    BatchJobResponse,
+    CompletionBody,
+    ListBatchesResponse,
+    StreamBody,
+)
+from .tools import GeminiToolMixin
 from .._base import ChatStream, LLMClientBase, Provider
-from ..conversation import Message
+from ..conversation import AssistantToolMessage, ChatMessage, ToolResultMessage
 from ..errors import QuotaExceededError, TooManyRequestsError, LLMError
-from ..models import UsageToken
+from ..models import (
+    ChatResponse,
+    FinishReason,
+    ToolCall,
+    ToolDefinition,
+    UsageToken,
+)
+
+# Gemini uses SCREAMING_CASE finish reasons; map to our normalized values.
+# https://ai.google.dev/api/generate-content#FinishReason
+_GEMINI_FINISH_REASON_MAP: dict[str, FinishReason] = {
+    "STOP": "stop",
+    "MAX_TOKENS": "length",
+    "SAFETY": "content_filter",
+    "RECITATION": "content_filter",
+    "LANGUAGE": "content_filter",
+    "BLOCKLIST": "content_filter",
+    "PROHIBITED_CONTENT": "content_filter",
+    "SPII": "content_filter",
+    "OTHER": "other",
+}
 
 if TYPE_CHECKING:
     from google.genai.types import (
@@ -119,13 +145,13 @@ class GeminiRetry(Retry):
                 if detail.get("@type") == "type.googleapis.com/google.rpc.RetryInfo":
                     delay_str = detail.get("retryDelay", "")
                     return math.ceil(float(delay_str.rstrip("s")))
-        except json.JSONDecodeError, ValueError, KeyError:
+        except (json.JSONDecodeError, ValueError, KeyError):  # fmt: skip
             pass
         return None
 
 
 @dataclasses.dataclass
-class GeminiClient(LLMClientBase[GeminiRetry]):
+class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
     """Gemini API client with structured output support."""
 
     provider: ClassVar[Provider] = "gemini"
@@ -326,6 +352,8 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
         }
         if system := body.get("systemInstruction"):
             payload["systemInstruction"] = system
+        if gemini_tools := body.get("tools"):
+            payload["tools"] = gemini_tools
 
         resp = await self.session.post(
             f"/models/{self.model}:streamGenerateContent",
@@ -346,79 +374,159 @@ class GeminiClient(LLMClientBase[GeminiRetry]):
                 except json.JSONDecodeError as e:
                     raise LLMError(self.provider, f"Stream parse error: {e}") from e
 
-    async def complete_chat(self, messages: list[Message]) -> tuple[str, UsageToken]:
-        """Send a chat conversation and return the complete response."""
-        stream_body = GeminiChatStream.build_body(messages, self.temperature)
+    async def complete_chat(
+        self,
+        messages: Sequence[ChatMessage],
+        tools: Sequence[ToolDefinition] | None = None,
+    ) -> tuple[ChatResponse, UsageToken]:
+        """Send a chat conversation and return the structured response."""
+        stream_body = GeminiChatStream.build_body(messages, self.temperature, tools)
         body: CompletionBody = {
             "contents": stream_body["contents"],
             "generationConfig": {"temperature": self.temperature},
         }
         if system := stream_body.get("systemInstruction"):
             body["systemInstruction"] = system
+        if gemini_tools := stream_body.get("tools"):
+            body["tools"] = gemini_tools
         data, token = await self.complete(body, self.model)
         candidates = data.get("candidates")
-        if (
-            not candidates
-            or not (content := candidates[0].get("content"))
-            or not (parts := content.get("parts"))
-            or (text := parts[0].get("text")) is None
-        ):
-            raise LLMError(self.provider, "No text content in response")
-        return text, token
+        if not candidates or not (content := candidates[0].get("content")):
+            raise LLMError(self.provider, "No content in response")
+        parts = cast(list[dict[str, typing.Any]], content.get("parts") or [])
 
-    def stream_chat(self, messages: list[Message]) -> GeminiChatStream:
+        raw_reason = candidates[0].get("finishReason", "STOP")
+        tool_calls = self._extract_gemini_tool_calls(parts)
+
+        # Extract text from parts (may coexist with function calls)
+        text: str | None = None
+        for part in parts:
+            if (t := part.get("text")) is not None:
+                text = t
+                break
+
+        if tool_calls:
+            finish_reason: FinishReason = "tool_calls"
+        else:
+            finish_reason = _GEMINI_FINISH_REASON_MAP.get(raw_reason, "other")
+
+        response: ChatResponse = {
+            "content": text,
+            "finish_reason": finish_reason,
+        }
+        if tool_calls:
+            response["tool_calls"] = tool_calls
+        if text is None and not tool_calls:
+            raise LLMError(self.provider, "No text content in response")
+        return response, token
+
+    def stream_chat(
+        self,
+        messages: Sequence[ChatMessage],
+        tools: Sequence[ToolDefinition] | None = None,
+    ) -> GeminiChatStream:
         """Stream a chat conversation, yielding text chunks.
 
         Handles Gemini-specific body building and response extraction.
-        Usage is available on the returned stream object after iteration.
+        Usage and tool_calls are available on the returned stream object after iteration.
         """
-        return GeminiChatStream(self, messages)
+        return GeminiChatStream(self, messages, tools)
 
 
-class GeminiChatStream(ChatStream):
+class GeminiChatStream(ChatStream, GeminiToolMixin):
     """ChatStream implementation for Gemini API."""
 
-    def __init__(self, client: GeminiClient, messages: list[Message]) -> None:
+    def __init__(
+        self,
+        client: GeminiClient,
+        messages: Sequence[ChatMessage],
+        tools: Sequence[ToolDefinition] | None = None,
+    ) -> None:
         self._client = client
         self._messages = messages
+        self._tools = tools
         self.usage: UsageToken | None = None
+        self.tool_calls: list[ToolCall] | None = None
 
     async def __aiter__(self) -> AsyncIterator[str]:
-        body = self.build_body(self._messages, self._client.temperature)
+        body = self.build_body(self._messages, self._client.temperature, self._tools)
+        pending_tool_calls: list[ToolCall] = []
         async for chunk in self._client.stream(body):
             if text := self._extract_text(chunk):
                 yield text
+            new_calls = self._extract_tool_calls_from_chunk(
+                chunk, id_offset=len(pending_tool_calls)
+            )
+            pending_tool_calls.extend(new_calls)
             if usage := self._extract_usage(chunk):
                 self.usage = usage
+        if pending_tool_calls:
+            self.tool_calls = pending_tool_calls
 
     @staticmethod
-    def build_body(messages: list[Message], temperature: float) -> StreamBody:
+    def build_body(
+        messages: Sequence[ChatMessage],
+        temperature: float,
+        tools: Sequence[ToolDefinition] | None = None,
+    ) -> StreamBody:
         """Build Gemini request body from messages.
 
         Gemini uses 'model' instead of 'assistant' and wraps content in parts.
         System messages are translated to Gemini's systemInstruction field.
+        Handles AssistantToolMessage and ToolResultMessage for tool flows.
         """
         contents = []
         system_parts: list[str] = []
         for msg in messages:
-            if msg["role"] == "system":
-                system_parts.append(msg["content"])
+            role = msg["role"]
+            if role == "system":
+                system_parts.append(msg["content"])  # type: ignore[typeddict-item]
                 continue
-            role = "model" if msg["role"] == "assistant" else "user"
-            contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+            if role == "tool":
+                contents.append(
+                    GeminiToolMixin._convert_tool_result(cast(ToolResultMessage, msg))
+                )
+                continue
+            if role == "assistant" and "tool_calls" in msg:
+                contents.append(
+                    GeminiToolMixin._convert_assistant_tool_message(
+                        cast(AssistantToolMessage, msg)
+                    )
+                )
+                continue
+            # Regular text message (user or assistant)
+            gemini_role = "model" if role == "assistant" else "user"
+            contents.append({"role": gemini_role, "parts": [{"text": msg["content"]}]})  # type: ignore[typeddict-item]
         body: StreamBody = {"contents": contents, "temperature": temperature}
         if system_parts:
             body["systemInstruction"] = {
                 "parts": [{"text": text} for text in system_parts]
             }
+        if tools:
+            body["tools"] = GeminiToolMixin._tools_to_gemini(tools)
         return body
+
+    @staticmethod
+    def _extract_tool_calls_from_chunk(
+        chunk: dict, id_offset: int = 0
+    ) -> list[ToolCall]:
+        """Extract function call tool calls from a Gemini stream chunk."""
+        candidates = chunk.get("candidates")
+        if not candidates:
+            return []
+        content = candidates[0].get("content")
+        if not content:
+            return []
+        parts = content.get("parts", [])
+        return GeminiToolMixin._extract_gemini_tool_calls(parts, id_offset)
 
     def _extract_text(self, chunk: dict) -> str | None:
         """Extract text content from a Gemini stream response chunk."""
         if candidates := chunk.get("candidates"):
             if content := candidates[0].get("content"):
-                if parts := content.get("parts"):
-                    return parts[0].get("text")
+                for part in content.get("parts", []):
+                    if (text := part.get("text")) is not None:
+                        return text
         return None
 
     def _extract_usage(self, chunk: dict) -> UsageToken | None:

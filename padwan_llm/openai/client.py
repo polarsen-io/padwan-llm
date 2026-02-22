@@ -4,7 +4,7 @@ from dataclasses import field
 from functools import partial
 import json
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from http import HTTPStatus
 from typing import TYPE_CHECKING, ClassVar, Literal, cast, get_args
 
@@ -12,11 +12,31 @@ import niquests
 from urllib3.util.retry import Retry
 
 from .batch import BatchJob, BatchRequest, BatchResult
+from .tools import OpenAIToolMixin
 from .types import Batch, ListBatchesResponse, OpenAIFile
 from .._base import ChatStream, LLMClientBase, LLMError, Provider
-from ..conversation import Message
+from ..conversation import ChatMessage
 from ..errors import QuotaExceededError, TooManyRequestsError
-from ..models import UsageToken
+from ..models import (
+    ChatResponse,
+    FinishReason,
+    ToolCall,
+    ToolCallFunction,
+    ToolDefinition,
+    UsageToken,
+)
+
+# Normalize provider-specific finish reasons to our FinishReason values.
+# https://platform.openai.com/docs/api-reference/chat/object#chat/object-choices
+_OPENAI_FINISH_REASON_MAP: dict[str, FinishReason] = {
+    "stop": "stop",
+    "length": "length",
+    "tool_calls": "tool_calls",
+    "content_filter": "content_filter",
+    "function_call": "tool_calls",
+    "model_length": "length",
+    "error": "error",
+}
 
 if TYPE_CHECKING:
     from .types import (
@@ -93,7 +113,7 @@ OPENAI_ENDPOINT = "https://api.openai.com/v1/"
 
 
 @dataclasses.dataclass
-class _OpenAIBase(LLMClientBase[Retry]):
+class _OpenAIBase(LLMClientBase[Retry], OpenAIToolMixin):
     """OpenAI-compatible base client with chat and auth logic.
 
     Shared by OpenAIClient, GrokClient, and MistralClient. Does not include
@@ -174,8 +194,12 @@ class _OpenAIBase(LLMClientBase[Retry]):
                 except json.JSONDecodeError as e:
                     raise LLMError(self.provider, f"Stream parse error: {e}") from e
 
-    async def complete_chat(self, messages: list[Message]) -> tuple[str, UsageToken]:
-        """Send a chat conversation and return the complete response."""
+    async def complete_chat(
+        self,
+        messages: Sequence[ChatMessage],
+        tools: Sequence[ToolDefinition] | None = None,
+    ) -> tuple[ChatResponse, UsageToken]:
+        """Send a chat conversation and return the structured response."""
         if not self.model:
             raise LLMError(self.provider, "No model specified")
         body: CreateChatCompletionRequest = {
@@ -183,25 +207,43 @@ class _OpenAIBase(LLMClientBase[Retry]):
             "messages": cast(list, messages),
             "temperature": self.temperature,
         }
+        if tools:
+            body["tools"] = cast(list, self._tools_to_openai(tools))
         data, token = await self.complete(body)
-        text = data["choices"][0]["message"]["content"] or ""
-        return text, token
+        choice = data["choices"][0]
+        message = choice["message"]
+        raw_reason = choice.get("finish_reason", "stop")
+        response: ChatResponse = {
+            "content": message.get("content"),
+            "finish_reason": _OPENAI_FINISH_REASON_MAP.get(raw_reason, "other"),
+        }
+        if raw_tool_calls := message.get("tool_calls"):
+            response["tool_calls"] = self._extract_tool_calls(
+                cast(list, raw_tool_calls)
+            )
+        return response, token
 
-    def stream_chat(self, messages: list[Message]) -> OpenAIChatStream:
+    def stream_chat(
+        self,
+        messages: Sequence[ChatMessage],
+        tools: Sequence[ToolDefinition] | None = None,
+    ) -> OpenAIChatStream:
         """Stream a chat conversation, yielding text chunks.
 
-        Usage is available on the returned stream object after iteration.
+        Usage and tool_calls are available on the returned stream object after iteration.
         """
-        return OpenAIChatStream(self, messages)
+        return OpenAIChatStream(self, messages, tools)
 
 
 @dataclasses.dataclass
-class OpenAIChatStream(ChatStream):
+class OpenAIChatStream(ChatStream, OpenAIToolMixin):
     """ChatStream implementation for OpenAI-compatible APIs."""
 
     _client: _OpenAIBase
-    _messages: list[Message]
+    _messages: Sequence[ChatMessage]
+    _tools: Sequence[ToolDefinition] | None = None
     usage: UsageToken | None = None
+    tool_calls: list[ToolCall] | None = None
 
     async def __aiter__(self) -> AsyncIterator[str]:
         if not self._client.model:
@@ -212,12 +254,30 @@ class OpenAIChatStream(ChatStream):
             "temperature": self._client.temperature,
             "stream_options": {"include_usage": True},
         }
+        if self._tools:
+            body["tools"] = cast(list, self._tools_to_openai(self._tools))
+
+        # Accumulate tool call deltas keyed by index
+        pending: dict[int, dict[str, str]] = {}
 
         async for chunk in self._client.stream(body):
             if text := self._extract_text(chunk):
                 yield text
+            self._accumulate_tool_call_deltas(chunk, pending)
             if usage := self._extract_usage(chunk):
                 self.usage = usage
+
+        if pending:
+            self.tool_calls = [
+                ToolCall(
+                    id=tc["id"],
+                    type="function",
+                    function=ToolCallFunction(
+                        name=tc["name"], arguments=tc["arguments"]
+                    ),
+                )
+                for tc in (pending[i] for i in sorted(pending))
+            ]
 
     def _extract_text(self, chunk: CreateChatCompletionStreamResponse) -> str | None:
         """Extract text content from an OpenAI stream response chunk."""

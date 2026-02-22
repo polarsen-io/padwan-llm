@@ -1,14 +1,14 @@
 import abc
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 import niquests
 from urllib3.util.retry import Retry
 
-from .conversation import Message
+from .conversation import ChatMessage
 from .errors import LLMError, Provider
-from .models import UsageToken
+from .models import ChatResponse, ToolCall, ToolDefinition, UsageToken
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -21,9 +21,10 @@ __all__ = (
 
 
 class ChatStream(abc.ABC):
-    """Async iterator that yields text chunks and captures usage after iteration."""
+    """Async iterator that yields text chunks and captures usage/tool_calls after iteration."""
 
     usage: UsageToken | None = None
+    tool_calls: list[ToolCall] | None = None
 
     @abc.abstractmethod
     def __aiter__(self) -> AsyncIterator[str]:
@@ -127,20 +128,28 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
         ...
 
     @abc.abstractmethod
-    def stream_chat(self, messages: list[Message]) -> ChatStream:
+    def stream_chat(
+        self,
+        messages: Sequence[ChatMessage],
+        tools: Sequence[ToolDefinition] | None = None,
+    ) -> ChatStream:
         """Stream a chat conversation, yielding text chunks.
 
         This is a higher-level API than stream() that handles provider-specific
-        body building and response extraction. Usage is available on the returned
-        ChatStream object after iteration completes.
+        body building and response extraction. Usage and tool_calls are available
+        on the returned ChatStream object after iteration completes.
         """
         ...
 
     @abc.abstractmethod
-    async def complete_chat(self, messages: list[Message]) -> tuple[str, UsageToken]:
-        """Send a chat conversation and return the complete response.
+    async def complete_chat(
+        self,
+        messages: Sequence[ChatMessage],
+        tools: Sequence[ToolDefinition] | None = None,
+    ) -> tuple[ChatResponse, UsageToken]:
+        """Send a chat conversation and return the structured response.
 
-        Non-streaming equivalent of stream_chat(). Returns the full response
-        text and token usage in a single call.
+        Returns a ChatResponse with content, optional tool_calls, and finish_reason,
+        along with token usage.
         """
         ...

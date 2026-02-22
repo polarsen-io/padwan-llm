@@ -24,14 +24,15 @@ from padwan_llm.conversation import Message
 
 # Using context manager (recommended)
 async with LLMClient("gpt-4o") as client:
-    text, usage = await client.complete_chat([
+    response, usage = await client.complete_chat([
         Message(role="user", content="Hello!")
     ])
+    print(response["content"])
 
 # Or manually manage the client
 client = LLMClient("gemini-2.0-flash")
 async with client:
-    text, usage = await client.complete_chat([
+    response, usage = await client.complete_chat([
         Message(role="user", content="Hello!")
     ])
 ```
@@ -50,7 +51,7 @@ async with OpenAIClient(
     base_url="https://api.groq.com/openai/v1/",
     api_key="gsk-...",
 ) as client:
-    text, usage = await client.complete_chat([
+    response, usage = await client.complete_chat([
         {"role": "user", "content": "Hello!"}
     ])
 ```
@@ -72,7 +73,7 @@ from padwan_llm import LLMClient
 from padwan_llm.conversation import Message
 
 async with LLMClient("gpt-4o") as client:
-    text, usage = await client.complete_chat([
+    response, usage = await client.complete_chat([
         Message(role="user", content="Hello!")
     ])
 ```
@@ -115,7 +116,7 @@ async with LLMClient("gpt-4o") as client:
         state.accumulate_usage(stream.usage)
 
     state.add_user_message("What are its main features?")
-    text, usage = await client.complete_chat(state.messages)
-    state.add_assistant_message(text)
+    response, usage = await client.complete_chat(state.messages)
+    state.add_assistant_message(response["content"])
     state.accumulate_usage(usage)
 ```

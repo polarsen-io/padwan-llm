@@ -1,9 +1,15 @@
 from dataclasses import dataclass, field
 from typing import Literal, TypedDict
 
-from .models import UsageToken
+from .models import ChatResponse, ToolCall, UsageToken
 
-__all__ = ("ConversationState", "Message")
+__all__ = (
+    "AssistantToolMessage",
+    "ChatMessage",
+    "ConversationState",
+    "Message",
+    "ToolResultMessage",
+)
 
 
 class Message(TypedDict):
@@ -11,6 +17,30 @@ class Message(TypedDict):
 
     role: Literal["system", "user", "assistant"]
     content: str
+
+
+class AssistantToolMessage(TypedDict):
+    """An assistant message that contains tool calls instead of (or alongside) text."""
+
+    role: Literal["assistant"]
+    content: str | None
+    tool_calls: list[ToolCall]
+
+
+class ToolResultMessage(TypedDict):
+    """The result of a tool invocation, sent back to the model.
+
+    The `name` field carries the function name, required by Gemini's functionResponse.
+    OpenAI uses `tool_call_id` for correlation and ignores `name`.
+    """
+
+    role: Literal["tool"]
+    tool_call_id: str
+    name: str
+    content: str
+
+
+ChatMessage = Message | AssistantToolMessage | ToolResultMessage
 
 
 @dataclass
@@ -23,7 +53,7 @@ class ConversationState:
     """
 
     system: str | None = None
-    messages: list[Message] = field(default_factory=list)
+    messages: list[ChatMessage] = field(default_factory=list)
     last_usage: UsageToken | None = field(default=None, init=False)
     total_usage: UsageToken = field(
         default_factory=lambda: {"total": 0, "input": 0, "output": 0}, init=False
@@ -39,9 +69,36 @@ class ConversationState:
         self.messages.append(msg)
         return msg
 
+    def add_assistant_response(self, response: ChatResponse) -> ChatMessage:
+        """Add an assistant message from a ChatResponse.
+
+        If the response contains tool calls, stores an AssistantToolMessage;
+        otherwise stores a plain Message with the text content.
+        """
+        if tool_calls := response.get("tool_calls"):
+            msg: ChatMessage = AssistantToolMessage(
+                role="assistant",
+                content=response["content"],
+                tool_calls=tool_calls,
+            )
+        else:
+            msg = Message(role="assistant", content=response["content"] or "")
+        self.messages.append(msg)
+        return msg
+
     def add_assistant_message(self, content: str) -> Message:
-        """Add an assistant message to the conversation history."""
+        """Add a plain text assistant message to the conversation history."""
         msg = Message(role="assistant", content=content)
+        self.messages.append(msg)
+        return msg
+
+    def add_tool_result(
+        self, tool_call_id: str, name: str, content: str
+    ) -> ToolResultMessage:
+        """Add a tool result message to the conversation history."""
+        msg = ToolResultMessage(
+            role="tool", tool_call_id=tool_call_id, name=name, content=content
+        )
         self.messages.append(msg)
         return msg
 

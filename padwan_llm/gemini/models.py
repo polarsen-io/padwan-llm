@@ -3,6 +3,13 @@ from typing import Any, Literal, NotRequired, TypedDict
 __all__ = (
     "CompletionBody",
     "Content",
+    "FunctionCall",
+    "FunctionCallPart",
+    "FunctionDeclaration",
+    "FunctionResponse",
+    "FunctionResponsePart",
+    "GeminiPart",
+    "GeminiTool",
     "Part",
     "StreamBody",
     "SystemInstruction",
@@ -93,13 +100,37 @@ class BatchRequestPayload(TypedDict, total=False):
     systemInstruction: NotRequired[SystemInstruction]
 
 
+# Content parts
+
+
 class Part(TypedDict):
     text: str
 
 
+class FunctionCall(TypedDict):
+    name: str
+    args: dict[str, Any]
+
+
+class FunctionCallPart(TypedDict):
+    functionCall: FunctionCall
+
+
+class FunctionResponse(TypedDict):
+    name: str
+    response: dict[str, Any]
+
+
+class FunctionResponsePart(TypedDict):
+    functionResponse: FunctionResponse
+
+
+GeminiPart = Part | FunctionCallPart | FunctionResponsePart
+
+
 class Content(TypedDict):
     role: Literal["user", "model"]
-    parts: list[Part]
+    parts: list[GeminiPart]
 
 
 class SystemInstruction(TypedDict):
@@ -117,6 +148,16 @@ class ThinkingConfig(TypedDict, total=False):
     ]
 
 
+class FunctionDeclaration(TypedDict):
+    name: str
+    description: str
+    parameters: NotRequired[dict[str, Any]]
+
+
+class GeminiTool(TypedDict):
+    function_declarations: list[FunctionDeclaration]
+
+
 class GenerationConfig(TypedDict, total=False):
     responseMimeType: Literal["application/json"]
     responseSchema: dict[str, Any]
@@ -128,9 +169,11 @@ class StreamBody(TypedDict):
     contents: list[Content]
     temperature: NotRequired[float]
     systemInstruction: NotRequired[SystemInstruction]
+    tools: NotRequired[list[GeminiTool]]
 
 
 class CompletionBody(TypedDict):
     contents: list[Content]
     systemInstruction: NotRequired[SystemInstruction]
     generationConfig: NotRequired[GenerationConfig]
+    tools: NotRequired[list[GeminiTool]]
