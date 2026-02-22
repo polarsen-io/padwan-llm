@@ -1,9 +1,11 @@
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 
 from padwan_llm.conversation import AssistantToolMessage, Message, ToolResultMessage
 from padwan_llm.gemini.client import GeminiChatStream, GeminiClient
+from padwan_llm.gemini.models import FunctionResponsePart
 from padwan_llm.gemini.tools import GeminiToolMixin
 from padwan_llm.models import (
     ChatResponse,
@@ -383,18 +385,20 @@ class TestToolDefinitionMapping:
         assert len(result) == 1
         tool = result[0]
         assert tool["type"] == "function"
-        assert tool["function"]["name"] == "get_weather"
-        assert tool["function"]["description"] == "Get the weather for a city"
-        assert tool["function"]["parameters"] == SAMPLE_TOOL["parameters"]
+        fn = tool["function"]
+        assert fn["name"] == "get_weather"
+        assert fn.get("description") == "Get the weather for a city"
+        assert fn.get("parameters") == SAMPLE_TOOL["parameters"]
 
     def test_to_gemini(self):
         result = GeminiToolMixin._tools_to_gemini([SAMPLE_TOOL])
         assert len(result) == 1
         decls = result[0]["function_declarations"]
         assert len(decls) == 1
-        assert decls[0]["name"] == "get_weather"
-        assert decls[0]["description"] == "Get the weather for a city"
-        assert decls[0]["parameters"] == SAMPLE_TOOL["parameters"]
+        decl = decls[0]
+        assert decl["name"] == "get_weather"
+        assert decl["description"] == "Get the weather for a city"
+        assert decl.get("parameters") == SAMPLE_TOOL["parameters"]
 
     def test_multiple_tools(self):
         tool2: ToolDefinition = {
@@ -474,8 +478,8 @@ class TestGeminiBuildBodyToolMessages:
             ),
         ]
         body = GeminiChatStream.build_body(messages, 0.5)
-        fr = body["contents"][0]["parts"][0]["functionResponse"]
-        assert fr["response"] == {"result": "plain text result"}
+        part = cast(FunctionResponsePart, body["contents"][0]["parts"][0])
+        assert part["functionResponse"]["response"] == {"result": "plain text result"}
 
     def test_tools_parameter(self):
         messages: list = [Message(role="user", content="Hi")]

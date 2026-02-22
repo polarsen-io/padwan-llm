@@ -76,8 +76,9 @@ async def test_complete_chat_tool_call(model: str) -> None:
         response, usage = await client.complete_chat(TOOL_PROMPT, tools=[WEATHER_TOOL])
 
     assert response["finish_reason"] == "tool_calls"
-    assert response.get("tool_calls")
-    tc = response["tool_calls"][0]
+    tool_calls = response.get("tool_calls")
+    assert tool_calls
+    tc = tool_calls[0]
     assert tc["type"] == "function"
     assert tc["function"]["name"] == "get_weather"
     args = json.loads(tc["function"]["arguments"])
