@@ -1,3 +1,14 @@
+## 0.4.0 (2026-02-22)
+
+### Feat
+
+- add tool-calling support across all providers
+
+### Fix
+
+- accept Sequence instead of list in ChatStream constructors
+- address review findings in tool-calling implementation
+
 ## 0.3.0 (2026-02-20)
 
 ### Feat
