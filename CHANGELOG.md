@@ -1,3 +1,9 @@
+## 0.5.1 (2026-03-03)
+
+### Fix
+
+- update Grok model definitions to match current xAI API
+
 ## 0.5.0 (2026-03-03)
 
 ### Feat
