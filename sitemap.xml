@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://polarsen-io.github.io/padwan-llm/</loc>
+         <lastmod>2026-03-03</lastmod>
+    </url>
+    <url>
+         <loc>https://polarsen-io.github.io/padwan-llm/getting-started/</loc>
+         <lastmod>2026-03-03</lastmod>
+    </url>
+    <url>
+         <loc>https://polarsen-io.github.io/padwan-llm/clients/gemini/</loc>
+         <lastmod>2026-03-03</lastmod>
+    </url>
+    <url>
+         <loc>https://polarsen-io.github.io/padwan-llm/clients/grok/</loc>
+         <lastmod>2026-03-03</lastmod>
+    </url>
+    <url>
+         <loc>https://polarsen-io.github.io/padwan-llm/clients/mistral/</loc>
+         <lastmod>2026-03-03</lastmod>
+    </url>
+    <url>
+         <loc>https://polarsen-io.github.io/padwan-llm/clients/openai-compatible/</loc>
+         <lastmod>2026-03-03</lastmod>
+    </url>
+    <url>
+         <loc>https://polarsen-io.github.io/padwan-llm/clients/openai/</loc>
+         <lastmod>2026-03-03</lastmod>
+    </url>
+</urlset>
