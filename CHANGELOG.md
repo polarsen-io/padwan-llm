@@ -1,3 +1,9 @@
+## 0.5.0 (2026-03-03)
+
+### Feat
+
+- update model definitions across all providers
+
 ## 0.4.0 (2026-02-22)
 
 ### Feat
