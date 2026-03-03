@@ -30,7 +30,7 @@ async with LLMClient("gpt-4o") as client:
     print(response["content"])
 
 # Or manually manage the client
-client = LLMClient("gemini-2.0-flash")
+client = LLMClient("gemini-2.5-flash")
 async with client:
     response, usage = await client.complete_chat([
         Message(role="user", content="Hello!")

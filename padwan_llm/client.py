@@ -61,7 +61,7 @@ def LLMClient(
     """Create an LLM client based on model name.
 
     Args:
-        model: Model name (e.g., 'gpt-4o', 'gemini-2.0-flash', 'mistral-large-latest')
+        model: Model name (e.g., 'gpt-4o', 'gemini-2.5-flash', 'mistral-large-latest')
         temperature: Sampling temperature (default: 0.2)
         timeout: Request timeout in seconds (default: 60)
         api_key: API key (default: from environment variable)

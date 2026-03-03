@@ -54,12 +54,21 @@ OpenAIModel = Literal[
     "gpt-4.1",
     "gpt-4.1-mini",
     "gpt-4.1-nano",
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-5-nano",
+    "gpt-5.1",
+    "gpt-5.1-mini",
+    "gpt-5.1-codex",
+    "gpt-5.2",
+    "gpt-5.2-pro",
     "o1",
     "o1-mini",
     "o1-preview",
     "o3",
     "o3-mini",
     "o4-mini",
+    "codex-mini-latest",
 ]
 
 __all__ = (
@@ -97,7 +106,7 @@ def _check_resp(resp: niquests.Response) -> typing.Any:
     return (_check_resp_status(resp)).json()
 
 
-_OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
+_OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-", "codex-")
 
 
 def is_openai_model(model_name: str | None) -> bool:

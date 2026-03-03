@@ -43,7 +43,7 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
     _retry: RetryT
 
     model: str | None = None
-    """Default model to use (e.g., 'gpt-4o', 'gemini-2.0-flash')."""
+    """Default model to use (e.g., 'gpt-4o', 'gemini-2.5-flash')."""
     temperature: float = 0.2
     """Sampling temperature."""
     timeout: float = 60

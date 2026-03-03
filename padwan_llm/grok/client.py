@@ -20,6 +20,9 @@ GrokModel = Literal[
     "grok-3",
     "grok-3-mini-fast",
     "grok-3-mini",
+    "grok-4",
+    "grok-4-fast",
+    "grok-code-fast-1",
 ]
 
 __all__ = ("GrokClient", "GROK_MODELS", "GROK_ENDPOINT", "GrokModel", "is_grok_model")
