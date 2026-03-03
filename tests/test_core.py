@@ -168,12 +168,15 @@ def test_llm_error(cause: Exception | None):
     [
         pytest.param(is_openai_model, "o3", True, id="openai-o3"),
         pytest.param(is_openai_model, "gpt-4.1", True, id="openai-gpt4.1"),
+        pytest.param(is_openai_model, "codex-mini-latest", True, id="openai-codex"),
         pytest.param(is_openai_model, "unknown", False, id="openai-miss"),
         pytest.param(is_gemini_model, "gemini-custom", True, id="gemini-prefix"),
         pytest.param(is_gemini_model, "gpt-4o", False, id="gemini-miss"),
         pytest.param(is_mistral_model, "codestral-latest", True, id="mistral-set"),
         pytest.param(is_mistral_model, "mistral-custom", True, id="mistral-prefix"),
         pytest.param(is_mistral_model, "gpt-4o", False, id="mistral-miss"),
+        pytest.param(is_grok_model, "grok-4", True, id="grok-4"),
+        pytest.param(is_grok_model, "grok-code-fast-1", True, id="grok-code"),
         pytest.param(is_grok_model, None, False, id="grok-none"),
     ],
 )
@@ -188,7 +191,7 @@ def test_is_model(func, model, expected: bool):
     "model, expected_type, ctx",
     [
         pytest.param("gpt-4o", OpenAIClient, nullcontext(), id="openai"),
-        pytest.param("gemini-2.0-flash", GeminiClient, nullcontext(), id="gemini"),
+        pytest.param("gemini-2.5-flash", GeminiClient, nullcontext(), id="gemini"),
         pytest.param(
             "mistral-large-latest", MistralClient, nullcontext(), id="mistral"
         ),

@@ -62,7 +62,7 @@ The interactive CLI/TUI is available as a separate package: `padwan-cli`.
 
 ```bash
 # One-shot prompt
-uvx padwan-cli "Explain Python decorators" -m gemini-2.0-flash
+uvx padwan-cli "Explain Python decorators" -m gemini-2.5-flash
 
 # Interactive chat
 uvx padwan-cli chat -m gpt-4o

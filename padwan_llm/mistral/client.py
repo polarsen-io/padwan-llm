@@ -20,10 +20,12 @@ MistralModel = Literal[
     "open-mistral-nemo",
     "mistral-small-latest",
     "devstral-small-latest",
+    "devstral-latest",
     "mistral-saba-latest",
     "codestral-latest",
     "mistral-ocr-latest",
     "magistral-small-latest",
+    "magistral-medium-latest",
 ]
 
 MistralEmbeddingModel = Literal["mistral-embed"]

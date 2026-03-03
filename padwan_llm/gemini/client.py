@@ -54,15 +54,11 @@ if TYPE_CHECKING:
     )
 
 GeminiModel = Literal[
-    "gemini-3-pro-preview",
+    "gemini-3.1-pro-preview",
     "gemini-3-flash-preview",
     "gemini-2.5-pro",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-1.5-pro",
-    "gemini-1.5-flash",
 ]
 
 __all__ = (
@@ -155,7 +151,7 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
     """Gemini API client with structured output support."""
 
     provider: ClassVar[Provider] = "gemini"
-    model: str | None = "gemini-2.0-flash"
+    model: str | None = "gemini-2.5-flash"
     base_url: str = GEMINI_ENDPOINT
     _retry: GeminiRetry = field(
         default_factory=partial(

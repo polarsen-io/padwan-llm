@@ -15,7 +15,7 @@ async def test_batch_lifecycle() -> None:
             key="e2e-gemini-1",
         )
         job = await client.create_batch(
-            [req], model="gemini-2.0-flash", display_name="e2e-test"
+            [req], model="gemini-2.5-flash", display_name="e2e-test"
         )
         assert job.name
         assert job.state
