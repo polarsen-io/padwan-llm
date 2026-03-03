@@ -175,7 +175,7 @@ def test_llm_error(cause: Exception | None):
         pytest.param(is_mistral_model, "codestral-latest", True, id="mistral-set"),
         pytest.param(is_mistral_model, "mistral-custom", True, id="mistral-prefix"),
         pytest.param(is_mistral_model, "gpt-4o", False, id="mistral-miss"),
-        pytest.param(is_grok_model, "grok-4", True, id="grok-4"),
+        pytest.param(is_grok_model, "grok-4-1-fast-reasoning", True, id="grok-4.1"),
         pytest.param(is_grok_model, "grok-code-fast-1", True, id="grok-code"),
         pytest.param(is_grok_model, None, False, id="grok-none"),
     ],
