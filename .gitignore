@@ -166,7 +166,9 @@ cli/
 
 CLAUDE.md
 .claude/
+.codex/
 .scratch/
+AGENTS.md
 
 # Test fixtures (binary audio files)
 tests/fixtures/

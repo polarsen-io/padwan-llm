@@ -1,4 +1,7 @@
+from importlib.metadata import version as _pkg_version
+
 from ._base import ChatStream, LLMClientBase
+from .mcp import McpStreamable, McpStdio, McpTool
 from .client import LLMClient
 from .conversation import (
     AssistantToolMessage,
@@ -35,6 +38,9 @@ __all__ = (
     "LLMClient",
     "LLMClientBase",
     "LLMError",
+    "McpStreamable",
+    "McpStdio",
+    "McpTool",
     "Message",
     "MistralClient",
     "MistralModel",
@@ -54,4 +60,7 @@ __all__ = (
     "is_grok_model",
     "is_mistral_model",
     "is_openai_model",
+    "__version__",
 )
+
+__version__: str = _pkg_version("padwan-llm")

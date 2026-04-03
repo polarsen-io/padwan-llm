@@ -15,9 +15,10 @@ Most LLM client libraries pull in heavy dependencies (pydantic, httpx) and lock 
 - **Unified interface** - Single API for multiple LLM providers
 - **Async-first** - Built on async/await for high performance
 - **HTTP/2 and HTTP/3** - Automatic protocol negotiation via [niquests](https://github.com/jawah/niquests)
-- **Fully typed** - Complete type hints with Python 3.14+ generics
+- **Fully typed** - Complete type hints with Python 3.13+ generics
 - **Streaming support** - Real-time token streaming for all providers
 - **Conversation management** - Built-in conversation history handling
+- **MCP support** - Streamable HTTP and stdio transports for [Model Context Protocol](https://modelcontextprotocol.io/) tool servers
 
 ## Supported Providers
 

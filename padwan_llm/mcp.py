@@ -1,0 +1,494 @@
+import asyncio
+import functools
+import json
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any, NotRequired, Self, TypedDict, cast
+from http import HTTPStatus
+
+from importlib.metadata import version as _pkg_version
+
+import niquests
+
+from .logs import log
+from .models import ToolDefinition
+
+__version__ = _pkg_version("padwan-llm")
+
+__all__ = ("McpTool", "McpStreamable", "McpStdio")
+
+_JSONRPC = "2.0"
+_PROTOCOL_VERSION = "2025-11-25"
+_MAX_LISTEN_RETRIES = 5
+_DEFAULT_RETRY_MS = 3000
+
+
+class _JsonRpcNotification(TypedDict):
+    jsonrpc: str
+    method: str
+    params: NotRequired[dict[str, Any]]
+
+
+class _JsonRpcRequest(_JsonRpcNotification):
+    id: str
+
+
+def _to_sse_url(url: str) -> str:
+    """Convert http(s):// URL to the niquests SSE scheme (psse:// or sse://)."""
+    stripped = url.removeprefix("https://")
+    if stripped is not url:
+        return "sse://" + stripped
+    return "psse://" + url.removeprefix("http://")
+
+
+@dataclass
+class McpTool:
+    """A single MCP-compatible tool with name, schema, and async handler."""
+
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+    """JSON Schema describing the tool's expected parameters. Corresponds to
+    the ``inputSchema`` field in the MCP wire protocol (camelCase on the wire,
+    snake_case here)."""
+    handler: Callable[[dict[str, Any]], Any] = field(
+        repr=False, default=lambda args: args
+    )
+    """Async callable invoked when the LLM requests this tool. Receives the
+    parsed arguments dict and should return the tool result. Defaults to an
+    identity function (pass-through), useful when only the schema matters."""
+
+    def to_tool_def(self) -> ToolDefinition:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": self.input_schema,
+        }
+
+
+# Shared helpers
+
+
+def _build_tools(raw_tools: list[dict[str, Any]], call_fn: Callable) -> list[McpTool]:
+    """Build McpTool list from a tools/list result."""
+    return [
+        McpTool(
+            name=t["name"],
+            description=t.get("description") or "",
+            input_schema=t.get("inputSchema") or {"type": "object", "properties": {}},
+            handler=lambda args, _n=t["name"]: call_fn(_n, args),
+        )
+        for t in raw_tools
+    ]
+
+
+def _extract_text_content(result: dict[str, Any]) -> dict[str, Any]:
+    """Extract text content blocks from a tools/call result."""
+    return {
+        "content": [
+            {"type": c["type"], "text": c.get("text", "")}
+            for c in result.get("content", [])
+            if c.get("type") == "text"
+        ]
+    }
+
+
+def _mcp_headers(
+    accept: str = "application/json", session_id: str | None = None
+) -> dict[str, str]:
+    """Build MCP HTTP headers with optional session ID."""
+    h = {
+        "Content-Type": "application/json",
+        "Accept": accept,
+        "MCP-Protocol-Version": _PROTOCOL_VERSION,
+    }
+    if session_id:
+        h["MCP-Session-Id"] = session_id
+    return h
+
+
+def _check_rpc_error(data: dict[str, Any]) -> None:
+    """Raise if a JSON-RPC response contains an error."""
+    if err := data.get("error"):
+        raise RuntimeError(f"MCP error {err.get('code')}: {err.get('message')}")
+
+
+# McpStreamable — streamable-HTTP transport
+
+
+@dataclass
+class McpStreamable:
+    """MCP client over streamable-HTTP using niquests.
+
+    POST JSON-RPC for all requests; response is JSON or SSE stream.
+    Background GET SSE stream for server-push notifications.
+
+    Spec: https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#streamable-http
+    """
+
+    url: str
+    client_name: str = "padwan-llm"
+    client_version: str = __version__
+    _tools: list[McpTool] = field(init=False, default_factory=list)
+    _http: niquests.AsyncSession = field(
+        init=False, default_factory=niquests.AsyncSession
+    )
+    _session_id: str | None = field(init=False, default=None)
+    _bg_task: asyncio.Task[None] | None = field(init=False, default=None)
+    _last_event_id: str | None = field(init=False, default=None)
+    _retry_ms: int = field(init=False, default=_DEFAULT_RETRY_MS)
+
+    @functools.cached_property
+    def _sse_url(self) -> str:
+        return _to_sse_url(self.url)
+
+    async def __aenter__(self) -> Self:
+        await self._initialize()
+        await self._refresh_tools()
+        self._bg_task = asyncio.create_task(self._listen())
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        try:
+            # Cleaning Background Task
+            if self._bg_task:
+                self._bg_task.cancel()
+                try:
+                    await self._bg_task
+                except asyncio.CancelledError:
+                    log.debug("MCP GET listener cancelled")
+            #
+            if self._session_id:
+                await self._http.delete(self.url, headers=self._headers())
+        except Exception:
+            log.warning("MCP session cleanup failed", exc_info=True)
+            raise
+        finally:
+            await self._http.close()
+
+    @property
+    def tools(self) -> list[McpTool]:
+        return self._tools
+
+    def _headers(self, accept: str = "application/json") -> dict[str, str]:
+        return _mcp_headers(accept, self._session_id)
+
+    async def _rpc(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        *,
+        _reinit: bool = True,
+    ) -> Any:
+        """POST a JSON-RPC request and return the result.
+
+        Handles both JSON and SSE response formats. On 404 with an active
+        session, re-initializes once and retries (per spec).
+        """
+        req_id = uuid.uuid4().hex
+        payload: _JsonRpcRequest = {"jsonrpc": _JSONRPC, "id": req_id, "method": method}
+        if params is not None:
+            payload["params"] = params
+        r = await self._http.post(
+            self._sse_url,
+            json=payload,
+            headers=self._headers(accept="application/json, text/event-stream"),
+        )
+        if r.status_code == HTTPStatus.NOT_FOUND and self._session_id and _reinit:
+            self._session_id = None
+            await self._initialize()
+            return await self._rpc(method, params, _reinit=False)
+        r.raise_for_status()
+        if sid := r.headers.get("MCP-Session-Id"):
+            self._session_id = cast(str, sid)
+        ct = cast(str, r.headers.get("content-type", ""))
+        if "text/event-stream" in ct:
+            return await self._read_sse_response(r)
+        data: dict[str, Any] = await r.json()
+        _check_rpc_error(data)
+        return data.get("result")
+
+    async def _read_sse_response(self, r: niquests.Response) -> Any:
+        """Consume SSE stream from a POST response, return the JSON-RPC result.
+
+        The spec allows servers to send notifications/requests before the
+        response. We process all events and return the result from the first
+        JSON-RPC response (message with 'result' or 'error').
+        """
+        ext = r.extension
+        if ext is None:
+            raise RuntimeError("SSE extension not available on response")
+        while not ext.closed:
+            event = await ext.next_payload()
+            if event is None:
+                break
+            if event.id:
+                self._last_event_id = event.id
+            if event.retry is not None:
+                self._retry_ms = event.retry
+            data: dict[str, Any] = event.json()
+            if "result" in data or "error" in data:
+                _check_rpc_error(data)
+                return data.get("result")
+            if data.get("method") == "notifications/tools/list_changed":
+                await self._refresh_tools()
+        raise RuntimeError("SSE stream ended without a JSON-RPC response")
+
+    async def _listen(self) -> None:
+        """GET SSE stream for server-push notifications, with reconnection.
+
+        Spec: https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#listening-for-messages-from-the-server
+        """
+        retries = 0
+        while retries < _MAX_LISTEN_RETRIES:
+            try:
+                headers = self._headers(accept="text/event-stream")
+                if self._last_event_id is not None:
+                    headers["Last-Event-ID"] = self._last_event_id
+                r = await self._http.get(self._sse_url, headers=headers)
+                if r.status_code == HTTPStatus.METHOD_NOT_ALLOWED:
+                    return
+                r.raise_for_status()
+                ext = r.extension
+                if ext is None:
+                    return
+                retries = 0
+                while not ext.closed:
+                    event = await ext.next_payload()
+                    if event is None:
+                        break
+                    if event.id:
+                        self._last_event_id = event.id
+                    if event.retry is not None:
+                        self._retry_ms = event.retry
+                    try:
+                        msg: dict[str, Any] = event.json()
+                    except ValueError:
+                        log.warning("MCP: ignoring malformed SSE event: %s", event.data)
+                        continue
+                    if msg.get("method") == "notifications/tools/list_changed":
+                        await self._refresh_tools()
+                retries += 1
+                log.debug(
+                    "MCP GET stream ended, reconnecting (%d/%d)",
+                    retries,
+                    _MAX_LISTEN_RETRIES,
+                )
+                await asyncio.sleep(self._retry_ms / 1000)
+            except asyncio.CancelledError:
+                log.debug("MCP GET listener cancelled")
+                return
+            except Exception:
+                retries += 1
+                log.warning(
+                    "MCP GET listener error (%d/%d)",
+                    retries,
+                    _MAX_LISTEN_RETRIES,
+                    exc_info=True,
+                )
+                await asyncio.sleep(self._retry_ms / 1000)
+
+    async def _initialize(self) -> None:
+        await self._rpc(
+            "initialize",
+            {
+                "protocolVersion": _PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {
+                    "name": self.client_name,
+                    "version": self.client_version,
+                },
+            },
+            _reinit=False,
+        )
+        await self._http.post(
+            self.url,
+            json=_JsonRpcNotification(
+                jsonrpc=_JSONRPC, method="notifications/initialized"
+            ),
+            headers=self._headers(),
+        )
+
+    async def _refresh_tools(self) -> None:
+        result = await self._rpc("tools/list")
+        self._tools = _build_tools(result.get("tools", []), self._call)
+
+    async def _call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        result = await self._rpc("tools/call", {"name": name, "arguments": args})
+        return _extract_text_content(result)
+
+    async def cancel(self, request_id: str, reason: str | None = None) -> None:
+        """Send notifications/cancelled to cancel an in-flight request."""
+        params: dict[str, Any] = {"requestId": request_id}
+        if reason is not None:
+            params["reason"] = reason
+        await self._http.post(
+            self.url,
+            json=_JsonRpcNotification(
+                jsonrpc=_JSONRPC,
+                method="notifications/cancelled",
+                params=params,
+            ),
+            headers=self._headers(),
+        )
+
+
+# McpStdio — stdio transport
+
+
+@dataclass
+class McpStdio:
+    """MCP client over stdio, spawning the server as a subprocess.
+
+    Communicates via newline-delimited JSON-RPC on stdin/stdout.
+
+    Spec: https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#stdio
+    """
+
+    command: str
+    args: list[str] = field(default_factory=list)
+    env: dict[str, str] | None = None
+    cwd: str | None = None
+    client_name: str = "padwan-llm"
+    client_version: str = __version__
+
+    _tools: list[McpTool] = field(init=False, default_factory=list)
+    _process: asyncio.subprocess.Process | None = field(init=False, default=None)
+    _next_id: int = field(init=False, default=0)
+    _pending: dict[str, asyncio.Future[Any]] = field(init=False, default_factory=dict)
+    _reader_task: asyncio.Task[None] | None = field(init=False, default=None)
+    _loop: asyncio.AbstractEventLoop = field(init=False)
+
+    async def __aenter__(self) -> Self:
+        self._loop = asyncio.get_running_loop()
+        self._process = await asyncio.create_subprocess_exec(
+            self.command,
+            *self.args,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=self.env,
+            cwd=self.cwd,
+        )
+        self._reader_task = asyncio.create_task(self._reader())
+        await self._initialize()
+        await self._refresh_tools()
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        if self._reader_task:
+            self._reader_task.cancel()
+            try:
+                await self._reader_task
+            except asyncio.CancelledError:
+                pass
+        if self._process:
+            if self._process.stdin:
+                self._process.stdin.close()
+            try:
+                await asyncio.wait_for(self._process.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                self._process.terminate()
+                try:
+                    await asyncio.wait_for(self._process.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    self._process.kill()
+        for fut in self._pending.values():
+            if not fut.done():
+                fut.set_exception(RuntimeError("MCP stdio connection closed"))
+        self._pending.clear()
+
+    @property
+    def tools(self) -> list[McpTool]:
+        return self._tools
+
+    async def _send(self, msg: _JsonRpcNotification | _JsonRpcRequest) -> None:
+        if not self._process or not self._process.stdin:
+            raise RuntimeError("MCP stdio process not running")
+        data = json.dumps(msg).encode() + b"\n"
+        self._process.stdin.write(data)
+        await self._process.stdin.drain()
+
+    async def _rpc(self, method: str, params: dict[str, Any] | None = None) -> Any:
+        self._next_id += 1
+        rid = str(self._next_id)
+        payload: _JsonRpcRequest = {"jsonrpc": _JSONRPC, "id": rid, "method": method}
+        if params is not None:
+            payload["params"] = params
+        fut: asyncio.Future[Any] = self._loop.create_future()
+        self._pending[rid] = fut
+        await self._send(payload)
+        return await fut
+
+    async def _notify(self, method: str, params: dict[str, Any] | None = None) -> None:
+        payload: _JsonRpcNotification = {"jsonrpc": _JSONRPC, "method": method}
+        if params is not None:
+            payload["params"] = params
+        await self._send(payload)
+
+    async def _reader(self) -> None:
+        """Read stdout line-by-line and dispatch JSON-RPC messages."""
+        if not self._process or not self._process.stdout:
+            return
+        try:
+            async for raw_line in self._process.stdout:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    msg: dict[str, Any] = json.loads(line)
+                except json.JSONDecodeError:
+                    log.warning("MCP stdio: ignoring malformed line: %s", line)
+                    continue
+                msg_id = msg.get("id")
+                if msg_id is not None and str(msg_id) in self._pending:
+                    fut = self._pending.pop(str(msg_id))
+                    if "error" in msg:
+                        err = msg["error"]
+                        fut.set_exception(
+                            RuntimeError(
+                                f"MCP error {err.get('code')}: {err.get('message')}"
+                            )
+                        )
+                    else:
+                        fut.set_result(msg.get("result"))
+                elif msg.get("method") == "notifications/tools/list_changed":
+                    asyncio.create_task(self._refresh_tools())
+        except asyncio.CancelledError:
+            log.debug("MCP stdio reader cancelled")
+        except Exception:
+            log.error("MCP stdio reader failed", exc_info=True)
+        finally:
+            for fut in self._pending.values():
+                if not fut.done():
+                    fut.set_exception(RuntimeError("MCP stdio reader stopped"))
+
+    async def _initialize(self) -> None:
+        await self._rpc(
+            "initialize",
+            {
+                "protocolVersion": _PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {
+                    "name": self.client_name,
+                    "version": self.client_version,
+                },
+            },
+        )
+        await self._notify("notifications/initialized")
+
+    async def _refresh_tools(self) -> None:
+        result = await self._rpc("tools/list")
+        self._tools = _build_tools(result.get("tools", []), self._call)
+
+    async def _call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        result = await self._rpc("tools/call", {"name": name, "arguments": args})
+        return _extract_text_content(result)
+
+    async def cancel(self, request_id: str, reason: str | None = None) -> None:
+        """Send notifications/cancelled to cancel an in-flight request."""
+        params: dict[str, Any] = {"requestId": request_id}
+        if reason is not None:
+            params["reason"] = reason
+        await self._notify("notifications/cancelled", params)
