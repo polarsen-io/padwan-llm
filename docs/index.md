@@ -57,6 +57,27 @@ Or with uv:
 uv add padwan-llm
 ```
 
+## MCP (Model Context Protocol)
+
+Connect to MCP tool servers over streamable HTTP or stdio:
+
+```python
+from padwan_llm import McpStreamable, McpStdio
+
+# Streamable HTTP — remote MCP server
+async with McpStreamable(url="https://mcp.example.com/mcp") as mcp:
+    for tool in mcp.tools:
+        print(tool.name, tool.description)
+    result = await mcp.tools[0].handler({"query": "test"})
+
+# Stdio — local subprocess
+async with McpStdio(command="uvx", args=["my-mcp-server"]) as mcp:
+    tool = next(t for t in mcp.tools if t.name == "search")
+    result = await tool.handler({"query": "hello"})
+```
+
+Both transports implement the [MCP 2025-11-25 spec](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) with session management, SSE streaming, reconnectable listeners, and request cancellation via `cancel()`.
+
 ## CLI / TUI
 
 The interactive CLI/TUI is available as a separate package: `padwan-cli`.
