@@ -2,7 +2,13 @@
 #   filename:  tmp.u54s3cOgGh.yml
 #   timestamp: 2026-02-18T15:28:05+00:00
 
-from typing import Any, Literal, NotRequired, TypedDict
+import sys
+from typing import Any, Literal, NotRequired
+
+if sys.version_info >= (3, 14):
+    from typing import TypedDict
+else:
+    from typing_extensions import TypedDict
 
 
 class EmbeddingResponseData(TypedDict):

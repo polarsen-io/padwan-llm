@@ -67,6 +67,9 @@ async def test_stream_chat(model: str) -> None:
     "model",
     [
         pytest.param("gemini-2.5-flash", id="gemini", marks=skip_no_gemini),
+        pytest.param(
+            "gemini-3-flash-preview", id="gemini-thinking", marks=skip_no_gemini
+        ),
         pytest.param("gpt-4o-mini", id="openai", marks=skip_no_openai),
         pytest.param("mistral-small-latest", id="mistral", marks=skip_no_mistral),
         pytest.param("grok-4-1-fast-non-reasoning", id="grok", marks=skip_no_grok),
@@ -91,6 +94,9 @@ async def test_complete_chat_tool_call(model: str) -> None:
     "model",
     [
         pytest.param("gemini-2.5-flash", id="gemini", marks=skip_no_gemini),
+        pytest.param(
+            "gemini-3-flash-preview", id="gemini-thinking", marks=skip_no_gemini
+        ),
         pytest.param("gpt-4o-mini", id="openai", marks=skip_no_openai),
         pytest.param("mistral-small-latest", id="mistral", marks=skip_no_mistral),
         pytest.param("grok-4-1-fast-non-reasoning", id="grok", marks=skip_no_grok),

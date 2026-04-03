@@ -4,9 +4,10 @@ version = "0.5.1"
 authors = [
     { email = "julien.brayere@polarsen.io" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
     "niquests>=3.17.0",
+    "typing_extensions>=4.10; python_version < '3.14'",
 ]
 
 [project.scripts]
@@ -23,6 +24,7 @@ module-name = "padwan_llm"
 [dependency-groups]
 dev = [
     "google-genai>=1.0.0",
+    "mcp>=1.27.0",
     "openai>=1.0.0",
     "prek>=0.2.30",
     "pyright>=1.1.400",
