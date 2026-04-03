@@ -40,16 +40,17 @@ class GeminiToolMixin:
         result: list[ToolCall] = []
         for i, part in enumerate(parts):
             if fc := part.get("functionCall"):
-                result.append(
-                    ToolCall(
-                        id=f"call_{id_offset + i}",
-                        type="function",
-                        function=ToolCallFunction(
-                            name=fc["name"],
-                            arguments=json.dumps(fc.get("args", {})),
-                        ),
-                    )
+                tc = ToolCall(
+                    id=fc.get("id") or f"call_{id_offset + i}",
+                    type="function",
+                    function=ToolCallFunction(
+                        name=fc["name"],
+                        arguments=json.dumps(fc.get("args", {})),
+                    ),
                 )
+                if sig := part.get("thoughtSignature"):
+                    tc["thought_signature"] = sig
+                result.append(tc)
         return result
 
     @staticmethod
@@ -63,6 +64,8 @@ class GeminiToolMixin:
             response_data = json.loads(msg["content"])
         except (json.JSONDecodeError, TypeError):  # fmt: skip
             response_data = {"result": msg["content"]}
+        if not isinstance(response_data, dict):
+            response_data = {"result": response_data}
         return {
             "role": "user",
             "parts": [
@@ -92,12 +95,14 @@ class GeminiToolMixin:
                 parsed_args = json.loads(args)
             except (json.JSONDecodeError, TypeError):  # fmt: skip
                 parsed_args = {}
-            parts.append(
-                {
-                    "functionCall": {
-                        "name": tc["function"]["name"],
-                        "args": parsed_args,
-                    }
+            part: dict[str, typing.Any] = {
+                "functionCall": {
+                    "name": tc["function"]["name"],
+                    "args": parsed_args,
+                    "id": tc["id"],
                 }
-            )
+            }
+            if sig := tc.get("thought_signature"):
+                part["thoughtSignature"] = sig
+            parts.append(part)
         return {"role": "model", "parts": parts}

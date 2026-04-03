@@ -188,14 +188,15 @@ class _OpenAIBase(LLMClientBase[Retry], OpenAIToolMixin):
         )
         _check_resp_status(resp)
 
+        done = False
         async for raw_line in resp.iter_lines(decode_unicode=True):  # pyright: ignore[reportGeneralTypeIssues]
-            if not raw_line:
+            if not raw_line or done:
                 continue
-            line = raw_line.decode() if isinstance(raw_line, bytes) else raw_line
-            if line.startswith("data: "):
-                data_str = line[6:]
+            if raw_line.startswith("data: "):
+                data_str = raw_line[6:]
                 if data_str == "[DONE]":
-                    break
+                    done = True
+                    continue
                 try:
                     yield cast(
                         "CreateChatCompletionStreamResponse", json.loads(data_str)

@@ -35,6 +35,7 @@ class ToolCall(TypedDict):
     id: str
     type: Literal["function"]
     function: ToolCallFunction
+    thought_signature: NotRequired[str]
 
 
 class ToolDefinition(TypedDict):

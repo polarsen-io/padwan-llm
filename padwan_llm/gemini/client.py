@@ -75,6 +75,28 @@ def _parse_retry_delay(delay_str: str) -> int:
     return math.ceil(float(delay_str.rstrip("s")))
 
 
+def _raise_error_from_resp(
+    data: typing.Any,
+    resp: niquests.Response,
+    e: niquests.exceptions.HTTPError,
+) -> typing.Never:
+    """Raise the appropriate error given parsed response data."""
+    error = cast("GoogleRpcStatusDict", data.get("error", {}))
+    if resp.status_code == HTTPStatus.TOO_MANY_REQUESTS:
+        retry_delay: int | None = None
+        for detail in error.get("details") or []:
+            if detail.get("@type") == "type.googleapis.com/google.rpc.QuotaFailure":
+                raise QuotaExceededError(body=data)
+            if detail.get("@type") == "type.googleapis.com/google.rpc.RetryInfo":
+                retry_delay = _parse_retry_delay(detail["retryDelay"])
+        if retry_delay is None:
+            raise e
+        raise TooManyRequestsError(retry_delay=retry_delay, response=resp)
+    raise LLMError(
+        "gemini", f"{resp.status_code} {error.get('message', '')}", body=data
+    ) from e
+
+
 def _check_resp_status(resp: niquests.Response) -> niquests.Response:
     """Check HTTP status and raise appropriate errors without consuming the body."""
     try:
@@ -84,20 +106,21 @@ def _check_resp_status(resp: niquests.Response) -> niquests.Response:
             data = resp.json()
         except Exception:
             raise e
-        error = cast("GoogleRpcStatusDict", data.get("error", {}))
-        if resp.status_code == HTTPStatus.TOO_MANY_REQUESTS:
-            retry_delay: int | None = None
-            for detail in error.get("details") or []:
-                if detail.get("@type") == "type.googleapis.com/google.rpc.QuotaFailure":
-                    raise QuotaExceededError(body=data)
-                if detail.get("@type") == "type.googleapis.com/google.rpc.RetryInfo":
-                    retry_delay = _parse_retry_delay(detail["retryDelay"])
-            if retry_delay is None:
-                raise e
-            raise TooManyRequestsError(retry_delay=retry_delay, response=resp)
-        raise LLMError(
-            "gemini", f"{resp.status_code} {error.get('message', '')}", body=data
-        ) from e
+        _raise_error_from_resp(data, resp, e)
+
+
+async def _async_check_resp_status(
+    resp: niquests.AsyncResponse,
+) -> niquests.AsyncResponse:
+    """Check HTTP status for a streaming response, raising appropriate errors."""
+    try:
+        return resp.raise_for_status()
+    except niquests.exceptions.HTTPError as e:
+        try:
+            data = await resp.json()
+        except Exception:
+            raise e
+        _raise_error_from_resp(data, resp, e)
 
 
 def _check_resp(resp: niquests.Response) -> typing.Any:
@@ -357,7 +380,7 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
             json=payload,
             stream=True,
         )
-        _check_resp_status(resp)
+        await _async_check_resp_status(resp)
         resp.encoding = "utf-8"
 
         async for line in resp.iter_lines(decode_unicode=True):  # pyright: ignore[reportGeneralTypeIssues]
@@ -517,10 +540,12 @@ class GeminiChatStream(ChatStream, GeminiToolMixin):
         return GeminiToolMixin._extract_gemini_tool_calls(parts, id_offset)
 
     def _extract_text(self, chunk: dict) -> str | None:
-        """Extract text content from a Gemini stream response chunk."""
+        """Extract text content from a Gemini stream response chunk, skipping thought parts."""
         if candidates := chunk.get("candidates"):
             if content := candidates[0].get("content"):
                 for part in content.get("parts", []):
+                    if part.get("thought"):
+                        continue
                     if (text := part.get("text")) is not None:
                         return text
         return None
