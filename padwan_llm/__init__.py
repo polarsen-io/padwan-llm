@@ -1,7 +1,7 @@
 from importlib.metadata import version as _pkg_version
 
 from ._base import ChatStream, LLMClientBase
-from .mcp import McpStreamable, McpStdio, McpTool
+from .mcp import McpStreamable, McpStdio, McpTool, ProgressEvent
 from .client import LLMClient
 from .conversation import (
     AssistantToolMessage,
@@ -41,6 +41,7 @@ __all__ = (
     "McpStreamable",
     "McpStdio",
     "McpTool",
+    "ProgressEvent",
     "Message",
     "MistralClient",
     "MistralModel",

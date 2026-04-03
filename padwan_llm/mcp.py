@@ -16,12 +16,21 @@ from .models import ToolDefinition
 
 __version__ = _pkg_version("padwan-llm")
 
-__all__ = ("McpTool", "McpStreamable", "McpStdio")
+__all__ = ("McpTool", "McpStreamable", "McpStdio", "ProgressEvent")
 
 _JSONRPC = "2.0"
 _PROTOCOL_VERSION = "2025-11-25"
 _MAX_LISTEN_RETRIES = 5
 _DEFAULT_RETRY_MS = 3000
+
+
+class ProgressEvent(TypedDict):
+    """Progress notification from an MCP server."""
+
+    progressToken: str | int
+    progress: float
+    total: NotRequired[float]
+    message: NotRequired[str]
 
 
 class _JsonRpcNotification(TypedDict):
@@ -95,9 +104,11 @@ def _extract_text_content(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _mcp_headers(
-    accept: str = "application/json", session_id: str | None = None
+    accept: str = "application/json",
+    session_id: str | None = None,
+    token: str | None = None,
 ) -> dict[str, str]:
-    """Build MCP HTTP headers with optional session ID."""
+    """Build MCP HTTP headers with optional session ID and bearer token."""
     h = {
         "Content-Type": "application/json",
         "Accept": accept,
@@ -105,6 +116,8 @@ def _mcp_headers(
     }
     if session_id:
         h["MCP-Session-Id"] = session_id
+    if token:
+        h["Authorization"] = f"Bearer {token}"
     return h
 
 
@@ -128,6 +141,8 @@ class McpStreamable:
     """
 
     url: str
+    token: str | None = None
+    on_progress: Callable[[ProgressEvent], Any] | None = None
     client_name: str = "padwan-llm"
     client_version: str = __version__
     _tools: list[McpTool] = field(init=False, default_factory=list)
@@ -172,7 +187,11 @@ class McpStreamable:
         return self._tools
 
     def _headers(self, accept: str = "application/json") -> dict[str, str]:
-        return _mcp_headers(accept, self._session_id)
+        return _mcp_headers(accept, self._session_id, self.token)
+
+    def _dispatch_progress(self, params: dict[str, Any]) -> None:
+        if self.on_progress is not None:
+            self.on_progress(params)  # type: ignore[arg-type]
 
     async def _rpc(
         self,
@@ -195,6 +214,8 @@ class McpStreamable:
             json=payload,
             headers=self._headers(accept="application/json, text/event-stream"),
         )
+        if r.status_code == HTTPStatus.UNAUTHORIZED:
+            raise RuntimeError("MCP server requires authorization (HTTP 401)")
         if r.status_code == HTTPStatus.NOT_FOUND and self._session_id and _reinit:
             self._session_id = None
             await self._initialize()
@@ -231,8 +252,11 @@ class McpStreamable:
             if "result" in data or "error" in data:
                 _check_rpc_error(data)
                 return data.get("result")
-            if data.get("method") == "notifications/tools/list_changed":
+            method = data.get("method")
+            if method == "notifications/tools/list_changed":
                 await self._refresh_tools()
+            elif method == "notifications/progress" and data.get("params"):
+                self._dispatch_progress(data["params"])
         raise RuntimeError("SSE stream ended without a JSON-RPC response")
 
     async def _listen(self) -> None:
@@ -267,8 +291,11 @@ class McpStreamable:
                     except ValueError:
                         log.warning("MCP: ignoring malformed SSE event: %s", event.data)
                         continue
-                    if msg.get("method") == "notifications/tools/list_changed":
+                    method = msg.get("method")
+                    if method == "notifications/tools/list_changed":
                         await self._refresh_tools()
+                    elif method == "notifications/progress" and msg.get("params"):
+                        self._dispatch_progress(msg["params"])
                 retries += 1
                 log.debug(
                     "MCP GET stream ended, reconnecting (%d/%d)",
@@ -318,6 +345,10 @@ class McpStreamable:
         result = await self._rpc("tools/call", {"name": name, "arguments": args})
         return _extract_text_content(result)
 
+    async def ping(self) -> None:
+        """Send a ping request to verify the server is responsive."""
+        await self._rpc("ping")
+
     async def cancel(self, request_id: str, reason: str | None = None) -> None:
         """Send notifications/cancelled to cancel an in-flight request."""
         params: dict[str, Any] = {"requestId": request_id}
@@ -350,6 +381,7 @@ class McpStdio:
     args: list[str] = field(default_factory=list)
     env: dict[str, str] | None = None
     cwd: str | None = None
+    on_progress: Callable[[ProgressEvent], Any] | None = None
     client_name: str = "padwan-llm"
     client_version: str = __version__
 
@@ -453,8 +485,16 @@ class McpStdio:
                         )
                     else:
                         fut.set_result(msg.get("result"))
-                elif msg.get("method") == "notifications/tools/list_changed":
-                    asyncio.create_task(self._refresh_tools())
+                else:
+                    method = msg.get("method")
+                    if method == "notifications/tools/list_changed":
+                        asyncio.create_task(self._refresh_tools())
+                    elif (
+                        method == "notifications/progress"
+                        and msg.get("params")
+                        and self.on_progress is not None
+                    ):
+                        self.on_progress(msg["params"])  # type: ignore[arg-type]
         except asyncio.CancelledError:
             log.debug("MCP stdio reader cancelled")
         except Exception:
@@ -485,6 +525,10 @@ class McpStdio:
     async def _call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         result = await self._rpc("tools/call", {"name": name, "arguments": args})
         return _extract_text_content(result)
+
+    async def ping(self) -> None:
+        """Send a ping request to verify the server is responsive."""
+        await self._rpc("ping")
 
     async def cancel(self, request_id: str, reason: str | None = None) -> None:
         """Send notifications/cancelled to cancel an in-flight request."""

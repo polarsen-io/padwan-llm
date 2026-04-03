@@ -64,8 +64,8 @@ Connect to MCP tool servers over streamable HTTP or stdio:
 ```python
 from padwan_llm import McpStreamable, McpStdio
 
-# Streamable HTTP — remote MCP server
-async with McpStreamable(url="https://mcp.example.com/mcp") as mcp:
+# Streamable HTTP — remote MCP server (with optional bearer token)
+async with McpStreamable(url="https://mcp.example.com/mcp", token="sk-...") as mcp:
     for tool in mcp.tools:
         print(tool.name, tool.description)
     result = await mcp.tools[0].handler({"query": "test"})
@@ -76,7 +76,19 @@ async with McpStdio(command="uvx", args=["my-mcp-server"]) as mcp:
     result = await tool.handler({"query": "hello"})
 ```
 
-Both transports implement the [MCP 2025-11-25 spec](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) with session management, SSE streaming, reconnectable listeners, and request cancellation via `cancel()`.
+Both transports implement the [MCP 2025-11-25 spec](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports):
+
+| Feature | `McpStreamable` | `McpStdio` |
+|---------|-----------------|------------|
+| Tool discovery | ✅ | ✅ |
+| Tool calls | ✅ | ✅ |
+| Session management | ✅ | — |
+| SSE streaming | ✅ | — |
+| Reconnectable listener | ✅ (`Last-Event-ID`) | — |
+| Bearer token auth | ✅ | — |
+| Progress notifications | ✅ (`on_progress`) | ✅ (`on_progress`) |
+| Ping | ✅ | ✅ |
+| Request cancellation | ✅ (`cancel()`) | ✅ (`cancel()`) |
 
 ## CLI / TUI
 

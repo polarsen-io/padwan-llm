@@ -360,6 +360,44 @@ class TestMcpStreamable:
             assert headers["MCP-Session-Id"] == "sess-x"
             assert headers["MCP-Protocol-Version"] == "2025-11-25"
 
+    @pytest.mark.parametrize(
+        "token, has_auth",
+        [
+            pytest.param("sk-abc123", True, id="with-token"),
+            pytest.param(None, False, id="without-token"),
+        ],
+    )
+    async def test_bearer_token(self, mock_http, token, has_auth):
+        self._setup_post_responses(
+            mock_http,
+            _make_response(_INIT_RESULT),
+            _make_response({}),
+            _make_response(_TOOLS_RESULT),
+        )
+        client = McpStreamable(url="https://example.com/mcp", token=token)
+        client._http = mock_http
+        async with client:
+            headers = client._headers()
+            if has_auth:
+                assert headers["Authorization"] == "Bearer sk-abc123"
+            else:
+                assert "Authorization" not in headers
+
+    async def test_401_raises(self, mock_http):
+        unauthorized = _make_response({}, status=HTTPStatus.UNAUTHORIZED)
+        self._setup_post_responses(
+            mock_http,
+            _make_response(_INIT_RESULT),
+            _make_response({}),
+            _make_response(_TOOLS_RESULT),
+            unauthorized,
+        )
+        client = McpStreamable(url="https://example.com/mcp")
+        client._http = mock_http
+        async with client:
+            with pytest.raises(RuntimeError, match="requires authorization"):
+                await client._rpc("tools/list")
+
     async def test_listen_tracks_last_event_id(self, mock_http):
         """_listen tracks event IDs and sends Last-Event-ID on reconnect."""
         sse_event = _make_sse_event('{"method":"ping"}', event_id="evt-1")
@@ -453,6 +491,24 @@ class TestMcpStreamable:
         assert body["method"] == "notifications/cancelled"
         assert body["params"] == expected_params
         assert "id" not in body  # notification, not request
+
+    async def test_ping(self, mock_http):
+        self._setup_post_responses(
+            mock_http,
+            _make_response(_INIT_RESULT),
+            _make_response({}),
+            _make_response(_TOOLS_RESULT),
+            _make_response({}),  # ping response
+        )
+        client = McpStreamable(url="https://example.com/mcp")
+        client._http = mock_http
+        async with client:
+            await client.ping()
+        ping_call = mock_http.post.call_args_list[3]
+        body = ping_call.kwargs.get(
+            "json", ping_call[1].get("json") if len(ping_call) > 1 else None
+        )
+        assert body["method"] == "ping"
 
 
 # McpStdio
