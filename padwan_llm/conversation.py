@@ -1,5 +1,6 @@
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Literal, TypedDict
+from typing import Any, Literal, Self, TypedDict, cast
 
 from .models import ChatResponse, ToolCall, UsageToken
 
@@ -119,3 +120,30 @@ class ConversationState:
             self.messages = [Message(role="system", content=self.system)]
         else:
             self.messages = []
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return a serializable snapshot of the full conversation state.
+
+        Includes the system prompt, message history, and accumulated token
+        usage. Use with `from_snapshot` to restore. JSON-serializable as long
+        as message contents are.
+        """
+        return {
+            "system": self.system,
+            "messages": list(self.messages),
+            "total_usage": dict(self.total_usage),
+        }
+
+    @classmethod
+    def from_snapshot(cls, data: Mapping[str, Any]) -> Self:
+        """Rebuild a ConversationState from a `snapshot()` dict.
+
+        Restores the system prompt, message list (kept verbatim — the snapshot
+        already contains the system message at index 0 if one was set), and
+        accumulated total usage. `last_usage` is not persisted and stays unset.
+        """
+        state = cls(system=data.get("system"))
+        state.messages = list(data.get("messages", []))
+        if usage := data.get("total_usage"):
+            state.total_usage = cast(UsageToken, dict(usage))
+        return state

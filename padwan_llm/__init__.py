@@ -1,6 +1,7 @@
 from importlib.metadata import version as _pkg_version
 
 from ._base import ChatStream, LLMClientBase
+from .agent import AgentSession, ConversationStore
 from .mcp import McpStreamable, McpStdio, McpTool, ProgressEvent
 from .client import LLMClient
 from .conversation import (
@@ -25,11 +26,13 @@ from .models import (
 from .openai import OPENAI_MODELS, OpenAIClient, OpenAIModel, is_openai_model
 
 __all__ = (
+    "AgentSession",
     "AssistantToolMessage",
     "ChatMessage",
     "ChatResponse",
     "ChatStream",
     "ConversationState",
+    "ConversationStore",
     "FinishReason",
     "GeminiClient",
     "GeminiModel",
