@@ -190,6 +190,14 @@ class _OpenAIBase(LLMClientBase[Retry], OpenAIToolMixin):
         )
         _check_resp_status(resp)
 
+        # SSE responses are UTF-8 per the W3C spec, but some providers
+        # (xAI/Grok) omit the charset from Content-Type. niquests'
+        # iter_lines(decode_unicode=True) falls back to yielding raw
+        # bytes when resp.encoding is None — force UTF-8 so the loop
+        # below always sees str.
+        if resp.encoding is None:
+            resp.encoding = "utf-8"
+
         done = False
         async for raw_line in resp.iter_lines(decode_unicode=True):  # pyright: ignore[reportGeneralTypeIssues]
             if not raw_line or done:
