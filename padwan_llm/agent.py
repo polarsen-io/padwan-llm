@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, Self
 
 from ._base import LLMClientBase
+from .client import LLMClient
 from .conversation import (
     AssistantToolMessage,
     ChatMessage,
@@ -107,6 +108,13 @@ class AgentSession:
     def clear(self) -> None:
         self._state.clear()
 
+    async def __aenter__(self) -> Self:
+        await self.client.__aenter__()
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        await self.client.__aexit__(*args)
+
     def save(self) -> None:
         """Persist the current state via the configured store, if any."""
         if self.store is None:
@@ -117,22 +125,30 @@ class AgentSession:
     def load(
         cls,
         *,
-        client: LLMClientBase,
         store: ConversationStore,
         session_id: str,
+        model: str | None = None,
+        client: LLMClientBase | None = None,
         **kwargs: Any,
     ) -> Self:
         """Construct an AgentSession with state restored from `store`.
 
-        Convenience constructor that replaces the two-step
-        `s = AgentSession(...); s.load()` pattern with a single call. The
-        `system` prompt is taken from the persisted snapshot, so any
-        `system` value passed in `kwargs` is silently ignored.
+        Pass `model` to have an `LLMClient` created automatically (intended
+        for use as an async context manager). Pass `client` directly when you
+        need a pre-configured or fake client (e.g. in tests). Exactly one of
+        the two must be provided.
+
+        The `system` prompt is taken from the persisted snapshot; any `system`
+        value in `kwargs` is ignored.
         """
+        if model is None and client is None:
+            raise ValueError("Either model= or client= must be provided")
+        _client = LLMClient(model=model) if model is not None else client
+        assert _client is not None
         snapshot = store.load(session_id)
         kwargs.pop("system", None)
         instance = cls(
-            client=client,
+            client=_client,
             store=store,
             session_id=session_id,
             system=snapshot.get("system"),

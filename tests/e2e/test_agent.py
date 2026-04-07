@@ -46,12 +46,11 @@ async def test_agent_session_tool_round_trip(model: str) -> None:
     call_log: list[dict[str, Any]] = []
     weather = _make_weather_tool(call_log)
 
-    async with LLMClient(model=model) as client:
-        session = AgentSession(
-            client=client,
-            mcp_tools=[weather],
-            system="Use the provided tools to answer questions about the weather.",
-        )
+    async with AgentSession(
+        client=LLMClient(model=model),
+        mcp_tools=[weather],
+        system="Use the provided tools to answer questions about the weather.",
+    ) as session:
         text = await session.send("What is the weather in Paris right now?")
 
     assert call_log, "the model never invoked the weather tool"
@@ -73,8 +72,7 @@ async def test_agent_session_tool_round_trip(model: str) -> None:
 async def test_agent_session_streams_text(model: str) -> None:
     """End-to-end: AgentSession.stream yields chunks for a plain text answer."""
     chunks: list[str] = []
-    async with LLMClient(model=model) as client:
-        session = AgentSession(client=client)
+    async with AgentSession(client=LLMClient(model=model)) as session:
         async for chunk in session.stream("Reply with only the word 'hello'."):
             chunks.append(chunk)
 
