@@ -7,7 +7,7 @@ from functools import partial
 import json
 import math
 import os
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from http import HTTPStatus
 from typing import TYPE_CHECKING, ClassVar, Literal, cast, get_args
 
@@ -19,8 +19,10 @@ from .batch import BatchJob, BatchRequest
 from .models import (
     BatchJobResponse,
     CompletionBody,
+    GenerationConfig,
     ListBatchesResponse,
     StreamBody,
+    ThinkingConfig,
 )
 from .tools import GeminiToolMixin
 from .._base import ChatStream, LLMClientBase, Provider
@@ -178,6 +180,8 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
     provider: ClassVar[Provider] = "gemini"
     model: str | None = "gemini-2.5-flash"
     base_url: str = GEMINI_ENDPOINT
+    on_thought: Callable[[str], None] | None = None
+    thinking_config: ThinkingConfig | None = None
     _retry: GeminiRetry = field(
         default_factory=partial(
             GeminiRetry,
@@ -367,9 +371,12 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
             raise LLMError(self.provider, "No model specified for streaming")
         _temperature = body.get("temperature", self.temperature)
 
+        gen_config: GenerationConfig = {"temperature": _temperature}
+        if self.thinking_config:
+            gen_config["thinkingConfig"] = self.thinking_config
         payload: dict = {
             "contents": body["contents"],
-            "generationConfig": {"temperature": _temperature},
+            "generationConfig": gen_config,
         }
         if system := body.get("systemInstruction"):
             payload["systemInstruction"] = system
@@ -451,7 +458,7 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
         Handles Gemini-specific body building and response extraction.
         Usage and tool_calls are available on the returned stream object after iteration.
         """
-        return GeminiChatStream(self, messages, tools)
+        return GeminiChatStream(self, messages, tools, on_thought=self.on_thought)
 
 
 class GeminiChatStream(ChatStream, GeminiToolMixin):
@@ -462,12 +469,15 @@ class GeminiChatStream(ChatStream, GeminiToolMixin):
         client: GeminiClient,
         messages: Sequence[ChatMessage],
         tools: Sequence[ToolDefinition] | None = None,
+        on_thought: Callable[[str], None] | None = None,
     ) -> None:
         self._client = client
         self._messages = messages
         self._tools = tools
+        self._on_thought = on_thought
         self.usage: UsageToken | None = None
         self.tool_calls: list[ToolCall] | None = None
+        self.thoughts: str | None = None
 
     async def __aiter__(self) -> AsyncIterator[str]:
         body = self.build_body(self._messages, self._client.temperature, self._tools)
@@ -542,11 +552,19 @@ class GeminiChatStream(ChatStream, GeminiToolMixin):
         return GeminiToolMixin._extract_gemini_tool_calls(parts, id_offset)
 
     def _extract_text(self, chunk: dict) -> str | None:
-        """Extract text content from a Gemini stream response chunk, skipping thought parts."""
+        """Extract text content from a Gemini stream response chunk.
+
+        Thought parts are accumulated into `self.thoughts` and forwarded to
+        `on_thought` if set; they are not yielded as regular text chunks.
+        """
         if candidates := chunk.get("candidates"):
             if content := candidates[0].get("content"):
                 for part in content.get("parts", []):
                     if part.get("thought"):
+                        if thought_text := part.get("text"):
+                            self.thoughts = (self.thoughts or "") + thought_text
+                            if self._on_thought:
+                                self._on_thought(thought_text)
                         continue
                     if (text := part.get("text")) is not None:
                         return text
