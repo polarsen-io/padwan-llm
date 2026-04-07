@@ -262,6 +262,33 @@ async def test_long_tool_result_truncated_in_context_only() -> None:
     assert sent["content"].endswith("[truncated]")  # type: ignore[typeddict-item]
 
 
+async def test_max_tool_result_chars_none_disables_truncation() -> None:
+    huge = "x" * 50_000
+
+    async def big(_args: dict[str, Any]) -> str:
+        return huge
+
+    tool = McpTool(
+        name="big",
+        description="",
+        input_schema={"type": "object", "properties": {}},
+        handler=big,
+    )
+    session, client = make_session(
+        [
+            FakeChatStream(chunks=[], tool_calls=[make_tool_call("big", {})]),
+            FakeChatStream(chunks=["done"]),
+        ],
+        mcp_tools=[tool],
+        max_tool_result_chars=None,
+    )
+    await session.send("go")
+
+    second_messages = client.calls[1][0]
+    sent = next(m for m in second_messages if m.get("role") == "tool")
+    assert len(sent["content"]) == 50_000  # type: ignore[typeddict-item]
+
+
 # Hooks
 
 

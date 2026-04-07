@@ -1,7 +1,6 @@
 import asyncio
 import inspect
 import json
-import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
@@ -14,12 +13,11 @@ from .conversation import (
     ConversationState,
     ToolResultMessage,
 )
+from .logs import log
 from .mcp import McpTool
 from .models import ToolCall, ToolDefinition, UsageToken
 
 __all__ = ("AgentSession", "ConversationStore")
-
-logger = logging.getLogger(__name__)
 
 
 type ToolErrorHandler = Callable[[McpTool, dict[str, Any], Exception], str]
@@ -74,7 +72,7 @@ class AgentSession:
     system: str | None = None
     mcp_tools: Sequence[McpTool] = field(default_factory=list)
     max_tool_rounds: int | None = 30
-    max_tool_result_chars: int = 8_000
+    max_tool_result_chars: int | None = 8_000
     execution: Literal["sequential", "parallel"] = "sequential"
     on_tool: Callable[[str, dict[str, Any]], None] | None = None
     on_tool_error: ToolErrorHandler | None = None
@@ -130,9 +128,12 @@ class AgentSession:
         """Return messages with tool results truncated to `max_tool_result_chars`.
 
         Truncation only affects the copy sent to the LLM; the full content is
-        retained in `self.messages`.
+        retained in `self.messages`. Pass `max_tool_result_chars=None` to
+        disable truncation entirely.
         """
         limit = self.max_tool_result_chars
+        if limit is None:
+            return list(self._state.messages)
         out: list[ChatMessage] = []
         for msg in self._state.messages:
             if msg.get("role") == "tool":
@@ -172,7 +173,7 @@ class AgentSession:
             if inspect.isawaitable(result):
                 result = await result
         except Exception as exc:
-            logger.warning("Tool %r raised: %s", name, exc, exc_info=True)
+            log.warning("Tool %r raised: %s", name, exc, exc_info=True)
             if self.on_tool_error is not None:
                 return self.on_tool_error(tool, args, exc)
             return json.dumps({"error": str(exc)})
@@ -200,7 +201,7 @@ class AgentSession:
                     else dict(raw_args)
                 )
             except json.JSONDecodeError as exc:
-                logger.warning("Bad tool args for %r: %s", name, exc)
+                log.warning("Bad tool args for %r: %s", name, exc)
                 args = {}
             if self.on_tool is not None:
                 self.on_tool(name, args)
@@ -272,7 +273,7 @@ class AgentSession:
             f"(reached tool call limit of {self.max_tool_rounds} rounds "
             "without a final answer)"
         )
-        logger.warning(msg)
+        log.warning(msg)
         yield msg
 
     async def send(self, user_input: str) -> str:
