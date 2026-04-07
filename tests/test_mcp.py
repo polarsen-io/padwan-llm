@@ -492,6 +492,40 @@ class TestMcpStreamable:
         assert body["params"] == expected_params
         assert "id" not in body  # notification, not request
 
+    async def test_refresh_tools_mutates_in_place(self, mock_http):
+        """External references to mcp.tools must survive a refresh.
+
+        Regression: `self._tools = _build_tools(...)` broke references held
+        by callers (e.g. `AgentSession(mcp_tools=mcp.tools)`) because a
+        fresh list object replaced the one they were pointing at.
+        """
+        new_tools_result = _jsonrpc_result(
+            {
+                "tools": [
+                    {
+                        "name": "new_tool",
+                        "description": "Added after a list_changed notification",
+                        "inputSchema": {"type": "object", "properties": {}},
+                    },
+                ],
+            }
+        )
+        self._setup_post_responses(
+            mock_http,
+            _make_response(_INIT_RESULT),
+            _make_response({}),
+            _make_response(_TOOLS_RESULT),  # initial: `search`
+            _make_response(new_tools_result),  # refresh: `new_tool`
+        )
+        client = McpStreamable(url="https://example.com/mcp")
+        client._http = mock_http
+        async with client:
+            tools_ref = client.tools  # reference captured before refresh
+            assert [t.name for t in tools_ref] == ["search"]
+            await client._refresh_tools()
+            assert tools_ref is client.tools  # same list object
+            assert [t.name for t in tools_ref] == ["new_tool"]
+
     async def test_ping(self, mock_http):
         self._setup_post_responses(
             mock_http,
@@ -530,6 +564,36 @@ def add(a: int, b: int) -> int:
     \"\"\"Add two numbers.\"\"\"
     return a + b
 
+@server.tool()
+async def slow(seconds: float) -> str:
+    \"\"\"Sleep for `seconds` seconds, then return.\"\"\"
+    await asyncio.sleep(seconds)
+    return "woke up"
+
+if __name__ == "__main__":
+    server.run(transport="stdio")
+"""
+
+
+# A stdio server that also writes a lot to stderr — used to verify the
+# drain task keeps the pipe clear. Without the drain, a server writing
+# more than ~64KB to stderr before responding would block forever.
+_STDIO_NOISY_SERVER_SCRIPT = """\
+import sys
+from mcp.server.fastmcp import FastMCP
+
+# Write enough bytes to overflow the default 64KB stderr pipe buffer
+# before the MCP initialization handshake runs.
+sys.stderr.write("x" * 200_000 + "\\n")
+sys.stderr.flush()
+
+server = FastMCP("noisy-stdio")
+
+@server.tool()
+def ping() -> str:
+    \"\"\"Simple ping tool.\"\"\"
+    return "pong"
+
 if __name__ == "__main__":
     server.run(transport="stdio")
 """
@@ -541,9 +605,9 @@ class TestMcpStdio:
             command=sys.executable,
             args=["-c", _STDIO_SERVER_SCRIPT],
         ) as client:
-            assert len(client.tools) == 2
+            assert len(client.tools) == 3
             names = {t.name for t in client.tools}
-            assert names == {"greet", "add"}
+            assert names == {"greet", "add", "slow"}
 
     async def test_tool_to_tool_def(self):
         async with McpStdio(
@@ -572,3 +636,76 @@ class TestMcpStdio:
             add = next(t for t in client.tools if t.name == "add")
             result = await add.handler({"a": 3, "b": 4})
             assert any("7" in c["text"] for c in result["content"])
+
+    async def test_cancelled_rpc_does_not_kill_reader(self):
+        """Cancelling one in-flight RPC must not wedge the whole session.
+
+        Regression: the cancelled future used to stay in `_pending`; when
+        the late response arrived, the reader's `fut.set_result()` raised
+        `InvalidStateError` and crashed the reader task, so subsequent
+        tool calls would hang forever.
+        """
+        async with McpStdio(
+            command=sys.executable,
+            args=["-c", _STDIO_SERVER_SCRIPT],
+        ) as client:
+            slow = next(t for t in client.tools if t.name == "slow")
+            greet = next(t for t in client.tools if t.name == "greet")
+
+            # Kick off a slow call and cancel it after a short delay.
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(slow.handler({"seconds": 5}), timeout=0.2)
+
+            # Give the late response a chance to arrive on the reader.
+            await asyncio.sleep(0.1)
+
+            # Reader must still be alive and able to service new calls.
+            assert client._reader_task is not None
+            assert not client._reader_task.done()
+            result = await greet.handler({"name": "alive"})
+            assert any("Hello, alive!" in c["text"] for c in result["content"])
+
+    async def test_noisy_stderr_does_not_block_init(self):
+        """A server that floods stderr must not deadlock on the pipe buffer.
+
+        Regression: stderr was piped but never read, so any server writing
+        more than ~64KB to stderr would block at its next write, wedging
+        the MCP init handshake forever.
+        """
+        async with McpStdio(
+            command=sys.executable,
+            args=["-c", _STDIO_NOISY_SERVER_SCRIPT],
+        ) as client:
+            assert any(t.name == "ping" for t in client.tools)
+            ping_tool = next(t for t in client.tools if t.name == "ping")
+            result = await ping_tool.handler({})
+            assert any("pong" in c["text"] for c in result["content"])
+
+    async def test_refresh_tools_mutates_in_place(self):
+        """Stdio transport also refreshes its tool list in place."""
+        async with McpStdio(
+            command=sys.executable,
+            args=["-c", _STDIO_SERVER_SCRIPT],
+        ) as client:
+            tools_ref = client.tools  # reference captured before refresh
+            original_names = {t.name for t in tools_ref}
+
+            # Swap in a fake result to force a difference we can observe.
+            from padwan_llm.mcp import _build_tools
+
+            async def fake_refresh() -> None:
+                client._tools[:] = _build_tools(
+                    [
+                        {
+                            "name": "refreshed_tool",
+                            "description": "Added after refresh",
+                            "inputSchema": {"type": "object", "properties": {}},
+                        },
+                    ],
+                    client._call,
+                )
+
+            await fake_refresh()
+            assert tools_ref is client.tools  # same list object
+            assert [t.name for t in tools_ref] == ["refreshed_tool"]
+            assert original_names != {"refreshed_tool"}

@@ -365,18 +365,22 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
             stats=metadata.get("batchStats"),
         )
 
+    def _build_gen_config(self, temperature: float) -> GenerationConfig:
+        """Assemble `generationConfig`, merging `thinking_config` if set."""
+        gen_config: GenerationConfig = {"temperature": temperature}
+        if self.thinking_config:
+            gen_config["thinkingConfig"] = self.thinking_config
+        return gen_config
+
     async def stream(self, body: StreamBody) -> AsyncIterator[dict]:
         """Stream chat completions from Gemini, yielding response chunks as they arrive via SSE."""
         if not self.model:
             raise LLMError(self.provider, "No model specified for streaming")
         _temperature = body.get("temperature", self.temperature)
 
-        gen_config: GenerationConfig = {"temperature": _temperature}
-        if self.thinking_config:
-            gen_config["thinkingConfig"] = self.thinking_config
         payload: dict = {
             "contents": body["contents"],
-            "generationConfig": gen_config,
+            "generationConfig": self._build_gen_config(_temperature),
         }
         if system := body.get("systemInstruction"):
             payload["systemInstruction"] = system
@@ -411,7 +415,7 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
         stream_body = GeminiChatStream.build_body(messages, self.temperature, tools)
         body: CompletionBody = {
             "contents": stream_body["contents"],
-            "generationConfig": {"temperature": self.temperature},
+            "generationConfig": self._build_gen_config(self.temperature),
         }
         if system := stream_body.get("systemInstruction"):
             body["systemInstruction"] = system

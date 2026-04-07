@@ -120,3 +120,20 @@ async with LLMClient("gpt-4o") as client:
     state.add_assistant_message(response["content"])
     state.accumulate_usage(usage)
 ```
+
+## Agents with tools
+
+When the model needs to call tools, use `AgentSession` — it handles the full loop of dispatching tool calls, feeding results back, and continuing until the model produces a plain text answer:
+
+```python
+from padwan_llm import AgentSession, LLMClient, McpStdio
+
+async with AgentSession(
+    client=LLMClient("gpt-4o"),
+    mcp_tools=[McpStdio(command="uvx", args=["weather-mcp"])],
+    system="You have access to weather tools.",
+) as session:
+    text = await session.send("What's the weather in Paris?")
+```
+
+See the [Agents page](agents.md) for the full API: approval hooks, parallel execution, snapshot persistence, and error handling.

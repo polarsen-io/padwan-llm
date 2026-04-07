@@ -21,6 +21,7 @@ nav = [
     { "Grok" = "clients/grok.md" },
   ] },
   { "MCP" = "mcp.md" },
+  { "Agents" = "agents.md" },
 ]
 
 [project.theme]

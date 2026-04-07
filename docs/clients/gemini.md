@@ -40,6 +40,34 @@ async with GeminiClient() as client:
         print(chunk, end="")
 ```
 
+## Thinking models
+
+Gemini's reasoning models (e.g. `gemini-2.5-flash`, `gemini-2.5-pro`) can emit internal thought tokens alongside the final answer. Configure them via two fields on `GeminiClient`:
+
+- `thinking_config: ThinkingConfig | None` — merged into every `generationConfig`. Set `thinkingBudget` to allocate tokens for reasoning and `includeThoughts=True` to have the thought parts streamed back.
+- `on_thought: Callable[[str], None] | None` — called with each thought text chunk as it arrives. Thought chunks are **not** yielded as part of the normal text stream; this callback is the only way to see them.
+
+```python
+from padwan_llm import GeminiClient
+
+thoughts: list[str] = []
+
+async with GeminiClient(
+    model="gemini-2.5-flash",
+    on_thought=thoughts.append,
+    thinking_config={"thinkingBudget": 2048, "includeThoughts": True},
+) as client:
+    stream = client.stream_chat([
+        {"role": "user", "content": "What is 7 * 8? Think step by step."}
+    ])
+    async for chunk in stream:
+        print(chunk, end="")
+
+print("\n\nReasoning:", "".join(thoughts))
+```
+
+Without `includeThoughts=True`, the model may still think internally (consuming the budget) but won't emit the thoughts — the callback will never fire. Without a non-zero `thinkingBudget`, the model won't think at all.
+
 ## Batch Processing
 
 Gemini supports batch processing for large-scale requests via methods on `GeminiClient`.

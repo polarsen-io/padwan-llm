@@ -229,6 +229,59 @@ class TestGeminiChatStream:
         assert self.stream._extract_usage(chunk) == expected
 
 
+class TestGenConfig:
+    """Tests for `GeminiClient._build_gen_config` and its usage across APIs."""
+
+    def test_without_thinking(self):
+        client = GeminiClient(api_key="test")
+        assert client._build_gen_config(0.7) == {"temperature": 0.7}
+
+    def test_with_thinking(self):
+        client = GeminiClient(
+            api_key="test",
+            thinking_config={"thinkingBudget": 1024, "includeThoughts": True},
+        )
+        assert client._build_gen_config(0.3) == {
+            "temperature": 0.3,
+            "thinkingConfig": {"thinkingBudget": 1024, "includeThoughts": True},
+        }
+
+    async def test_complete_chat_applies_thinking_config(self):
+        """Regression: `complete_chat` used to hard-code generationConfig
+        and dropped any `thinking_config` set on the client."""
+        client = GeminiClient(
+            api_key="test",
+            thinking_config={"thinkingBudget": 2048, "includeThoughts": True},
+        )
+
+        recorded: dict[str, object] = {}
+
+        async def fake_complete(body, model=None):
+            recorded["body"] = body
+            return (
+                {
+                    "candidates": [
+                        {
+                            "content": {"parts": [{"text": "ok"}]},
+                            "finishReason": "STOP",
+                        }
+                    ]
+                },
+                {"total": 0, "input": 0, "output": 0},
+            )
+
+        client.complete = fake_complete  # type: ignore[method-assign]
+        await client.complete_chat([{"role": "user", "content": "hi"}])
+
+        body = recorded["body"]
+        assert isinstance(body, dict)
+        assert body["generationConfig"]["temperature"] == 0.2
+        assert body["generationConfig"]["thinkingConfig"] == {
+            "thinkingBudget": 2048,
+            "includeThoughts": True,
+        }
+
+
 # Batch
 
 

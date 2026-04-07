@@ -5,7 +5,7 @@
 <h1 align="center">Padwan LLM</h1>
 
 Lightweight, unified async client for OpenAI, Gemini, Mistral, Grok, and any OpenAI-compatible API.
-Single dependency ([niquests](https://github.com/jawah/niquests)), automatic HTTP/2 and HTTP/3 negotiation.
+Single runtime dependency ([niquests](https://github.com/jawah/niquests)), automatic HTTP/2 and HTTP/3 negotiation.
 
 For the full interactive CLI/TUI, use the separate [`padwan-cli`](https://github.com/polarsen-io/padwan-cli) package.
 
@@ -19,31 +19,103 @@ pip install padwan-llm
 
 ## Library Usage
 
+### One-shot chat
+
 ```python
-from padwan_llm import LLMClient, ConversationState
+from padwan_llm import LLMClient
 
 async with LLMClient(model="gpt-4o") as client:
-    response, usage = await client.complete({
-        "messages": [{"role": "user", "content": "Hello!"}]
-    })
+    response, usage = await client.complete_chat(
+        [{"role": "user", "content": "Hello!"}]
+    )
+    print(response["content"])
 ```
 
-### Streaming with ConversationState
+### Streaming with `ConversationState`
 
 ```python
 from padwan_llm import LLMClient, ConversationState
 
-state = ConversationState(system="You are a concise assistant, helping me in my daily tasks.")
+state = ConversationState(system="You are a concise assistant.")
 
 async with LLMClient(model="gpt-4o") as client:
-    state.add_user_message("What's python?")
+    state.add_user_message("What's Python?")
 
-    chat_stream = client.stream_chat(state.messages)
-    async for text in chat_stream:
+    stream = client.stream_chat(state.messages)
+    chunks: list[str] = []
+    async for text in stream:
         print(text, end="", flush=True)
+        chunks.append(text)
 
-    if chat_stream.usage:
-        state.accumulate_usage(chat_stream.usage)
+    state.add_assistant_message("".join(chunks))
+    if stream.usage:
+        state.accumulate_usage(stream.usage)
+```
+
+### Agentic loop with `AgentSession`
+
+`AgentSession` drives a multi-turn conversation that can dispatch tool calls on each
+round, feed the results back, and repeat until the model returns a plain text answer.
+The `mcp_tools` list accepts both individual `McpTool` instances and whole
+`McpTransport` servers — transports are entered as part of the session lifecycle:
+
+```python
+from padwan_llm import AgentSession, LLMClient, McpStdio
+
+async with AgentSession(
+    client=LLMClient(model="gpt-4o"),
+    mcp_tools=[McpStdio(command="uvx", args=["my-mcp-server"])],
+    system="You have access to tools. Use them when helpful.",
+) as session:
+    async for chunk in session.stream("What's the weather in Paris?"):
+        print(chunk, end="", flush=True)
+
+    # Or collect the full response in one call:
+    text = await session.send("And in London?")
+```
+
+`AgentSession` supports sequential or parallel tool execution, approval hooks,
+per-tool error handlers, and optional snapshot persistence via a
+`ConversationStore` protocol — see [docs/agents.md](docs/agents.md).
+
+### MCP (Model Context Protocol)
+
+Both streamable-HTTP and stdio MCP transports are built in:
+
+```python
+from padwan_llm import McpStreamable, McpStdio
+
+# Remote MCP server over HTTP (with optional bearer token)
+async with McpStreamable(url="https://mcp.example.com/mcp", token="sk-...") as mcp:
+    for tool in mcp.tools:
+        print(tool.name, tool.description)
+
+# Local subprocess
+async with McpStdio(command="uvx", args=["my-mcp-server"]) as mcp:
+    result = await mcp.tools[0].handler({"query": "hello"})
+```
+
+See [docs/mcp.md](docs/mcp.md) for the full feature matrix and architecture.
+
+### Gemini thinking models
+
+Gemini's reasoning models can stream their internal thought tokens separately from
+the final answer. Wire an `on_thought` callback to receive them:
+
+```python
+from padwan_llm import GeminiClient
+
+thoughts: list[str] = []
+async with GeminiClient(
+    model="gemini-2.5-flash",
+    on_thought=thoughts.append,
+    thinking_config={"thinkingBudget": 2048, "includeThoughts": True},
+) as client:
+    stream = client.stream_chat([{"role": "user", "content": "What is 7 * 8?"}])
+    async for chunk in stream:
+        print(chunk, end="")
+
+print("\n---\nReasoning:", "".join(thoughts))
 ```
 
 ## One-Shot Command
@@ -61,7 +133,7 @@ uvx padwan-llm "Hello!" -m gpt-4o-mini
 
 Auto-detected providers: **OpenAI**, **Gemini**, **Mistral**, **Grok**.
 
-Any OpenAI-compatible API (Groq, Together AI, Ollama, vLLM, ...) is supported via `OpenAIClient`.
+Any OpenAI-compatible API (Groq, Together AI, Ollama, vLLM, ...) is supported via `OpenAIClient` with a custom `base_url`.
 
 ## Testing
 
@@ -74,10 +146,7 @@ uv run pytest
 E2e tests require API keys. Create a `.env` file or pass one with `--env-file`:
 
 ```bash
-# Using a .env file in the project root
 uv run pytest tests/e2e/ -m e2e
-
-# Using a custom .env file
 uv run pytest tests/e2e/ -m e2e --env-file path/to/.env
 ```
 

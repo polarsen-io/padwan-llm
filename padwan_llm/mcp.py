@@ -5,7 +5,16 @@ import json
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal, NotRequired, Self, TypedDict, cast
+from typing import (
+    Any,
+    Literal,
+    NotRequired,
+    Protocol,
+    Self,
+    TypedDict,
+    cast,
+    runtime_checkable,
+)
 from http import HTTPStatus
 
 from importlib.metadata import version as _pkg_version
@@ -17,7 +26,7 @@ from .models import ToolDefinition
 
 __version__ = _pkg_version("padwan-llm")
 
-__all__ = ("McpTool", "McpStreamable", "McpStdio", "ProgressEvent")
+__all__ = ("McpTool", "McpTransport", "McpStreamable", "McpStdio", "ProgressEvent")
 
 _JSONRPC = "2.0"
 _PROTOCOL_VERSION = "2025-11-25"
@@ -85,6 +94,21 @@ class McpTool:
             "description": self.description,
             "parameters": self.input_schema,
         }
+
+
+@runtime_checkable
+class McpTransport(Protocol):
+    """Structural interface satisfied by `McpStreamable` and `McpStdio`.
+
+    An MCP transport exposes a `tools` property (a list refreshed in place
+    on `notifications/tools/list_changed`) and is usable as an async context
+    manager so its session can be initialized on entry and torn down on exit.
+    """
+
+    @property
+    def tools(self) -> list[McpTool]: ...
+    async def __aenter__(self) -> Self: ...
+    async def __aexit__(self, *args: object) -> None: ...
 
 
 # Shared helpers
@@ -372,8 +396,10 @@ class McpStreamable:
         )
 
     async def _refresh_tools(self) -> None:
+        # Mutate the list in place so external references (e.g. AgentSession
+        # holding onto `mcp.tools`) see the refreshed contents.
         result = await self._rpc("tools/list")
-        self._tools = _build_tools(result.get("tools", []), self._call)
+        self._tools[:] = _build_tools(result.get("tools", []), self._call)
 
     async def _call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         result = await self._rpc("tools/call", {"name": name, "arguments": args})
@@ -424,6 +450,7 @@ class McpStdio:
     _next_id: int = field(init=False, default=0)
     _pending: dict[str, asyncio.Future[Any]] = field(init=False, default_factory=dict)
     _reader_task: asyncio.Task[None] | None = field(init=False, default=None)
+    _stderr_task: asyncio.Task[None] | None = field(init=False, default=None)
     _loop: asyncio.AbstractEventLoop = field(init=False)
 
     async def __aenter__(self) -> Self:
@@ -438,6 +465,7 @@ class McpStdio:
             cwd=self.cwd,
         )
         self._reader_task = asyncio.create_task(self._reader())
+        self._stderr_task = asyncio.create_task(self._drain_stderr())
         await self._initialize()
         await self._refresh_tools()
         return self
@@ -447,6 +475,12 @@ class McpStdio:
             self._reader_task.cancel()
             try:
                 await self._reader_task
+            except asyncio.CancelledError:
+                pass
+        if self._stderr_task:
+            self._stderr_task.cancel()
+            try:
+                await self._stderr_task
             except asyncio.CancelledError:
                 pass
         if self._process:
@@ -477,6 +511,25 @@ class McpStdio:
         self._process.stdin.write(data)
         await self._process.stdin.drain()
 
+    async def _drain_stderr(self) -> None:
+        """Background task that forwards the child process's stderr to logs.
+
+        Stderr is piped so the parent can observe it, but if nothing reads
+        from the pipe the buffer fills (typically ~64 KB) and the child
+        blocks on its next stderr write — wedging the whole session.
+        """
+        if not self._process or not self._process.stderr:
+            return
+        try:
+            async for raw_line in self._process.stderr:
+                line = raw_line.decode(errors="replace").rstrip()
+                if line:
+                    log.debug("MCP stdio stderr: %s", line)
+        except asyncio.CancelledError:
+            log.debug("MCP stdio stderr drain cancelled")
+        except Exception:
+            log.warning("MCP stdio stderr drain failed", exc_info=True)
+
     async def _rpc(
         self, method: _RpcMethod, params: dict[str, Any] | None = None
     ) -> Any:
@@ -487,8 +540,13 @@ class McpStdio:
             payload["params"] = params
         fut: asyncio.Future[Any] = self._loop.create_future()
         self._pending[rid] = fut
-        await self._send(payload)
-        return await fut
+        try:
+            await self._send(payload)
+            return await fut
+        finally:
+            # Drop the entry on cancel/exception so a late response from the
+            # server doesn't try to resolve a stale (possibly cancelled) future.
+            self._pending.pop(rid, None)
 
     async def _notify(self, method: str, params: dict[str, Any] | None = None) -> None:
         payload: _JsonRpcNotification = {"jsonrpc": _JSONRPC, "method": method}
@@ -513,6 +571,13 @@ class McpStdio:
                 msg_id = msg.get("id")
                 if msg_id is not None and str(msg_id) in self._pending:
                     fut = self._pending.pop(str(msg_id))
+                    if fut.done():
+                        log.debug(
+                            "MCP stdio: dropping late response for id=%s "
+                            "(caller already cancelled or resolved)",
+                            msg_id,
+                        )
+                        continue
                     if "error" in msg:
                         err = msg["error"]
                         fut.set_exception(
@@ -561,8 +626,10 @@ class McpStdio:
         await self._notify(_Notification.INITIALIZED)
 
     async def _refresh_tools(self) -> None:
+        # Mutate the list in place so external references (e.g. AgentSession
+        # holding onto `mcp.tools`) see the refreshed contents.
         result = await self._rpc("tools/list")
-        self._tools = _build_tools(result.get("tools", []), self._call)
+        self._tools[:] = _build_tools(result.get("tools", []), self._call)
 
     async def _call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         result = await self._rpc("tools/call", {"name": name, "arguments": args})

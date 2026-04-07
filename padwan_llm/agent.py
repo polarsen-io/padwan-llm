@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import inspect
 import json
 import uuid
@@ -16,7 +17,7 @@ from .conversation import (
     ToolResultMessage,
 )
 from .logs import log
-from .mcp import McpTool
+from .mcp import McpTool, McpTransport
 from .models import ToolCall, ToolDefinition, UsageToken
 
 __all__ = ("AgentSession", "ConversationStore")
@@ -72,7 +73,7 @@ class AgentSession:
 
     client: LLMClientBase
     system: str | None = None
-    mcp_tools: Sequence[McpTool] = field(default_factory=list)
+    mcp_tools: Sequence[McpTool | McpTransport] = field(default_factory=list)
     max_tool_rounds: int | None = 30
     max_tool_result_chars: int | None = 8_000
     execution: Literal["sequential", "parallel"] = "sequential"
@@ -82,6 +83,7 @@ class AgentSession:
     session_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     store: ConversationStore | None = None
     _state: ConversationState = field(init=False)
+    _exit_stack: contextlib.AsyncExitStack = field(init=False)
 
     def __post_init__(self) -> None:
         if self.max_tool_rounds is not None and self.max_tool_rounds < 1:
@@ -89,6 +91,7 @@ class AgentSession:
                 f"max_tool_rounds must be >= 1 or None, got {self.max_tool_rounds}"
             )
         self._state = ConversationState(system=self.system)
+        self._exit_stack = contextlib.AsyncExitStack()
 
     @property
     def messages(self) -> list[ChatMessage]:
@@ -109,11 +112,15 @@ class AgentSession:
         self._state.clear()
 
     async def __aenter__(self) -> Self:
-        await self.client.__aenter__()
+        await self._exit_stack.__aenter__()
+        await self._exit_stack.enter_async_context(self.client)
+        for item in self.mcp_tools:
+            if not isinstance(item, McpTool):
+                await self._exit_stack.enter_async_context(item)
         return self
 
     async def __aexit__(self, *args: Any) -> None:
-        await self.client.__aexit__(*args)
+        await self._exit_stack.__aexit__(*args)
 
     def save(self) -> None:
         """Persist the current state via the configured store, if any."""
@@ -157,11 +164,6 @@ class AgentSession:
         instance._state = ConversationState.from_snapshot(snapshot)
         return instance
 
-    def _build_dispatch(self) -> tuple[list[ToolDefinition], dict[str, McpTool]]:
-        """Snapshot `mcp_tools` for the current round into definitions + name lookup."""
-        tools = list(self.mcp_tools)
-        return [t.to_tool_def() for t in tools], {t.name: t for t in tools}
-
     def _context_messages(self) -> list[ChatMessage]:
         """Return messages with tool results truncated to `max_tool_result_chars`.
 
@@ -174,13 +176,13 @@ class AgentSession:
             return list(self._state.messages)
         out: list[ChatMessage] = []
         for msg in self._state.messages:
-            if msg.get("role") == "tool":
-                content = msg.get("content") or ""
-                if isinstance(content, str) and len(content) > limit:
+            if msg["role"] == "tool":
+                content = msg["content"]
+                if len(content) > limit:
                     msg = ToolResultMessage(
                         role="tool",
-                        tool_call_id=msg["tool_call_id"],  # type: ignore[typeddict-item]
-                        name=msg["name"],  # type: ignore[typeddict-item]
+                        tool_call_id=msg["tool_call_id"],
+                        name=msg["name"],
                         content=content[:limit] + "\n[truncated]",
                     )
             out.append(msg)
@@ -271,7 +273,14 @@ class AgentSession:
             if calls_remaining is not None:
                 calls_remaining -= 1
 
-            tool_defs, dispatch = self._build_dispatch()
+            # Read mcp_tools at the top of every round — picks up tools/list_changed updates.
+            tool_defs: list[ToolDefinition] = []
+            dispatch: dict[str, McpTool] = {}
+            for item in self.mcp_tools:
+                tools = [item] if isinstance(item, McpTool) else item.tools
+                for t in tools:
+                    tool_defs.append(t.to_tool_def())
+                    dispatch[t.name] = t
             chunks: list[str] = []
             chat_stream = self.client.stream_chat(
                 self._context_messages(),
