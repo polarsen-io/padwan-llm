@@ -1,12 +1,12 @@
-from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal, Self, TypedDict, cast
+from typing import Literal, Self, TypedDict, cast
 
 from .models import ChatResponse, ToolCall, UsageToken
 
 __all__ = (
     "AssistantToolMessage",
     "ChatMessage",
+    "ConversationSnapshot",
     "ConversationState",
     "Message",
     "ToolResultMessage",
@@ -42,6 +42,19 @@ class ToolResultMessage(TypedDict):
 
 
 ChatMessage = Message | AssistantToolMessage | ToolResultMessage
+
+
+class ConversationSnapshot(TypedDict):
+    """Serializable view of a `ConversationState`.
+
+    Round-tripped through `ConversationState.snapshot` /
+    `ConversationState.from_snapshot`. JSON-serializable as long as the
+    message contents are.
+    """
+
+    system: str | None
+    messages: list[ChatMessage]
+    total_usage: UsageToken
 
 
 @dataclass
@@ -121,21 +134,20 @@ class ConversationState:
         else:
             self.messages = []
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self) -> ConversationSnapshot:
         """Return a serializable snapshot of the full conversation state.
 
         Includes the system prompt, message history, and accumulated token
-        usage. Use with `from_snapshot` to restore. JSON-serializable as long
-        as message contents are.
+        usage. Use with `from_snapshot` to restore.
         """
-        return {
-            "system": self.system,
-            "messages": list(self.messages),
-            "total_usage": dict(self.total_usage),
-        }
+        return ConversationSnapshot(
+            system=self.system,
+            messages=list(self.messages),
+            total_usage=cast(UsageToken, dict(self.total_usage)),
+        )
 
     @classmethod
-    def from_snapshot(cls, data: Mapping[str, Any]) -> Self:
+    def from_snapshot(cls, data: ConversationSnapshot) -> Self:
         """Rebuild a ConversationState from a `snapshot()` dict.
 
         Restores the system prompt, message list (kept verbatim — the snapshot

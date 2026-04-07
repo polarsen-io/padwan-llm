@@ -4,12 +4,13 @@ import json
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, Self
 
 from ._base import LLMClientBase
 from .conversation import (
     AssistantToolMessage,
     ChatMessage,
+    ConversationSnapshot,
     ConversationState,
     ToolResultMessage,
 )
@@ -27,12 +28,12 @@ type ApprovalHook = Callable[[McpTool, dict[str, Any]], bool | Awaitable[bool]]
 class ConversationStore(Protocol):
     """Persistence backend for conversation snapshots.
 
-    Implementations should round-trip a `ConversationState.snapshot()` dict
-    keyed by an opaque session id.
+    Implementations should round-trip a `ConversationSnapshot` keyed by an
+    opaque session id.
     """
 
-    def save(self, session_id: str, snapshot: dict[str, Any]) -> None: ...
-    def load(self, session_id: str) -> dict[str, Any]: ...
+    def save(self, session_id: str, snapshot: ConversationSnapshot) -> None: ...
+    def load(self, session_id: str) -> ConversationSnapshot: ...
 
 
 def _extract_text(result: Any) -> str:
@@ -112,12 +113,33 @@ class AgentSession:
             return
         self.store.save(self.session_id, self._state.snapshot())
 
-    def load(self) -> None:
-        """Restore state from the configured store, if any."""
-        if self.store is None:
-            return
-        snapshot = self.store.load(self.session_id)
-        self._state = ConversationState.from_snapshot(snapshot)
+    @classmethod
+    def load(
+        cls,
+        *,
+        client: LLMClientBase,
+        store: ConversationStore,
+        session_id: str,
+        **kwargs: Any,
+    ) -> Self:
+        """Construct an AgentSession with state restored from `store`.
+
+        Convenience constructor that replaces the two-step
+        `s = AgentSession(...); s.load()` pattern with a single call. The
+        `system` prompt is taken from the persisted snapshot, so any
+        `system` value passed in `kwargs` is silently ignored.
+        """
+        snapshot = store.load(session_id)
+        kwargs.pop("system", None)
+        instance = cls(
+            client=client,
+            store=store,
+            session_id=session_id,
+            system=snapshot.get("system"),
+            **kwargs,
+        )
+        instance._state = ConversationState.from_snapshot(snapshot)
+        return instance
 
     def _build_dispatch(self) -> tuple[list[ToolDefinition], dict[str, McpTool]]:
         """Snapshot `mcp_tools` for the current round into definitions + name lookup."""
@@ -193,13 +215,8 @@ class AgentSession:
         plan: list[tuple[ToolCall, McpTool | None, dict[str, Any], bool]] = []
         for tc in tool_calls:
             name = tc["function"]["name"]
-            raw_args = tc["function"]["arguments"]
             try:
-                args = (
-                    json.loads(raw_args)
-                    if isinstance(raw_args, str)
-                    else dict(raw_args)
-                )
+                args = json.loads(tc["function"]["arguments"])
             except json.JSONDecodeError as exc:
                 log.warning("Bad tool args for %r: %s", name, exc)
                 args = {}

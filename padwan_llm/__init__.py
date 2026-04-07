@@ -7,6 +7,7 @@ from .client import LLMClient
 from .conversation import (
     AssistantToolMessage,
     ChatMessage,
+    ConversationSnapshot,
     ConversationState,
     Message,
     ToolResultMessage,
@@ -31,6 +32,7 @@ __all__ = (
     "ChatMessage",
     "ChatResponse",
     "ChatStream",
+    "ConversationSnapshot",
     "ConversationState",
     "ConversationStore",
     "FinishReason",

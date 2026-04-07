@@ -10,6 +10,7 @@ from padwan_llm import (
     AgentSession,
     ChatMessage,
     ChatStream,
+    ConversationSnapshot,
     ConversationState,
     LLMClientBase,
     McpTool,
@@ -502,13 +503,13 @@ def test_conversation_state_snapshot_round_trip() -> None:
 
 
 async def test_save_and_load_via_store_round_trips_state() -> None:
-    storage: dict[str, dict[str, Any]] = {}
+    storage: dict[str, ConversationSnapshot] = {}
 
     class FakeStore:
-        def save(self, session_id: str, snapshot: dict[str, Any]) -> None:
+        def save(self, session_id: str, snapshot: ConversationSnapshot) -> None:
             storage[session_id] = snapshot
 
-        def load(self, session_id: str) -> dict[str, Any]:
+        def load(self, session_id: str) -> ConversationSnapshot:
             return storage[session_id]
 
     store = FakeStore()
@@ -516,14 +517,48 @@ async def test_save_and_load_via_store_round_trips_state() -> None:
         [FakeChatStream(chunks=["hello"])],
         store=store,
         session_id="abc",
+        system="be helpful",
     )
     await session.send("hi")
     session.save()
 
-    session2, _ = make_session(
-        [FakeChatStream(chunks=["world"])],
+    # Restore via the classmethod constructor — single call.
+    client2 = FakeClient(responses=[FakeChatStream(chunks=["world"])])
+    session2 = AgentSession.load(
+        client=cast(LLMClientBase, client2),
         store=store,
         session_id="abc",
     )
-    session2.load()
     assert session2.messages == session.messages
+    assert session2.system == "be helpful"
+
+
+async def test_load_classmethod_ignores_system_kwarg() -> None:
+    """The system prompt is taken from the snapshot, not the kwargs."""
+    storage: dict[str, ConversationSnapshot] = {}
+
+    class FakeStore:
+        def save(self, session_id: str, snapshot: ConversationSnapshot) -> None:
+            storage[session_id] = snapshot
+
+        def load(self, session_id: str) -> ConversationSnapshot:
+            return storage[session_id]
+
+    store = FakeStore()
+    session, _ = make_session(
+        [FakeChatStream(chunks=["x"])],
+        store=store,
+        session_id="abc",
+        system="original",
+    )
+    await session.send("hi")
+    session.save()
+
+    client2 = FakeClient(responses=[FakeChatStream(chunks=["y"])])
+    session2 = AgentSession.load(
+        client=cast(LLMClientBase, client2),
+        store=store,
+        session_id="abc",
+        system="overridden — should be ignored",
+    )
+    assert session2.system == "original"
