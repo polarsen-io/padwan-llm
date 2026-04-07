@@ -477,7 +477,6 @@ class GeminiChatStream(ChatStream, GeminiToolMixin):
         self._on_thought = on_thought
         self.usage: UsageToken | None = None
         self.tool_calls: list[ToolCall] | None = None
-        self.thoughts: str | None = None
 
     async def __aiter__(self) -> AsyncIterator[str]:
         body = self.build_body(self._messages, self._client.temperature, self._tools)
@@ -554,17 +553,15 @@ class GeminiChatStream(ChatStream, GeminiToolMixin):
     def _extract_text(self, chunk: dict) -> str | None:
         """Extract text content from a Gemini stream response chunk.
 
-        Thought parts are accumulated into `self.thoughts` and forwarded to
-        `on_thought` if set; they are not yielded as regular text chunks.
+        Thought parts are forwarded to `on_thought` if set and skipped
+        as regular text; callers collect them via the callback.
         """
         if candidates := chunk.get("candidates"):
             if content := candidates[0].get("content"):
                 for part in content.get("parts", []):
                     if part.get("thought"):
-                        if thought_text := part.get("text"):
-                            self.thoughts = (self.thoughts or "") + thought_text
-                            if self._on_thought:
-                                self._on_thought(thought_text)
+                        if self._on_thought and (thought_text := part.get("text")):
+                            self._on_thought(thought_text)
                         continue
                     if (text := part.get("text")) is not None:
                         return text

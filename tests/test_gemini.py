@@ -184,14 +184,6 @@ class TestGeminiChatStream:
     def test_extract_text(self, chunk: dict, expected: str | None):
         assert self.stream._extract_text(chunk) == expected
 
-    def test_thought_accumulated(self):
-        chunk = {
-            "candidates": [{"content": {"parts": [{"text": "step1", "thought": True}]}}]
-        }
-        self.stream._extract_text(chunk)
-        self.stream._extract_text(chunk)
-        assert self.stream.thoughts == "step1step1"
-
     def test_on_thought_callback(self):
         received: list[str] = []
         client = MagicMock(spec=GeminiClient)
@@ -203,7 +195,6 @@ class TestGeminiChatStream:
         }
         stream._extract_text(chunk)
         assert received == ["pondering"]
-        assert stream.thoughts == "pondering"
 
     @pytest.mark.parametrize(
         "chunk, expected",

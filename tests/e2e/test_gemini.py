@@ -22,7 +22,6 @@ async def test_stream_thought_callback() -> None:
     assert text, "no text returned"
     assert "56" in text
     assert received, "no thought chunks received"
-    assert stream.thoughts == "".join(received)
 
 
 async def test_batch_lifecycle() -> None:
