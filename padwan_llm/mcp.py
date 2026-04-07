@@ -101,12 +101,16 @@ class McpTransport(Protocol):
     """Structural interface satisfied by `McpStreamable` and `McpStdio`.
 
     An MCP transport exposes a `tools` property (a list refreshed in place
-    on `notifications/tools/list_changed`) and is usable as an async context
-    manager so its session can be initialized on entry and torn down on exit.
+    on `notifications/tools/list_changed`), an `is_open` property so callers
+    can detect an already-entered instance, and is usable as an async
+    context manager so its session can be initialized on entry and torn
+    down on exit.
     """
 
     @property
     def tools(self) -> list[McpTool]: ...
+    @property
+    def is_open(self) -> bool: ...
     async def __aenter__(self) -> Self: ...
     async def __aexit__(self, *args: object) -> None: ...
 
@@ -211,7 +215,16 @@ class McpStreamable:
     def _sse_url(self) -> str:
         return _to_sse_url(self.url)
 
+    @property
+    def is_open(self) -> bool:
+        """True once the transport has been entered and the listener task is live."""
+        return self._bg_task is not None
+
     async def __aenter__(self) -> Self:
+        if self._bg_task is not None:
+            raise RuntimeError(
+                "McpStreamable is already open; re-entering is not supported"
+            )
         await self._initialize()
         await self._refresh_tools()
         self._bg_task = asyncio.create_task(self._listen())
@@ -453,7 +466,14 @@ class McpStdio:
     _stderr_task: asyncio.Task[None] | None = field(init=False, default=None)
     _loop: asyncio.AbstractEventLoop = field(init=False)
 
+    @property
+    def is_open(self) -> bool:
+        """True while the child process is running and the reader task is live."""
+        return self._process is not None
+
     async def __aenter__(self) -> Self:
+        if self._process is not None:
+            raise RuntimeError("McpStdio is already open; re-entering is not supported")
         self._loop = asyncio.get_running_loop()
         self._process = await asyncio.create_subprocess_exec(
             self.command,

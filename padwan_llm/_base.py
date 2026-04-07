@@ -97,7 +97,17 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
         self._set_auth_headers(session)
         return session
 
+    @property
+    def is_open(self) -> bool:
+        """True while the underlying HTTP session is live."""
+        return self._session is not None
+
     async def __aenter__(self) -> Self:
+        if self._session is not None:
+            raise RuntimeError(
+                f"{type(self).__name__} is already open; "
+                "using the same client in nested `async with` blocks is not supported"
+            )
         self._session = self._build_session()
         return self
 

@@ -112,10 +112,20 @@ class AgentSession:
         self._state.clear()
 
     async def __aenter__(self) -> Self:
+        """Enter the session, opening any resources the caller hasn't already.
+
+        Resources (`client` and each `McpTransport` in `mcp_tools`) that are
+        already open — detected via `is_open` — are left alone: the caller
+        still owns their lifecycle. Only resources we open here are
+        registered with the exit stack for cleanup on `__aexit__`.
+        """
         await self._exit_stack.__aenter__()
-        await self._exit_stack.enter_async_context(self.client)
+        if not self.client.is_open:
+            await self._exit_stack.enter_async_context(self.client)
         for item in self.mcp_tools:
-            if not isinstance(item, McpTool):
+            if isinstance(item, McpTool):
+                continue
+            if not item.is_open:
                 await self._exit_stack.enter_async_context(item)
         return self
 
@@ -150,6 +160,11 @@ class AgentSession:
         """
         if model is None and client is None:
             raise ValueError("Either model= or client= must be provided")
+        if model is not None and client is not None:
+            raise ValueError(
+                "Provide exactly one of model= or client=, not both — "
+                "passing both would silently drop the custom client."
+            )
         _client = LLMClient(model=model) if model is not None else client
         assert _client is not None
         snapshot = store.load(session_id)

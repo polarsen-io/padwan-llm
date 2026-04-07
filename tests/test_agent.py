@@ -46,6 +46,14 @@ class FakeClient:
     calls: list[tuple[list[ChatMessage], list[ToolDefinition]]] = field(
         default_factory=list
     )
+    aenter_count: int = 0
+    aexit_count: int = 0
+    # Track state so AgentSession can detect whether the fake is "open"
+    _is_open: bool = False
+
+    @property
+    def is_open(self) -> bool:
+        return self._is_open
 
     def stream_chat(
         self,
@@ -54,6 +62,15 @@ class FakeClient:
     ) -> ChatStream:
         self.calls.append((list(messages), list(tools or [])))
         return self.responses.pop(0)
+
+    async def __aenter__(self) -> "FakeClient":
+        self.aenter_count += 1
+        self._is_open = True
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        self.aexit_count += 1
+        self._is_open = False
 
 
 def make_session(
@@ -562,3 +579,69 @@ async def test_load_classmethod_ignores_system_kwarg() -> None:
         system="overridden — should be ignored",
     )
     assert session2.system == "original"
+
+
+async def test_load_rejects_both_model_and_client() -> None:
+    """Regression: load() silently dropped `client=` when `model=` was also set.
+
+    That broke callers mid-migration who kept their custom client while
+    adding model= — their client would be swapped for a fresh `LLMClient`
+    with default auth, turning tests into real network calls.
+    """
+    storage: dict[str, ConversationSnapshot] = {}
+
+    class FakeStore:
+        def save(self, session_id: str, snapshot: ConversationSnapshot) -> None:
+            storage[session_id] = snapshot
+
+        def load(self, session_id: str) -> ConversationSnapshot:
+            return storage[session_id]
+
+    store = FakeStore()
+    session, _ = make_session(
+        [FakeChatStream(chunks=["x"])], store=store, session_id="abc", system="sys"
+    )
+    await session.send("hi")
+    session.save()
+
+    fake = FakeClient(responses=[FakeChatStream(chunks=["y"])])
+    with pytest.raises(ValueError, match="exactly one of model= or client="):
+        AgentSession.load(
+            client=cast(LLMClientBase, fake),
+            model="gpt-4o",
+            store=store,
+            session_id="abc",
+        )
+
+
+async def test_aenter_skips_already_open_client() -> None:
+    """Regression: AgentSession.__aenter__ used to unconditionally enter
+    the client, orphaning the original session and leaking HTTP state.
+    Now it detects `is_open` and skips.
+    """
+    fake = FakeClient(responses=[FakeChatStream(chunks=["ok"])])
+    # Pretend the caller already entered the client elsewhere
+    await fake.__aenter__()
+    assert fake.aenter_count == 1
+
+    async with AgentSession(client=cast(LLMClientBase, fake)) as session:
+        await session.send("hi")
+
+    # AgentSession must NOT have re-entered the already-open client
+    assert fake.aenter_count == 1
+    assert fake.aexit_count == 0  # and must not have closed it either
+    # Caller is still responsible for cleanup
+    await fake.__aexit__(None, None, None)
+    assert fake.aexit_count == 1
+
+
+async def test_aenter_opens_fresh_client() -> None:
+    """Happy path: a brand-new client gets entered and exited by the session."""
+    fake = FakeClient(responses=[FakeChatStream(chunks=["ok"])])
+    assert fake.aenter_count == 0
+
+    async with AgentSession(client=cast(LLMClientBase, fake)) as session:
+        await session.send("hi")
+        assert fake.aenter_count == 1  # entered by AgentSession
+
+    assert fake.aexit_count == 1  # and exited on scope exit
