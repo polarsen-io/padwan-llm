@@ -112,10 +112,12 @@ class Part(TypedDict):
 class FunctionCall(TypedDict):
     name: str
     args: dict[str, Any]
+    id: NotRequired[str]
 
 
 class FunctionCallPart(TypedDict):
     functionCall: FunctionCall
+    thoughtSignature: NotRequired[str]
 
 
 class FunctionResponse(TypedDict):

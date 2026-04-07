@@ -116,7 +116,7 @@ async def _async_check_resp_status(
 ) -> niquests.AsyncResponse:
     """Check HTTP status for a streaming response, raising appropriate errors."""
     try:
-        return resp.raise_for_status()
+        return resp.raise_for_status()  # type: ignore[return-value]
     except niquests.exceptions.HTTPError as e:
         try:
             data = await resp.json()

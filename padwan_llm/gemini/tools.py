@@ -1,8 +1,15 @@
 import json
-import typing
 from collections.abc import Sequence
+from typing import Any
 
-from .models import FunctionDeclaration, GeminiTool
+from .models import (
+    Content,
+    FunctionCallPart,
+    FunctionDeclaration,
+    GeminiPart,
+    GeminiTool,
+    Part,
+)
 from ..conversation import AssistantToolMessage, ToolResultMessage
 from ..models import ToolCall, ToolCallFunction, ToolDefinition
 
@@ -29,7 +36,7 @@ class GeminiToolMixin:
 
     @staticmethod
     def _extract_gemini_tool_calls(
-        parts: Sequence[dict[str, typing.Any]],
+        parts: Sequence[dict[str, Any]],
         id_offset: int = 0,
     ) -> list[ToolCall]:
         """Extract ToolCall objects from Gemini response parts containing functionCall.
@@ -54,7 +61,7 @@ class GeminiToolMixin:
         return result
 
     @staticmethod
-    def _convert_tool_result(msg: ToolResultMessage) -> dict[str, typing.Any]:
+    def _convert_tool_result(msg: ToolResultMessage) -> Content:
         """Convert a ToolResultMessage to a Gemini functionResponse content dict.
 
         Gemini expects tool results as a user message with a functionResponse part.
@@ -81,21 +88,21 @@ class GeminiToolMixin:
     @staticmethod
     def _convert_assistant_tool_message(
         msg: AssistantToolMessage,
-    ) -> dict[str, typing.Any]:
+    ) -> Content:
         """Convert an AssistantToolMessage to a Gemini model content dict with functionCall parts.
 
         Includes a text part if the message has content alongside the tool calls.
         """
-        parts: list[dict[str, typing.Any]] = []
+        parts: list[GeminiPart] = []
         if msg["content"]:
-            parts.append({"text": msg["content"]})
+            parts.append(Part(text=msg["content"]))
         for tc in msg["tool_calls"]:
             args = tc["function"]["arguments"]
             try:
                 parsed_args = json.loads(args)
             except (json.JSONDecodeError, TypeError):  # fmt: skip
                 parsed_args = {}
-            part: dict[str, typing.Any] = {
+            part: FunctionCallPart = {
                 "functionCall": {
                     "name": tc["function"]["name"],
                     "args": parsed_args,
@@ -105,4 +112,4 @@ class GeminiToolMixin:
             if sig := tc.get("thought_signature"):
                 part["thoughtSignature"] = sig
             parts.append(part)
-        return {"role": "model", "parts": parts}
+        return Content(role="model", parts=parts)

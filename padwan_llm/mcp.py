@@ -1,10 +1,11 @@
 import asyncio
+import enum
 import functools
 import json
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, NotRequired, Self, TypedDict, cast
+from typing import Any, Literal, NotRequired, Self, TypedDict, cast
 from http import HTTPStatus
 
 from importlib.metadata import version as _pkg_version
@@ -22,6 +23,16 @@ _JSONRPC = "2.0"
 _PROTOCOL_VERSION = "2025-11-25"
 _MAX_LISTEN_RETRIES = 5
 _DEFAULT_RETRY_MS = 3000
+
+
+class _Notification(enum.StrEnum):
+    TOOLS_CHANGED = "notifications/tools/list_changed"
+    PROGRESS = "notifications/progress"
+    INITIALIZED = "notifications/initialized"
+    CANCELLED = "notifications/cancelled"
+
+
+type _RpcMethod = Literal["initialize", "tools/list", "tools/call", "ping"]
 
 
 class ProgressEvent(TypedDict):
@@ -127,6 +138,24 @@ def _check_rpc_error(data: dict[str, Any]) -> None:
         raise RuntimeError(f"MCP error {err.get('code')}: {err.get('message')}")
 
 
+def _check_protocol_version(init_result: dict[str, Any] | None) -> None:
+    """Warn if the server's negotiated protocol version differs from ours.
+
+    Per spec, if the server responds with a different version, the client
+    SHOULD disconnect if it cannot support it. We log a warning instead of
+    hard-failing to stay permissive across minor spec revisions.
+    """
+    if not init_result:
+        return
+    server_version = init_result.get("protocolVersion")
+    if server_version and server_version != _PROTOCOL_VERSION:
+        log.warning(
+            "MCP protocol version mismatch: client=%s server=%s",
+            _PROTOCOL_VERSION,
+            server_version,
+        )
+
+
 # McpStreamable — streamable-HTTP transport
 
 
@@ -195,7 +224,7 @@ class McpStreamable:
 
     async def _rpc(
         self,
-        method: str,
+        method: _RpcMethod,
         params: dict[str, Any] | None = None,
         *,
         _reinit: bool = True,
@@ -216,6 +245,7 @@ class McpStreamable:
         )
         if r.status_code == HTTPStatus.UNAUTHORIZED:
             raise RuntimeError("MCP server requires authorization (HTTP 401)")
+        # Server lost track of session
         if r.status_code == HTTPStatus.NOT_FOUND and self._session_id and _reinit:
             self._session_id = None
             await self._initialize()
@@ -253,19 +283,19 @@ class McpStreamable:
                 _check_rpc_error(data)
                 return data.get("result")
             method = data.get("method")
-            if method == "notifications/tools/list_changed":
+            if method == _Notification.TOOLS_CHANGED:
                 await self._refresh_tools()
-            elif method == "notifications/progress" and data.get("params"):
+            elif method == _Notification.PROGRESS and data.get("params"):
                 self._dispatch_progress(data["params"])
         raise RuntimeError("SSE stream ended without a JSON-RPC response")
 
-    async def _listen(self) -> None:
+    async def _listen(self, max_retries: int = _MAX_LISTEN_RETRIES) -> None:
         """GET SSE stream for server-push notifications, with reconnection.
 
         Spec: https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#listening-for-messages-from-the-server
         """
         retries = 0
-        while retries < _MAX_LISTEN_RETRIES:
+        while retries < max_retries:
             try:
                 headers = self._headers(accept="text/event-stream")
                 if self._last_event_id is not None:
@@ -273,8 +303,7 @@ class McpStreamable:
                 r = await self._http.get(self._sse_url, headers=headers)
                 if r.status_code == HTTPStatus.METHOD_NOT_ALLOWED:
                     return
-                r.raise_for_status()
-                ext = r.extension
+                ext = (r.raise_for_status()).extension
                 if ext is None:
                     return
                 retries = 0
@@ -292,15 +321,15 @@ class McpStreamable:
                         log.warning("MCP: ignoring malformed SSE event: %s", event.data)
                         continue
                     method = msg.get("method")
-                    if method == "notifications/tools/list_changed":
+                    if method == _Notification.TOOLS_CHANGED:
                         await self._refresh_tools()
-                    elif method == "notifications/progress" and msg.get("params"):
+                    elif method == _Notification.PROGRESS and msg.get("params"):
                         self._dispatch_progress(msg["params"])
                 retries += 1
                 log.debug(
                     "MCP GET stream ended, reconnecting (%d/%d)",
                     retries,
-                    _MAX_LISTEN_RETRIES,
+                    max_retries,
                 )
                 await asyncio.sleep(self._retry_ms / 1000)
             except asyncio.CancelledError:
@@ -311,13 +340,17 @@ class McpStreamable:
                 log.warning(
                     "MCP GET listener error (%d/%d)",
                     retries,
-                    _MAX_LISTEN_RETRIES,
+                    max_retries,
                     exc_info=True,
                 )
                 await asyncio.sleep(self._retry_ms / 1000)
 
     async def _initialize(self) -> None:
-        await self._rpc(
+        """Perform the MCP initialization handshake.
+
+        See https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle#initialization
+        """
+        result = await self._rpc(
             "initialize",
             {
                 "protocolVersion": _PROTOCOL_VERSION,
@@ -329,10 +362,11 @@ class McpStreamable:
             },
             _reinit=False,
         )
+        _check_protocol_version(result)
         await self._http.post(
             self.url,
             json=_JsonRpcNotification(
-                jsonrpc=_JSONRPC, method="notifications/initialized"
+                jsonrpc=_JSONRPC, method=_Notification.INITIALIZED
             ),
             headers=self._headers(),
         )
@@ -358,7 +392,7 @@ class McpStreamable:
             self.url,
             json=_JsonRpcNotification(
                 jsonrpc=_JSONRPC,
-                method="notifications/cancelled",
+                method=_Notification.CANCELLED,
                 params=params,
             ),
             headers=self._headers(),
@@ -438,11 +472,14 @@ class McpStdio:
     async def _send(self, msg: _JsonRpcNotification | _JsonRpcRequest) -> None:
         if not self._process or not self._process.stdin:
             raise RuntimeError("MCP stdio process not running")
+        # Newline-Delimited JSON framing
         data = json.dumps(msg).encode() + b"\n"
         self._process.stdin.write(data)
         await self._process.stdin.drain()
 
-    async def _rpc(self, method: str, params: dict[str, Any] | None = None) -> Any:
+    async def _rpc(
+        self, method: _RpcMethod, params: dict[str, Any] | None = None
+    ) -> Any:
         self._next_id += 1
         rid = str(self._next_id)
         payload: _JsonRpcRequest = {"jsonrpc": _JSONRPC, "id": rid, "method": method}
@@ -487,10 +524,10 @@ class McpStdio:
                         fut.set_result(msg.get("result"))
                 else:
                     method = msg.get("method")
-                    if method == "notifications/tools/list_changed":
+                    if method == _Notification.TOOLS_CHANGED:
                         asyncio.create_task(self._refresh_tools())
                     elif (
-                        method == "notifications/progress"
+                        method == _Notification.PROGRESS
                         and msg.get("params")
                         and self.on_progress is not None
                     ):
@@ -505,7 +542,11 @@ class McpStdio:
                     fut.set_exception(RuntimeError("MCP stdio reader stopped"))
 
     async def _initialize(self) -> None:
-        await self._rpc(
+        """Perform the MCP initialization handshake.
+
+        See https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle#initialization
+        """
+        result = await self._rpc(
             "initialize",
             {
                 "protocolVersion": _PROTOCOL_VERSION,
@@ -516,7 +557,8 @@ class McpStdio:
                 },
             },
         )
-        await self._notify("notifications/initialized")
+        _check_protocol_version(result)
+        await self._notify(_Notification.INITIALIZED)
 
     async def _refresh_tools(self) -> None:
         result = await self._rpc("tools/list")
@@ -535,4 +577,4 @@ class McpStdio:
         params: dict[str, Any] = {"requestId": request_id}
         if reason is not None:
             params["reason"] = reason
-        await self._notify("notifications/cancelled", params)
+        await self._notify(_Notification.CANCELLED, params)

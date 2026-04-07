@@ -8,6 +8,7 @@ requires-python = ">=3.13"
 dependencies = [
     "niquests>=3.17.0",
     "typing_extensions>=4.10; python_version < '3.14'",
+    "urllib3-future>=2.19.902",
 ]
 
 [project.scripts]
@@ -41,12 +42,14 @@ research = [
     "python-dotenv>=1.2.1",
 ]
 docs = [
-    "mkdocs>=1.6.0",
-    "mkdocs-material>=9.5.0",
+    "zensical>=0.0.31",
 ]
 bump = [
     "commitizen>=4.0.0",
 ]
+
+[tool.ruff.lint]
+extend-select = ["G"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

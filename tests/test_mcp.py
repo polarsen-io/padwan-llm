@@ -184,7 +184,7 @@ def _make_response(
         headers["MCP-Session-Id"] = session_id
     resp.headers = headers
     resp.json = AsyncMock(return_value=data)
-    resp.raise_for_status = MagicMock()
+    resp.raise_for_status = MagicMock(return_value=resp)
     return resp
 
 
@@ -214,7 +214,7 @@ def _make_sse_response(
     if session_id:
         headers["MCP-Session-Id"] = session_id
     resp.headers = headers
-    resp.raise_for_status = MagicMock()
+    resp.raise_for_status = MagicMock(return_value=resp)
     ext = MagicMock()
     ext.closed = False
     payloads = list(events) + [None]
@@ -324,7 +324,7 @@ class TestMcpStreamable:
         client._http = mock_http
         async with client:
             with pytest.raises(RuntimeError, match="MCP error -32600"):
-                await client._rpc("bad/method")
+                await client._rpc("bad/method")  # type: ignore[arg-type]
 
     async def test_404_reinitializes(self, mock_http):
         """On 404 with active session, re-initializes and retries."""
