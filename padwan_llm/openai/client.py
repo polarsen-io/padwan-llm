@@ -40,6 +40,61 @@ _OPENAI_FINISH_REASON_MAP: dict[str, FinishReason] = {
     "error": "error",
 }
 
+
+def _extract_text_payload(payload: dict[str, typing.Any]) -> str | None:
+    """Pull plain answer text out of a `delta` or `message` dict.
+
+    Handles two shapes interchangeably: a plain string `content` (OpenAI,
+    Grok), or Mistral's structured `content: list[ContentChunk]` where
+    we keep only `type: "text"` chunks and concatenate them. `thinking`
+    chunks are ignored here — they go through `_extract_thought_payload`.
+    """
+    content = payload.get("content")
+    if isinstance(content, str):
+        return content or None
+    if isinstance(content, list):
+        texts: list[str] = []
+        for chunk in content:
+            if isinstance(chunk, dict) and chunk.get("type") == "text":
+                if t := chunk.get("text"):
+                    texts.append(t)
+        if texts:
+            return "".join(texts)
+    return None
+
+
+def _extract_thought_payload(payload: dict[str, typing.Any]) -> str | None:
+    """Pull reasoning text out of a `delta` or `message` dict.
+
+    Handles two shapes:
+
+    - `reasoning_content: str` — xAI/Grok and DeepSeek-style reasoning
+      models surface their scratchpad as a sibling string field on the
+      delta/message.
+    - `content: list[{"type": "thinking", "thinking": [{"type": "text",
+      "text": ...}]}]` — Mistral's `Magistral` models embed reasoning as
+      a `ThinkChunk` inside a structured content array.
+
+    Returns the concatenated thought text, or `None` if neither shape
+    carries any reasoning content.
+    """
+    if rc := payload.get("reasoning_content"):
+        return rc if isinstance(rc, str) else None
+    content = payload.get("content")
+    if isinstance(content, list):
+        thoughts: list[str] = []
+        for chunk in content:
+            if not isinstance(chunk, dict) or chunk.get("type") != "thinking":
+                continue
+            for inner in chunk.get("thinking") or []:
+                if isinstance(inner, dict) and inner.get("type") == "text":
+                    if t := inner.get("text"):
+                        thoughts.append(t)
+        if thoughts:
+            return "".join(thoughts)
+    return None
+
+
 if TYPE_CHECKING:
     from .types import (
         CompletionUsage,
@@ -231,13 +286,20 @@ class _OpenAIBase(LLMClientBase[Retry], OpenAIToolMixin):
             body["tools"] = cast(list, self._tools_to_openai(tools))
         data, token = await self.complete(body)
         choice = data["choices"][0]
-        message = choice["message"]
+        message_dict = cast(dict[str, typing.Any], choice["message"])
         raw_reason = choice.get("finish_reason", "stop")
+        # Forward any reasoning content to on_thought before unpacking the
+        # answer text — keeps the final ChatResponse free of the model's
+        # internal scratchpad. Same shape on both wire formats handled by
+        # `_extract_thought_payload` (Grok `reasoning_content`, Mistral
+        # `ThinkChunk` inside a structured content array).
+        if self.on_thought and (thought := _extract_thought_payload(message_dict)):
+            self.on_thought(thought)
         response: ChatResponse = {
-            "content": message.get("content"),
+            "content": _extract_text_payload(message_dict),
             "finish_reason": _OPENAI_FINISH_REASON_MAP.get(raw_reason, "other"),
         }
-        if raw_tool_calls := message.get("tool_calls"):
+        if raw_tool_calls := message_dict.get("tool_calls"):
             response["tool_calls"] = self._extract_tool_calls(
                 cast(list, raw_tool_calls)
             )
@@ -281,8 +343,14 @@ class OpenAIChatStream(ChatStream, OpenAIToolMixin):
         pending: dict[int, dict[str, str]] = {}
 
         async for chunk in self._client.stream(body):
-            if text := self._extract_text(chunk):
-                yield text
+            delta = self._delta(chunk)
+            if delta is not None:
+                if self._client.on_thought and (
+                    thought := _extract_thought_payload(delta)
+                ):
+                    self._client.on_thought(thought)
+                if text := _extract_text_payload(delta):
+                    yield text
             self._accumulate_tool_call_deltas(chunk, pending)
             if usage := self._extract_usage(chunk):
                 self.usage = usage
@@ -299,12 +367,25 @@ class OpenAIChatStream(ChatStream, OpenAIToolMixin):
                 for tc in (pending[i] for i in sorted(pending))
             ]
 
-    def _extract_text(self, chunk: CreateChatCompletionStreamResponse) -> str | None:
-        """Extract text content from an OpenAI stream response chunk."""
+    @staticmethod
+    def _delta(
+        chunk: CreateChatCompletionStreamResponse,
+    ) -> dict[str, typing.Any] | None:
+        """Return the first choice's `delta` dict, or None if absent."""
         if choices := chunk.get("choices"):
             if delta := choices[0].get("delta"):
-                return delta.get("content")
+                return cast(dict[str, typing.Any], delta)
         return None
+
+    def _extract_text(self, chunk: CreateChatCompletionStreamResponse) -> str | None:
+        """Extract text content from an OpenAI stream response chunk.
+
+        Kept for backwards compatibility with subclasses that still call
+        it. New code should go through `__aiter__`'s shared payload
+        helpers (`_extract_text_payload`, `_extract_thought_payload`).
+        """
+        delta = self._delta(chunk)
+        return _extract_text_payload(delta) if delta else None
 
     def _extract_usage(
         self, chunk: CreateChatCompletionStreamResponse

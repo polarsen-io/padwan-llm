@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING
 
 from padwan_llm.errors import LLMError, QuotaExceededError, TooManyRequestsError
 from padwan_llm.openai.batch import BatchJob, BatchResult
-from padwan_llm.openai.client import OpenAIClient, OpenAIChatStream, _check_resp
+from padwan_llm.openai.client import (
+    OpenAIClient,
+    OpenAIChatStream,
+    _check_resp,
+    _extract_text_payload,
+    _extract_thought_payload,
+)
 
 if TYPE_CHECKING:
     from padwan_llm.openai.types import CreateChatCompletionStreamResponse
@@ -57,6 +63,42 @@ class TestOpenAIChatStreamExtraction:
             ),
             pytest.param({"choices": [{"delta": {}}]}, None, id="empty-delta"),
             pytest.param({}, None, id="empty"),
+            pytest.param(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "content": [
+                                    {"type": "text", "text": "Hello "},
+                                    {"type": "text", "text": "world"},
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "Hello world",
+                id="mistral-text-chunks",
+            ),
+            pytest.param(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "content": [
+                                    {
+                                        "type": "thinking",
+                                        "thinking": [
+                                            {"type": "text", "text": "Thinking..."}
+                                        ],
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                None,
+                id="mistral-thinking-only",
+            ),
         ],
     )
     def test_extract_text(
@@ -97,6 +139,197 @@ class TestOpenAIChatStreamExtraction:
         self, chunk: CreateChatCompletionStreamResponse, expected: dict | None
     ):
         assert self.stream._extract_usage(chunk) == expected
+
+
+class TestPayloadHelpers:
+    """`_extract_text_payload` and `_extract_thought_payload` are the
+    cross-provider routers used by `OpenAIChatStream` and
+    `_OpenAIBase.complete_chat`. They have to handle three wire shapes:
+    OpenAI/Grok plain string, Mistral structured chunk arrays, and the
+    Grok/DeepSeek `reasoning_content` sibling field.
+    """
+
+    @pytest.mark.parametrize(
+        "payload, expected",
+        [
+            pytest.param({"content": "hi"}, "hi", id="plain-string"),
+            pytest.param({"content": ""}, None, id="empty-string"),
+            pytest.param({"content": None}, None, id="null"),
+            pytest.param({}, None, id="missing"),
+            pytest.param(
+                {
+                    "content": [
+                        {"type": "text", "text": "Hello "},
+                        {"type": "text", "text": "world"},
+                    ]
+                },
+                "Hello world",
+                id="mistral-text-chunks",
+            ),
+            pytest.param(
+                {
+                    "content": [
+                        {
+                            "type": "thinking",
+                            "thinking": [{"type": "text", "text": "ignore me"}],
+                        },
+                        {"type": "text", "text": "the answer"},
+                    ]
+                },
+                "the answer",
+                id="mistral-mixed-skips-thinking",
+            ),
+            pytest.param(
+                {
+                    "content": [
+                        {
+                            "type": "thinking",
+                            "thinking": [{"type": "text", "text": "only thinking"}],
+                        }
+                    ]
+                },
+                None,
+                id="mistral-thinking-only",
+            ),
+        ],
+    )
+    def test_extract_text_payload(self, payload: dict, expected: str | None):
+        assert _extract_text_payload(payload) == expected
+
+    @pytest.mark.parametrize(
+        "payload, expected",
+        [
+            pytest.param(
+                {"reasoning_content": "thinking..."}, "thinking...", id="grok"
+            ),
+            pytest.param({"reasoning_content": ""}, None, id="grok-empty"),
+            pytest.param({"content": "just text"}, None, id="plain-no-thought"),
+            pytest.param(
+                {
+                    "content": [
+                        {
+                            "type": "thinking",
+                            "thinking": [
+                                {"type": "text", "text": "first "},
+                                {"type": "text", "text": "second"},
+                            ],
+                        },
+                        {"type": "text", "text": "answer"},
+                    ]
+                },
+                "first second",
+                id="mistral-thinking",
+            ),
+            pytest.param(
+                {
+                    "content": [
+                        {"type": "text", "text": "no thinking here"},
+                    ]
+                },
+                None,
+                id="mistral-text-only",
+            ),
+            pytest.param({}, None, id="missing"),
+        ],
+    )
+    def test_extract_thought_payload(self, payload: dict, expected: str | None):
+        assert _extract_thought_payload(payload) == expected
+
+
+class TestStreamForwardsThoughts:
+    """`OpenAIChatStream.__aiter__` must forward reasoning chunks to
+    `client.on_thought` for both Grok-style `reasoning_content` and
+    Mistral-style `ThinkChunk` payloads, while keeping the regular text
+    stream free of any thought content.
+    """
+
+    async def _drive(
+        self,
+        chunks: list[dict],
+        on_thought: list[str],
+    ) -> tuple[list[str], list[str]]:
+        """Run a fake stream through `OpenAIChatStream` and return
+        (yielded_text_chunks, on_thought_calls)."""
+
+        async def fake_stream(_body):
+            for c in chunks:
+                yield c
+
+        client = MagicMock(spec=OpenAIClient)
+        client.model = "test-model"
+        client.temperature = 0.2
+        client.provider = "openai"
+        client.on_thought = on_thought.append
+        client.stream = fake_stream
+        stream = OpenAIChatStream(client, [])
+        produced = [t async for t in stream]
+        return produced, on_thought
+
+    async def test_grok_reasoning_content(self):
+        """xAI/Grok surfaces reasoning via `delta.reasoning_content`."""
+        chunks = [
+            {"choices": [{"delta": {"reasoning_content": "Let me think... "}}]},
+            {"choices": [{"delta": {"reasoning_content": "ok done."}}]},
+            {"choices": [{"delta": {"content": "The answer is 42"}}]},
+        ]
+        thoughts: list[str] = []
+        text_chunks, _ = await self._drive(chunks, thoughts)
+        assert "".join(text_chunks) == "The answer is 42"
+        assert thoughts == ["Let me think... ", "ok done."]
+
+    async def test_mistral_thinking_chunks(self):
+        """Mistral Magistral surfaces reasoning via structured `ThinkChunk`."""
+        chunks = [
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "content": [
+                                {
+                                    "type": "thinking",
+                                    "thinking": [
+                                        {"type": "text", "text": "Reasoning step 1"}
+                                    ],
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "content": [
+                                {"type": "text", "text": "Final answer."},
+                            ]
+                        }
+                    }
+                ]
+            },
+        ]
+        thoughts: list[str] = []
+        text_chunks, _ = await self._drive(chunks, thoughts)
+        assert "".join(text_chunks) == "Final answer."
+        assert thoughts == ["Reasoning step 1"]
+
+    async def test_no_callback_when_unset(self):
+        """If `on_thought` is None, reasoning content is silently dropped
+        from the text stream — never raised, never yielded."""
+
+        async def fake_stream(_body):
+            yield {"choices": [{"delta": {"reasoning_content": "internal scratchpad"}}]}
+            yield {"choices": [{"delta": {"content": "answer"}}]}
+
+        client = MagicMock(spec=OpenAIClient)
+        client.model = "test-model"
+        client.temperature = 0.2
+        client.provider = "openai"
+        client.on_thought = None
+        client.stream = fake_stream
+        stream = OpenAIChatStream(client, [])
+        produced = [t async for t in stream]
+        assert "".join(produced) == "answer"
 
 
 class TestBatchResultFromLine:

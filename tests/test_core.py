@@ -216,6 +216,34 @@ def test_llm_client_passes_params():
     assert client.timeout == 120
 
 
+@pytest.mark.parametrize(
+    "cls, kwargs",
+    [
+        pytest.param(OpenAIClient, {"api_key": "k"}, id="openai"),
+        pytest.param(GeminiClient, {"api_key": "k"}, id="gemini"),
+        pytest.param(MistralClient, {"api_key": "k"}, id="mistral"),
+        pytest.param(GrokClient, {"api_key": "k"}, id="grok"),
+    ],
+)
+def test_on_thought_lifted_to_base(cls: type, kwargs: dict):
+    """`on_thought` is a base-class field so every provider client accepts
+    it, even those that don't yet emit reasoning content. Producers (e.g.
+    Gemini) translate their native shape into calls; non-producers
+    simply never invoke it.
+    """
+    captured: list[str] = []
+
+    def cb(text: str) -> None:
+        captured.append(text)
+
+    client = cls(on_thought=cb, **kwargs)
+    assert client.on_thought is cb
+    # And it must be invocable through the attribute (not just stored).
+    assert client.on_thought is not None
+    client.on_thought("hello")
+    assert captured == ["hello"]
+
+
 # Client init
 
 

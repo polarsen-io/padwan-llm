@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import abc
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
@@ -52,6 +52,17 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
     """Request timeout in seconds."""
     api_key: str | None = field(default=None, repr=False)
     """API key. If None, reads from provider's environment variable."""
+    on_thought: Callable[[str], None] | None = field(default=None, repr=False)
+    """Callback invoked with each chunk of model "thinking" / reasoning text.
+
+    Providers expose reasoning content under different names — Gemini's
+    `parts[].thought`, Grok/Mistral `reasoning_content`, Claude's
+    `thinking` blocks, OpenAI Responses API summaries — but they all
+    share the same intent: surface the model's internal scratchpad
+    separately from the final answer. Each provider client is
+    responsible for translating its native shape into calls to this
+    callback. Clients that don't support thinking yet simply never
+    invoke it."""
 
     _api_key: str = field(init=False, repr=False)
     base_url: str = field(init=False, default="", repr=False)

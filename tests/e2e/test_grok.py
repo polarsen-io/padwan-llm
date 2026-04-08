@@ -10,6 +10,46 @@ from .conftest import skip_no_grok
 pytestmark = [pytest.mark.e2e, skip_no_grok]
 
 
+async def test_stream_thought_callback() -> None:
+    """Grok's `grok-3-mini` surfaces scratchpad text via
+    `delta.reasoning_content`. The lifted `on_thought` callback must
+    receive those chunks while the regular text stream stays clean.
+
+    Note: `grok-4-fast-reasoning` does NOT expose `reasoning_content`
+    (xAI hides Grok 4 reasoning the way OpenAI hides o-series), so the
+    e2e regression has to target a model that actually emits it.
+    """
+    received: list[str] = []
+    async with GrokClient(
+        model="grok-3-mini",
+        on_thought=received.append,
+    ) as client:
+        stream = client.stream_chat([{"role": "user", "content": "What is 7 * 8?"}])
+        text = "".join([chunk async for chunk in stream])
+
+    assert text, "no text returned"
+    assert "56" in text
+    assert received, "no thought chunks received from reasoning model"
+
+
+async def test_complete_chat_thought_callback() -> None:
+    """Same contract for the non-streaming path: thoughts go to the
+    callback, the answer goes to `response['content']`.
+    """
+    received: list[str] = []
+    async with GrokClient(
+        model="grok-3-mini",
+        on_thought=received.append,
+    ) as client:
+        response, _ = await client.complete_chat(
+            [{"role": "user", "content": "What is 7 * 8?"}]
+        )
+
+    assert response["content"], "no text returned"
+    assert "56" in response["content"]
+    assert received, "no thought chunks forwarded to on_thought"
+
+
 async def test_batch_lifecycle() -> None:
     async with GrokClient() as client:
         req = GrokBatchRequest(

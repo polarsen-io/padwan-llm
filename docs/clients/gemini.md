@@ -42,10 +42,10 @@ async with GeminiClient() as client:
 
 ## Thinking models
 
-Gemini's reasoning models (e.g. `gemini-2.5-flash`, `gemini-2.5-pro`) can emit internal thought tokens alongside the final answer. Configure them via two fields on `GeminiClient`:
+Gemini's reasoning models (e.g. `gemini-2.5-flash`, `gemini-2.5-pro`) can emit internal thought tokens alongside the final answer. Configure them via two fields:
 
-- `thinking_config: ThinkingConfig | None` — merged into every `generationConfig`. Set `thinkingBudget` to allocate tokens for reasoning and `includeThoughts=True` to have the thought parts streamed back.
-- `on_thought: Callable[[str], None] | None` — called with each thought text chunk as it arrives. Thought chunks are **not** yielded as part of the normal text stream; this callback is the only way to see them.
+- `thinking_config: ThinkingConfig | None` (Gemini-specific) — merged into every `generationConfig`. Set `thinkingBudget` to allocate tokens for reasoning and `includeThoughts=True` to have the thought parts streamed back.
+- `on_thought: Callable[[str], None] | None` (defined on `LLMClientBase`, so any provider can adopt it) — called with each thought text chunk as it arrives. Thought chunks are **not** yielded as part of the normal text stream; this callback is the only way to see them.
 
 ```python
 from padwan_llm import GeminiClient

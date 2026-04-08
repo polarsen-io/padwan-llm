@@ -180,7 +180,6 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
     provider: ClassVar[Provider] = "gemini"
     model: str | None = "gemini-2.5-flash"
     base_url: str = GEMINI_ENDPOINT
-    on_thought: Callable[[str], None] | None = None
     thinking_config: ThinkingConfig | None = None
     _retry: GeminiRetry = field(
         default_factory=partial(
