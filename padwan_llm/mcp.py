@@ -305,14 +305,12 @@ class McpStreamable:
 
     async def __aexit__(self, *_: object) -> None:
         try:
-            # Cleaning Background Task
             if self._bg_task:
                 self._bg_task.cancel()
                 try:
                     await self._bg_task
                 except asyncio.CancelledError:
                     log.debug("MCP GET listener cancelled")
-            #
             if self._session_id:
                 await self._http.delete(self.url, headers=self._headers())
         except Exception:
@@ -615,8 +613,7 @@ class McpStdio:
             # A failure after spawning the subprocess (bad handshake,
             # crash, malformed JSON-RPC) would otherwise leak the child
             # and both background tasks — `__aexit__` never runs because
-            # this method is raising. `__aexit__` is defensive about None
-            # fields, so it's safe to call partway through startup.
+            # this method is raising, so clean up before propagating.
             try:
                 await self.__aexit__(None, None, None)
             except Exception:
@@ -638,8 +635,7 @@ class McpStdio:
             except asyncio.CancelledError:
                 pass
         if self._process:
-            if self._process.stdin:
-                self._process.stdin.close()
+            self._process.stdin.close()
             try:
                 await asyncio.wait_for(self._process.wait(), timeout=2.0)
             except asyncio.TimeoutError:
@@ -676,7 +672,7 @@ class McpStdio:
         return self._tools
 
     async def _send(self, msg: _JsonRpcNotification | _JsonRpcRequest) -> None:
-        if not self._process or not self._process.stdin:
+        if not self._process:
             raise RuntimeError("MCP stdio process not running")
         # Newline-Delimited JSON framing
         data = json.dumps(msg).encode() + b"\n"
@@ -690,8 +686,6 @@ class McpStdio:
         from the pipe the buffer fills (typically ~64 KB) and the child
         blocks on its next stderr write — wedging the whole session.
         """
-        if not self._process or not self._process.stderr:
-            return
         try:
             async for raw_line in self._process.stderr:
                 line = raw_line.decode(errors="replace").rstrip()
@@ -728,8 +722,6 @@ class McpStdio:
 
     async def _reader(self) -> None:
         """Read stdout line-by-line and dispatch JSON-RPC messages."""
-        if not self._process or not self._process.stdout:
-            return
         try:
             async for raw_line in self._process.stdout:
                 line = raw_line.strip()
@@ -743,13 +735,6 @@ class McpStdio:
                 msg_id = msg.get("id")
                 if msg_id is not None and str(msg_id) in self._pending:
                     fut = self._pending.pop(str(msg_id))
-                    if fut.done():
-                        log.debug(
-                            "MCP stdio: dropping late response for id=%s "
-                            "(caller already cancelled or resolved)",
-                            msg_id,
-                        )
-                        continue
                     if "error" in msg:
                         err = msg["error"]
                         fut.set_exception(

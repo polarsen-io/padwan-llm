@@ -58,7 +58,7 @@ def _wire_to_mcp_tool(wire: dict) -> McpTool:
 
 
 class TestMcpTool:
-    def test_round_trip_fields(self, mcp_wire_tools):
+    def test_round_trip_fields_and_tool_defs(self, mcp_wire_tools):
         """McpTool correctly captures name, description, and input schema from mcp wire format."""
         tool_map = {t["name"]: _wire_to_mcp_tool(t) for t in mcp_wire_tools}
 
@@ -72,8 +72,6 @@ class TestMcpTool:
         assert add.name == "add"
         assert set(add.input_schema["required"]) == {"a", "b"}
 
-    def test_to_tool_def(self, mcp_wire_tools):
-        """to_tool_def() produces a ToolDefinition compatible with LLM provider APIs."""
         for wire in mcp_wire_tools:
             tool = _wire_to_mcp_tool(wire)
             td = tool.to_tool_def()
@@ -81,6 +79,10 @@ class TestMcpTool:
             assert td["description"] == wire.get("description", "")
             assert td["parameters"] == wire["inputSchema"]
             assert td["parameters"]["type"] == "object"
+        no_params = tool_map["no_params"]
+        td = no_params.to_tool_def()
+        assert td["parameters"]["type"] == "object"
+        assert td["parameters"].get("properties") is not None
 
     @pytest.mark.parametrize(
         "wire_patch, ctx",
@@ -106,14 +108,6 @@ class TestMcpTool:
             assert td["name"] == wire["name"]
             assert isinstance(td["description"], str)
             assert td["parameters"]["type"] == "object"
-
-    def test_no_params_tool(self, mcp_wire_tools):
-        """A tool with no parameters still produces a valid schema."""
-        tool_map = {t["name"]: _wire_to_mcp_tool(t) for t in mcp_wire_tools}
-        no_params = tool_map["no_params"]
-        td = no_params.to_tool_def()
-        assert td["parameters"]["type"] == "object"
-        assert td["parameters"].get("properties") is not None
 
 
 # _to_sse_url
@@ -424,21 +418,6 @@ class TestMcpStreamable:
     def _setup_post_responses(self, mock_http, *responses):
         mock_http.post = AsyncMock(side_effect=list(responses))
 
-    async def test_initialize_and_list_tools(self, mock_http):
-        self._setup_post_responses(
-            mock_http,
-            _make_response(_INIT_RESULT),  # initialize
-            _make_response({}),  # notifications/initialized
-            _make_response(_TOOLS_RESULT),  # tools/list
-        )
-        client = McpStreamable(url="https://example.com/mcp")
-        client._http = mock_http
-        async with client:
-            assert len(client.tools) == 1
-            assert client.tools[0].name == "search"
-            td = client.tools[0].to_tool_def()
-            assert td["parameters"]["properties"]["query"]["type"] == "string"
-
     async def test_call_tool(self, mock_http):
         self._setup_post_responses(
             mock_http,
@@ -450,42 +429,66 @@ class TestMcpStreamable:
         client = McpStreamable(url="https://example.com/mcp")
         client._http = mock_http
         async with client:
+            assert len(client.tools) == 1
             tool = client.tools[0]
+            assert tool.name == "search"
+            td = tool.to_tool_def()
+            assert td["parameters"]["properties"]["query"]["type"] == "string"
             result = await tool.handler({"query": "test"})
             assert result["content"][0]["text"] == "found it"
 
-    async def test_session_id_captured(self, mock_http):
+    @pytest.mark.parametrize(
+        "session_id, expected_header_value",
+        [
+            pytest.param("abc-123", "abc-123", id="session_id_captured"),
+            pytest.param(None, None, id="no_session_id"),
+        ],
+    )
+    async def test_session_id_state(
+        self,
+        mock_http,
+        session_id,
+        expected_header_value,
+    ):
         self._setup_post_responses(
             mock_http,
-            _make_response(_INIT_RESULT, session_id="abc-123"),
-            _make_response({}, session_id="abc-123"),
-            _make_response(_TOOLS_RESULT, session_id="abc-123"),
+            _make_response(_INIT_RESULT, session_id=session_id),
+            _make_response({}, session_id=session_id),
+            _make_response(_TOOLS_RESULT, session_id=session_id),
         )
         client = McpStreamable(url="https://example.com/mcp")
         client._http = mock_http
         async with client:
-            assert client._session_id == "abc-123"
+            assert client._session_id == session_id
+            headers = client._headers()
+            assert headers["MCP-Protocol-Version"] == "2025-11-25"
+            if expected_header_value is None:
+                assert "MCP-Session-Id" not in headers
+            else:
+                assert headers["MCP-Session-Id"] == expected_header_value
 
-    async def test_no_session_id(self, mock_http):
-        self._setup_post_responses(
-            mock_http,
-            _make_response(_INIT_RESULT, session_id=None),
-            _make_response({}, session_id=None),
-            _make_response(_TOOLS_RESULT, session_id=None),
-        )
-        client = McpStreamable(url="https://example.com/mcp")
-        client._http = mock_http
-        async with client:
-            assert client._session_id is None
-
-    async def test_rpc_error_raises(self, mock_http):
-        error_resp = _make_response(
-            {
-                "jsonrpc": "2.0",
-                "id": "1",
-                "error": {"code": -32600, "message": "Invalid Request"},
-            }
-        )
+    @pytest.mark.parametrize(
+        "error_resp, expected_match",
+        [
+            pytest.param(
+                _make_response(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "1",
+                        "error": {"code": -32600, "message": "Invalid Request"},
+                    }
+                ),
+                "MCP error -32600",
+                id="jsonrpc_error",
+            ),
+            pytest.param(
+                _make_response({}, status=HTTPStatus.UNAUTHORIZED),
+                "requires authorization",
+                id="unauthorized",
+            ),
+        ],
+    )
+    async def test_rpc_failures_raise(self, mock_http, error_resp, expected_match):
         self._setup_post_responses(
             mock_http,
             _make_response(_INIT_RESULT),
@@ -496,7 +499,7 @@ class TestMcpStreamable:
         client = McpStreamable(url="https://example.com/mcp")
         client._http = mock_http
         async with client:
-            with pytest.raises(RuntimeError, match="MCP error -32600"):
+            with pytest.raises(RuntimeError, match=expected_match):
                 await client._rpc("bad/method")  # type: ignore[arg-type]
 
     async def test_404_reinitializes(self, mock_http):
@@ -505,33 +508,19 @@ class TestMcpStreamable:
         not_found.raise_for_status = MagicMock(side_effect=Exception("404"))
         self._setup_post_responses(
             mock_http,
-            _make_response(_INIT_RESULT),  # initial initialize
-            _make_response({}),  # notifications/initialized
-            _make_response(_TOOLS_RESULT),  # tools/list
+            _make_response(_INIT_RESULT),
+            _make_response({}),
+            _make_response(_TOOLS_RESULT),
             not_found,  # first attempt → 404
-            _make_response(_INIT_RESULT),  # re-initialize
-            _make_response({}),  # notifications/initialized
-            _make_response(_TOOLS_RESULT),  # retried tools/list
+            _make_response(_INIT_RESULT),
+            _make_response({}),
+            _make_response(_TOOLS_RESULT),
         )
         client = McpStreamable(url="https://example.com/mcp")
         client._http = mock_http
         async with client:
             result = await client._rpc("tools/list")
             assert "tools" in result
-
-    async def test_headers_include_session_id(self, mock_http):
-        self._setup_post_responses(
-            mock_http,
-            _make_response(_INIT_RESULT, session_id="sess-x"),
-            _make_response({}, session_id="sess-x"),
-            _make_response(_TOOLS_RESULT, session_id="sess-x"),
-        )
-        client = McpStreamable(url="https://example.com/mcp")
-        client._http = mock_http
-        async with client:
-            headers = client._headers()
-            assert headers["MCP-Session-Id"] == "sess-x"
-            assert headers["MCP-Protocol-Version"] == "2025-11-25"
 
     @pytest.mark.parametrize(
         "token, has_auth",
@@ -555,21 +544,6 @@ class TestMcpStreamable:
                 assert headers["Authorization"] == "Bearer sk-abc123"
             else:
                 assert "Authorization" not in headers
-
-    async def test_401_raises(self, mock_http):
-        unauthorized = _make_response({}, status=HTTPStatus.UNAUTHORIZED)
-        self._setup_post_responses(
-            mock_http,
-            _make_response(_INIT_RESULT),
-            _make_response({}),
-            _make_response(_TOOLS_RESULT),
-            unauthorized,
-        )
-        client = McpStreamable(url="https://example.com/mcp")
-        client._http = mock_http
-        async with client:
-            with pytest.raises(RuntimeError, match="requires authorization"):
-                await client._rpc("tools/list")
 
     async def test_listen_tracks_last_event_id(self, mock_http):
         """_listen tracks event IDs and sends Last-Event-ID on reconnect."""
@@ -927,7 +901,7 @@ if __name__ == "__main__":
 
 
 class TestMcpStdio:
-    async def test_list_tools(self):
+    async def test_list_tools_and_tool_defs(self):
         async with McpStdio(
             command=sys.executable,
             args=["-c", _STDIO_SERVER_SCRIPT],
@@ -935,34 +909,36 @@ class TestMcpStdio:
             assert len(client.tools) == 3
             names = {t.name for t in client.tools}
             assert names == {"greet", "add", "slow"}
-
-    async def test_tool_to_tool_def(self):
-        async with McpStdio(
-            command=sys.executable,
-            args=["-c", _STDIO_SERVER_SCRIPT],
-        ) as client:
             for tool in client.tools:
                 td = tool.to_tool_def()
                 assert td["name"] == tool.name
                 assert td["parameters"]["type"] == "object"
 
-    async def test_call_tool(self):
+    @pytest.mark.parametrize(
+        "tool_name, args, expected_text",
+        [
+            pytest.param(
+                "greet",
+                {"name": "World"},
+                "Hello, World!",
+                id="greet_tool",
+            ),
+            pytest.param("add", {"a": 3, "b": 4}, "7", id="add_tool"),
+        ],
+    )
+    async def test_call_tool_returns_content(
+        self,
+        tool_name: str,
+        args: dict[str, int | str],
+        expected_text: str,
+    ) -> None:
         async with McpStdio(
             command=sys.executable,
             args=["-c", _STDIO_SERVER_SCRIPT],
         ) as client:
-            greet = next(t for t in client.tools if t.name == "greet")
-            result = await greet.handler({"name": "World"})
-            assert any("Hello, World!" in c["text"] for c in result["content"])
-
-    async def test_call_add(self):
-        async with McpStdio(
-            command=sys.executable,
-            args=["-c", _STDIO_SERVER_SCRIPT],
-        ) as client:
-            add = next(t for t in client.tools if t.name == "add")
-            result = await add.handler({"a": 3, "b": 4})
-            assert any("7" in c["text"] for c in result["content"])
+            tool = next(t for t in client.tools if t.name == tool_name)
+            result = await tool.handler(args)
+            assert any(expected_text in c["text"] for c in result["content"])
 
     async def test_cancelled_rpc_does_not_kill_reader(self):
         """Cancelling one in-flight RPC must not wedge the whole session.
@@ -1089,7 +1065,6 @@ class TestMcpStdio:
 
         proc = MagicMock()
         proc.wait = fake_wait
-        proc.stdin = None
         proc.terminate = MagicMock()
         proc.kill = MagicMock(side_effect=lambda: kill_called.update(value=True))
 

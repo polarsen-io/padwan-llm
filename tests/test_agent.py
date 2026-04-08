@@ -116,21 +116,19 @@ class FakeStore:
 # Basic loop behaviour
 
 
-async def test_plain_text_response_finishes_in_one_round() -> None:
-    session, client = make_session(
-        [FakeChatStream(chunks=["Hello", " world"])],
-    )
+@pytest.mark.parametrize(
+    "chunks, expected",
+    [
+        pytest.param(["Hello", " world"], "Hello world", id="text_response"),
+        pytest.param([], "(no response)", id="empty_response"),
+    ],
+)
+async def test_single_round_response(chunks: list[str], expected: str) -> None:
+    session, client = make_session([FakeChatStream(chunks=chunks)])
     out = await session.send("hi")
-    assert out == "Hello world"
+    assert out == expected
     assert len(client.calls) == 1
-    assert session.messages[-1] == {"role": "assistant", "content": "Hello world"}
-
-
-async def test_empty_response_yields_no_response_marker() -> None:
-    session, _ = make_session([FakeChatStream(chunks=[])])
-    out = await session.send("hi")
-    assert out == "(no response)"
-    assert session.messages[-1] == {"role": "assistant", "content": "(no response)"}
+    assert session.messages[-1] == {"role": "assistant", "content": expected}
 
 
 async def test_tool_call_round_trip() -> None:
@@ -492,36 +490,37 @@ def test_conversation_state_snapshot_round_trip() -> None:
     assert sum(1 for m in restored.messages if m.get("role") == "system") == 1
 
 
-async def test_save_and_load_via_store_round_trips_state() -> None:
+@pytest.mark.parametrize(
+    "source_chunks, source_system, load_kwargs, expected_system",
+    [
+        pytest.param(
+            ["hello"],
+            "be helpful",
+            {},
+            "be helpful",
+            id="round_trips_state",
+        ),
+        pytest.param(
+            ["x"],
+            "original",
+            {"system": "overridden — should be ignored"},
+            "original",
+            id="ignores_system_kwarg",
+        ),
+    ],
+)
+async def test_load_restores_state_from_store(
+    source_chunks: list[str],
+    source_system: str,
+    load_kwargs: dict[str, str],
+    expected_system: str,
+) -> None:
     store = FakeStore()
     session, _ = make_session(
-        [FakeChatStream(chunks=["hello"])],
+        [FakeChatStream(chunks=source_chunks)],
         store=store,
         session_id="abc",
-        system="be helpful",
-    )
-    await session.send("hi")
-    session.save()
-
-    # Restore via the classmethod constructor — single call.
-    client2 = FakeClient(responses=[FakeChatStream(chunks=["world"])])
-    session2 = AgentSession.load(
-        client=cast(LLMClientBase, client2),
-        store=store,
-        session_id="abc",
-    )
-    assert session2.messages == session.messages
-    assert session2.system == "be helpful"
-
-
-async def test_load_classmethod_ignores_system_kwarg() -> None:
-    """The system prompt is taken from the snapshot, not the kwargs."""
-    store = FakeStore()
-    session, _ = make_session(
-        [FakeChatStream(chunks=["x"])],
-        store=store,
-        session_id="abc",
-        system="original",
+        system=source_system,
     )
     await session.send("hi")
     session.save()
@@ -531,9 +530,10 @@ async def test_load_classmethod_ignores_system_kwarg() -> None:
         client=cast(LLMClientBase, client2),
         store=store,
         session_id="abc",
-        system="overridden — should be ignored",
+        **load_kwargs,
     )
-    assert session2.system == "original"
+    assert session2.messages == session.messages
+    assert session2.system == expected_system
 
 
 @pytest.mark.parametrize(
@@ -676,95 +676,93 @@ def _make_local_tool(name: str, payload: str) -> McpTool:
     )
 
 
-async def test_duplicate_local_tool_names_raise() -> None:
-    """Regression: two **local** tools sharing a name used to silently
-    overwrite each other in the dispatch dict — every call to that name
-    would hit whichever handler was registered last, while both
-    definitions were advertised to the model. Local tools have no
-    transport to derive an auto-prefix from, so the session raises.
-    """
-    session, _ = make_session(
-        [FakeChatStream(chunks=["unused"])],
-        mcp_tools=[_make_local_tool("search", "a"), _make_local_tool("search", "b")],
-    )
-    with pytest.raises(ValueError, match="Duplicate tool name 'search'"):
-        await session.send("hi")
+@pytest.mark.parametrize(
+    "scenario, expected_names, expected_error",
+    [
+        pytest.param(
+            "duplicate_local_tools",
+            None,
+            "Duplicate tool name 'search'",
+            id="duplicate_local_tools_raise",
+        ),
+        pytest.param(
+            "auto_prefix_transports",
+            {"src_a__search", "src_a__filter", "src_b__search"},
+            None,
+            id="collision_auto_prefixes_transports",
+        ),
+        pytest.param(
+            "skip_explicit_prefix",
+            {"weather__search", "search"},
+            None,
+            id="collision_skips_transport_with_explicit_prefix",
+        ),
+        pytest.param(
+            "duplicate_explicit_prefixes",
+            None,
+            "Duplicate tool name 'weather__search'",
+            id="collision_with_two_explicit_prefixes_colliding_raises",
+        ),
+    ],
+)
+async def test_tool_name_collision_handling(
+    scenario: str,
+    expected_names: set[str] | None,
+    expected_error: str | None,
+) -> None:
+    """Covers duplicate-name behaviour for local tools and transports."""
+    if scenario == "duplicate_local_tools":
+        mcp_tools: Sequence[McpTool] = [
+            _make_local_tool("search", "a"),
+            _make_local_tool("search", "b"),
+        ]
+    elif scenario == "auto_prefix_transports":
+        transport_a = _FakeTransport(
+            _tools=[
+                _make_local_tool("search", "a-search"),
+                _make_local_tool("filter", "a-filter"),
+            ],
+            auto_prefix_value="src_a",
+        )
+        transport_b = _FakeTransport(
+            _tools=[_make_local_tool("search", "b-search")],
+            auto_prefix_value="src_b",
+        )
+        mcp_tools = cast(Sequence[McpTool], [transport_a, transport_b])
+    elif scenario == "skip_explicit_prefix":
+        transport_a = _FakeTransport(
+            _tools=[_make_local_tool("weather__search", "a")],
+            name_prefix="weather",
+        )
+        transport_b = _FakeTransport(
+            _tools=[_make_local_tool("search", "b")],
+            auto_prefix_value="src_b",
+        )
+        mcp_tools = cast(Sequence[McpTool], [transport_a, transport_b])
+    else:
+        transport_a = _FakeTransport(
+            _tools=[_make_local_tool("weather__search", "a")],
+            name_prefix="weather",
+        )
+        transport_b = _FakeTransport(
+            _tools=[_make_local_tool("weather__search", "b")],
+            name_prefix="weather",
+        )
+        mcp_tools = cast(Sequence[McpTool], [transport_a, transport_b])
 
-
-async def test_collision_auto_prefixes_transports() -> None:
-    """Two MCP transports exposing the same tool name without explicit
-    `name_prefix` should both get auto-prefixed (consistent naming for
-    every tool from the same transport, not just the colliding one).
-    """
-    transport_a = _FakeTransport(
-        _tools=[
-            _make_local_tool("search", "a-search"),
-            _make_local_tool("filter", "a-filter"),  # not colliding
-        ],
-        auto_prefix_value="src_a",
-    )
-    transport_b = _FakeTransport(
-        _tools=[_make_local_tool("search", "b-search")],
-        auto_prefix_value="src_b",
-    )
     session, client = make_session(
-        [FakeChatStream(chunks=["done"])],
-        mcp_tools=cast(Sequence[McpTool], [transport_a, transport_b]),
+        [FakeChatStream(chunks=["done" if expected_error is None else "unused"])],
+        mcp_tools=mcp_tools,
     )
+
+    if expected_error is not None:
+        with pytest.raises(ValueError, match=expected_error):
+            await session.send("hi")
+        return
+
     await session.send("hi")
     advertised = {t["name"] for t in client.calls[0][1]}
-    # Every tool from each colliding transport gets prefixed for
-    # consistency, so a prompt that uses one prefix can rely on it.
-    assert advertised == {"src_a__search", "src_a__filter", "src_b__search"}
-
-
-async def test_collision_skips_transport_with_explicit_prefix() -> None:
-    """Explicit `name_prefix` wins: a transport that already has one
-    keeps it untouched, while the un-prefixed colliding transport gets
-    auto-prefixed instead.
-    """
-    transport_a = _FakeTransport(
-        _tools=[_make_local_tool("search", "a")],
-        name_prefix="weather",
-    )
-    transport_b = _FakeTransport(
-        _tools=[_make_local_tool("search", "b")],
-        auto_prefix_value="src_b",
-    )
-    # transport_a's tool already arrives as "search" because the fake
-    # doesn't run _build_tools — simulate the prefixed name directly.
-    transport_a._tools = [_make_local_tool("weather__search", "a")]
-    session, client = make_session(
-        [FakeChatStream(chunks=["done"])],
-        mcp_tools=cast(Sequence[McpTool], [transport_a, transport_b]),
-    )
-    await session.send("hi")
-    advertised = {t["name"] for t in client.calls[0][1]}
-    # No collision in the first place — both already-distinct names go through.
-    assert advertised == {"weather__search", "search"}
-
-
-async def test_collision_with_two_explicit_prefixes_colliding_raises() -> None:
-    """If two transports both have explicit `name_prefix` set to the
-    same value (or to values that produce the same prefixed name),
-    auto-prefixing is skipped because the operator already declared
-    intent — fall back to raising so they fix the source.
-    """
-    # Simulate both transports applying the same explicit prefix
-    transport_a = _FakeTransport(
-        _tools=[_make_local_tool("weather__search", "a")],
-        name_prefix="weather",
-    )
-    transport_b = _FakeTransport(
-        _tools=[_make_local_tool("weather__search", "b")],
-        name_prefix="weather",
-    )
-    session, _ = make_session(
-        [FakeChatStream(chunks=["unused"])],
-        mcp_tools=cast(Sequence[McpTool], [transport_a, transport_b]),
-    )
-    with pytest.raises(ValueError, match="Duplicate tool name 'weather__search'"):
-        await session.send("hi")
+    assert advertised == expected_names
 
 
 # `_extract_text` regression tests for tool result normalization

@@ -5,7 +5,7 @@ import json
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol, Self
+from typing import Any, Literal, Protocol, Self, cast
 
 from ._base import LLMClientBase
 from ._json import loads as _json_loads
@@ -209,8 +209,9 @@ class AgentSession:
                 "Provide exactly one of model= or client=, not both — "
                 "passing both would silently drop the custom client."
             )
-        _client = LLMClient(model=model) if model is not None else client
-        assert _client is not None
+        _client = (
+            LLMClient(model=model) if model is not None else cast(LLMClientBase, client)
+        )
 
         if session_id is None:
             # Fresh session — no snapshot to restore, rely on the main
