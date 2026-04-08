@@ -143,20 +143,26 @@ class AgentSession:
         cls,
         *,
         store: ConversationStore,
-        session_id: str,
+        session_id: str | None = None,
         model: str | None = None,
         client: LLMClientBase | None = None,
         **kwargs: Any,
     ) -> Self:
-        """Construct an AgentSession with state restored from `store`.
+        """Construct an AgentSession, optionally restoring state from `store`.
+
+        If `session_id` is provided, the matching snapshot is fetched from
+        `store` and used to restore the conversation history, total usage,
+        and system prompt. If it's `None`, a fresh `session_id` is generated
+        and the session starts empty; future `save()` calls still go to the
+        configured store.
 
         Pass `model` to have an `LLMClient` created automatically (intended
         for use as an async context manager). Pass `client` directly when you
         need a pre-configured or fake client (e.g. in tests). Exactly one of
         the two must be provided.
 
-        The `system` prompt is taken from the persisted snapshot; any `system`
-        value in `kwargs` is ignored.
+        When restoring, the `system` prompt is taken from the persisted
+        snapshot; any `system` value in `kwargs` is ignored.
         """
         if model is None and client is None:
             raise ValueError("Either model= or client= must be provided")
@@ -167,6 +173,12 @@ class AgentSession:
             )
         _client = LLMClient(model=model) if model is not None else client
         assert _client is not None
+
+        if session_id is None:
+            # Fresh session — no snapshot to restore, rely on the main
+            # constructor's session_id default_factory.
+            return cls(client=_client, store=store, **kwargs)
+
         snapshot = store.load(session_id)
         kwargs.pop("system", None)
         instance = cls(

@@ -581,6 +581,35 @@ async def test_load_classmethod_ignores_system_kwarg() -> None:
     assert session2.system == "original"
 
 
+async def test_load_without_session_id_starts_fresh() -> None:
+    """`session_id=None` means 'start a new session', not 'fail to load'.
+
+    The store is still wired up so the new session can be `save()`d later.
+    """
+    storage: dict[str, ConversationSnapshot] = {}
+
+    class FakeStore:
+        def save(self, session_id: str, snapshot: ConversationSnapshot) -> None:
+            storage[session_id] = snapshot
+
+        def load(self, session_id: str) -> ConversationSnapshot:
+            return storage[session_id]
+
+    store = FakeStore()
+    fake = FakeClient(responses=[FakeChatStream(chunks=["hi"])])
+    session = AgentSession.load(
+        client=cast(LLMClientBase, fake),
+        store=store,
+        # session_id omitted — should generate a fresh one
+    )
+    assert session.messages == []
+    assert session.session_id  # non-empty, generated
+    assert session.store is store
+    await session.send("hi")
+    session.save()
+    assert session.session_id in storage  # save lands in store under the generated id
+
+
 async def test_load_rejects_both_model_and_client() -> None:
     """Regression: load() silently dropped `client=` when `model=` was also set.
 

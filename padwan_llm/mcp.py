@@ -247,6 +247,15 @@ class McpStreamable:
             raise
         finally:
             await self._http.close()
+            # Reset state so the same instance can be re-entered in a
+            # fresh `async with` block. `is_open` must flip back to False
+            # so callers (e.g. AgentSession.__aenter__) treat this as a
+            # brand-new transport on the next entry.
+            self._bg_task = None
+            self._session_id = None
+            self._last_event_id = None
+            self._retry_ms = _DEFAULT_RETRY_MS
+            self._http = niquests.AsyncSession()
 
     @property
     def tools(self) -> list[McpTool]:
@@ -518,6 +527,14 @@ class McpStdio:
             if not fut.done():
                 fut.set_exception(RuntimeError("MCP stdio connection closed"))
         self._pending.clear()
+        # Reset state so the same instance can be re-entered in a fresh
+        # `async with` block. `is_open` must flip back to False so callers
+        # (e.g. AgentSession.__aenter__) treat this as a brand-new
+        # transport on the next entry.
+        self._process = None
+        self._reader_task = None
+        self._stderr_task = None
+        self._next_id = 0
 
     @property
     def tools(self) -> list[McpTool]:

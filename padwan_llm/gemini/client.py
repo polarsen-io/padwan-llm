@@ -430,9 +430,16 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
         raw_reason = candidates[0].get("finishReason", "STOP")
         tool_calls = self._extract_gemini_tool_calls(parts)
 
-        # Extract text from parts (may coexist with function calls)
+        # Extract text from parts (may coexist with function calls). Thought
+        # parts are forwarded to `on_thought` if set and skipped as regular
+        # text — otherwise the model's internal reasoning would leak into
+        # the final answer.
         text: str | None = None
         for part in parts:
+            if part.get("thought"):
+                if self.on_thought and (thought_text := part.get("text")):
+                    self.on_thought(thought_text)
+                continue
             if (t := part.get("text")) is not None:
                 text = t
                 break

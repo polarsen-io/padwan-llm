@@ -417,7 +417,7 @@ class TestMcpStreamable:
         async with client:
             # Wait for _listen background task to finish
             await asyncio.sleep(0.05)
-        assert client._last_event_id == "evt-1"
+            assert client._last_event_id == "evt-1"
         # Second GET call should have Last-Event-ID header
         second_call_headers = mock_http.get.call_args_list[1].kwargs.get(
             "headers",
@@ -445,7 +445,7 @@ class TestMcpStreamable:
         client._retry_ms = 0
         async with client:
             await asyncio.sleep(0.05)
-        assert client._retry_ms == 5000
+            assert client._retry_ms == 5000
 
     async def test_listen_stops_after_max_retries(self, mock_http):
         """_listen gives up after _MAX_LISTEN_RETRIES consecutive failures."""
@@ -543,6 +543,39 @@ class TestMcpStreamable:
             "json", ping_call[1].get("json") if len(ping_call) > 1 else None
         )
         assert body["method"] == "ping"
+
+    async def test_reentry_after_exit(self, mock_http):
+        """Regression: `__aexit__` left `_bg_task`/`_session_id` populated, so
+        `is_open` stayed True after the first exit. That broke two things:
+        re-using the same instance in a second `async with` raised
+        "already open", and passing the post-exit instance into
+        `AgentSession` (which checks `is_open`) made the session skip
+        re-initialization and then fail on the first tool call because
+        `_http` had already been closed.
+        """
+        self._setup_post_responses(
+            mock_http,
+            # First entry: init + initialized notify + tools/list
+            _make_response(_INIT_RESULT),
+            _make_response({}),
+            _make_response(_TOOLS_RESULT),
+            # Second entry: same handshake again
+            _make_response(_INIT_RESULT),
+            _make_response({}),
+            _make_response(_TOOLS_RESULT),
+        )
+        client = McpStreamable(url="https://example.com/mcp")
+        client._http = mock_http
+        async with client:
+            assert client.is_open
+        assert not client.is_open
+        assert client._bg_task is None
+        assert client._session_id is None
+        # And it must be re-enterable, with a fresh _http underneath.
+        client._http = mock_http  # would have been recreated on exit
+        async with client:
+            assert client.is_open
+        assert not client.is_open
 
 
 # McpStdio
@@ -709,3 +742,31 @@ class TestMcpStdio:
             assert tools_ref is client.tools  # same list object
             assert [t.name for t in tools_ref] == ["refreshed_tool"]
             assert original_names != {"refreshed_tool"}
+
+    async def test_reentry_after_exit(self):
+        """Regression: `__aexit__` left `_process` populated, so `is_open`
+        stayed True after the first exit. Re-using the same instance in a
+        second `async with` raised "already open", and passing the
+        post-exit instance into `AgentSession` (which checks `is_open`)
+        made the session skip re-initialization and then issue tool calls
+        against a dead subprocess.
+        """
+        client = McpStdio(
+            command=sys.executable,
+            args=["-c", _STDIO_SERVER_SCRIPT],
+        )
+        async with client:
+            assert client.is_open
+            assert {t.name for t in client.tools} == {"greet", "add", "slow"}
+        assert not client.is_open
+        assert client._process is None
+        assert client._reader_task is None
+        assert client._stderr_task is None
+        # Same instance must be re-enterable end-to-end (new subprocess,
+        # fresh reader, working tool call).
+        async with client:
+            assert client.is_open
+            greet = next(t for t in client.tools if t.name == "greet")
+            result = await greet.handler({"name": "again"})
+            assert any("Hello, again!" in c["text"] for c in result["content"])
+        assert not client.is_open

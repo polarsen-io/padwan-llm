@@ -178,6 +178,14 @@ async with AgentSession.load(
 
 `load()` pulls the `system` prompt and full message history from the snapshot. Pass `client=` instead of `model=` when you need a pre-configured or fake client (e.g. in tests).
 
+`session_id` is optional — omit it to start a fresh session that's still wired up to the store, so a later `session.save()` lands under an auto-generated id:
+
+```python
+async with AgentSession.load(model="gpt-4o", store=store) as session:
+    await session.send("Hello!")
+    session.save()  # persisted under session.session_id
+```
+
 ## How tool results are fed back
 
 When the LLM response contains tool calls, the agent:

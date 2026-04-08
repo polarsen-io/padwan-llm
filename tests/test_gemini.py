@@ -281,6 +281,43 @@ class TestGenConfig:
             "includeThoughts": True,
         }
 
+    async def test_complete_chat_skips_thought_parts(self):
+        """Regression: `complete_chat` used to return the first text part
+        even if it was flagged `thought: true`, leaking the model's
+        internal reasoning into the final answer instead of the real
+        response. Thought parts must be skipped (and forwarded to
+        `on_thought` if set) like the streaming path already does.
+        """
+        thoughts: list[str] = []
+        client = GeminiClient(
+            api_key="test",
+            thinking_config={"thinkingBudget": 2048, "includeThoughts": True},
+            on_thought=thoughts.append,
+        )
+
+        async def fake_complete(body, model=None):
+            return (
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {"text": "thinking out loud...", "thought": True},
+                                    {"text": "the real answer"},
+                                ]
+                            },
+                            "finishReason": "STOP",
+                        }
+                    ]
+                },
+                {"total": 0, "input": 0, "output": 0},
+            )
+
+        client.complete = fake_complete  # type: ignore[method-assign]
+        response, _ = await client.complete_chat([{"role": "user", "content": "hi"}])
+        assert response["content"] == "the real answer"
+        assert thoughts == ["thinking out loud..."]
+
 
 # Batch
 
