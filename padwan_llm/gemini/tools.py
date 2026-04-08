@@ -10,6 +10,7 @@ from .models import (
     GeminiTool,
     Part,
 )
+from .._json import loads as _json_loads
 from ..conversation import AssistantToolMessage, ToolResultMessage
 from ..models import ToolCall, ToolCallFunction, ToolDefinition
 
@@ -68,7 +69,7 @@ class GeminiToolMixin:
         The content is parsed as JSON if possible, otherwise wrapped in {"result": ...}.
         """
         try:
-            response_data = json.loads(msg["content"])
+            response_data = _json_loads(msg["content"])
         except (json.JSONDecodeError, TypeError):  # fmt: skip
             response_data = {"result": msg["content"]}
         if not isinstance(response_data, dict):
@@ -99,7 +100,7 @@ class GeminiToolMixin:
         for tc in msg["tool_calls"]:
             args = tc["function"]["arguments"]
             try:
-                parsed_args = json.loads(args)
+                parsed_args = _json_loads(args)
             except (json.JSONDecodeError, TypeError):  # fmt: skip
                 parsed_args = {}
             part: FunctionCallPart = {

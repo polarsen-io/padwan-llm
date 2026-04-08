@@ -240,96 +240,100 @@ class TestStreamForwardsThoughts:
     """`OpenAIChatStream.__aiter__` must forward reasoning chunks to
     `client.on_thought` for both Grok-style `reasoning_content` and
     Mistral-style `ThinkChunk` payloads, while keeping the regular text
-    stream free of any thought content.
+    stream free of any thought content. When `on_thought` is unset,
+    reasoning chunks are silently dropped — never raised, never yielded.
     """
 
-    async def _drive(
+    @pytest.mark.parametrize(
+        "chunks, expected_text, expected_thoughts, with_callback",
+        [
+            pytest.param(
+                [
+                    {"choices": [{"delta": {"reasoning_content": "Let me think... "}}]},
+                    {"choices": [{"delta": {"reasoning_content": "ok done."}}]},
+                    {"choices": [{"delta": {"content": "The answer is 42"}}]},
+                ],
+                "The answer is 42",
+                ["Let me think... ", "ok done."],
+                True,
+                id="grok_reasoning_content",
+            ),
+            pytest.param(
+                [
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "content": [
+                                        {
+                                            "type": "thinking",
+                                            "thinking": [
+                                                {
+                                                    "type": "text",
+                                                    "text": "Reasoning step 1",
+                                                }
+                                            ],
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "content": [
+                                        {"type": "text", "text": "Final answer."},
+                                    ]
+                                }
+                            }
+                        ]
+                    },
+                ],
+                "Final answer.",
+                ["Reasoning step 1"],
+                True,
+                id="mistral_thinking_chunks",
+            ),
+            pytest.param(
+                [
+                    {
+                        "choices": [
+                            {"delta": {"reasoning_content": "internal scratchpad"}}
+                        ]
+                    },
+                    {"choices": [{"delta": {"content": "answer"}}]},
+                ],
+                "answer",
+                [],
+                False,  # on_thought=None
+                id="no_callback_drops_silently",
+            ),
+        ],
+    )
+    async def test_forwards_or_drops_thoughts(
         self,
         chunks: list[dict],
-        on_thought: list[str],
-    ) -> tuple[list[str], list[str]]:
-        """Run a fake stream through `OpenAIChatStream` and return
-        (yielded_text_chunks, on_thought_calls)."""
-
+        expected_text: str,
+        expected_thoughts: list[str],
+        with_callback: bool,
+    ):
         async def fake_stream(_body):
             for c in chunks:
                 yield c
 
+        thoughts: list[str] = []
         client = MagicMock(spec=OpenAIClient)
         client.model = "test-model"
         client.temperature = 0.2
         client.provider = "openai"
-        client.on_thought = on_thought.append
+        client.on_thought = thoughts.append if with_callback else None
         client.stream = fake_stream
         stream = OpenAIChatStream(client, [])
         produced = [t async for t in stream]
-        return produced, on_thought
-
-    async def test_grok_reasoning_content(self):
-        """xAI/Grok surfaces reasoning via `delta.reasoning_content`."""
-        chunks = [
-            {"choices": [{"delta": {"reasoning_content": "Let me think... "}}]},
-            {"choices": [{"delta": {"reasoning_content": "ok done."}}]},
-            {"choices": [{"delta": {"content": "The answer is 42"}}]},
-        ]
-        thoughts: list[str] = []
-        text_chunks, _ = await self._drive(chunks, thoughts)
-        assert "".join(text_chunks) == "The answer is 42"
-        assert thoughts == ["Let me think... ", "ok done."]
-
-    async def test_mistral_thinking_chunks(self):
-        """Mistral Magistral surfaces reasoning via structured `ThinkChunk`."""
-        chunks = [
-            {
-                "choices": [
-                    {
-                        "delta": {
-                            "content": [
-                                {
-                                    "type": "thinking",
-                                    "thinking": [
-                                        {"type": "text", "text": "Reasoning step 1"}
-                                    ],
-                                }
-                            ]
-                        }
-                    }
-                ]
-            },
-            {
-                "choices": [
-                    {
-                        "delta": {
-                            "content": [
-                                {"type": "text", "text": "Final answer."},
-                            ]
-                        }
-                    }
-                ]
-            },
-        ]
-        thoughts: list[str] = []
-        text_chunks, _ = await self._drive(chunks, thoughts)
-        assert "".join(text_chunks) == "Final answer."
-        assert thoughts == ["Reasoning step 1"]
-
-    async def test_no_callback_when_unset(self):
-        """If `on_thought` is None, reasoning content is silently dropped
-        from the text stream — never raised, never yielded."""
-
-        async def fake_stream(_body):
-            yield {"choices": [{"delta": {"reasoning_content": "internal scratchpad"}}]}
-            yield {"choices": [{"delta": {"content": "answer"}}]}
-
-        client = MagicMock(spec=OpenAIClient)
-        client.model = "test-model"
-        client.temperature = 0.2
-        client.provider = "openai"
-        client.on_thought = None
-        client.stream = fake_stream
-        stream = OpenAIChatStream(client, [])
-        produced = [t async for t in stream]
-        assert "".join(produced) == "answer"
+        assert "".join(produced) == expected_text
+        assert thoughts == expected_thoughts
 
 
 class TestBatchResultFromLine:

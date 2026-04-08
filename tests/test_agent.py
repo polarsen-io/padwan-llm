@@ -19,7 +19,7 @@ from padwan_llm import (
     ToolDefinition,
     UsageToken,
 )
-from padwan_llm.agent import ToolErrorHandler
+from padwan_llm.agent import ToolErrorHandler, _extract_text
 
 
 # Fakes
@@ -98,6 +98,19 @@ def make_tool_call(
         type="function",
         function=ToolCallFunction(name=name, arguments=json.dumps(args)),
     )
+
+
+class FakeStore:
+    """In-memory ConversationStore used by every persistence test."""
+
+    def __init__(self) -> None:
+        self.storage: dict[str, ConversationSnapshot] = {}
+
+    def save(self, session_id: str, snapshot: ConversationSnapshot) -> None:
+        self.storage[session_id] = snapshot
+
+    def load(self, session_id: str) -> ConversationSnapshot:
+        return self.storage[session_id]
 
 
 # Basic loop behaviour
@@ -247,7 +260,16 @@ def test_invalid_max_tool_rounds_rejected() -> None:
 # Context truncation
 
 
-async def test_long_tool_result_truncated_in_context_only() -> None:
+@pytest.mark.parametrize(
+    "max_tool_result_chars, expected_truncated",
+    [
+        pytest.param(100, True, id="limit_truncates"),
+        pytest.param(None, False, id="none_disables"),
+    ],
+)
+async def test_tool_result_context_truncation(
+    max_tool_result_chars: int | None, expected_truncated: bool
+) -> None:
     huge = "x" * 50_000
 
     async def big(_args: dict[str, Any]) -> str:
@@ -265,46 +287,21 @@ async def test_long_tool_result_truncated_in_context_only() -> None:
             FakeChatStream(chunks=["done"]),
         ],
         mcp_tools=[tool],
-        max_tool_result_chars=100,
+        max_tool_result_chars=max_tool_result_chars,
     )
     await session.send("go")
 
-    # Stored history keeps the full result
+    # Stored history always keeps the full result
     stored = next(m for m in session.messages if m.get("role") == "tool")
     assert len(stored["content"]) == 50_000  # type: ignore[typeddict-item]
 
-    # The context sent to the second LLM call is truncated
     second_messages = client.calls[1][0]
     sent = next(m for m in second_messages if m.get("role") == "tool")
-    assert len(sent["content"]) <= 200  # type: ignore[typeddict-item]
-    assert sent["content"].endswith("[truncated]")  # type: ignore[typeddict-item]
-
-
-async def test_max_tool_result_chars_none_disables_truncation() -> None:
-    huge = "x" * 50_000
-
-    async def big(_args: dict[str, Any]) -> str:
-        return huge
-
-    tool = McpTool(
-        name="big",
-        description="",
-        input_schema={"type": "object", "properties": {}},
-        handler=big,
-    )
-    session, client = make_session(
-        [
-            FakeChatStream(chunks=[], tool_calls=[make_tool_call("big", {})]),
-            FakeChatStream(chunks=["done"]),
-        ],
-        mcp_tools=[tool],
-        max_tool_result_chars=None,
-    )
-    await session.send("go")
-
-    second_messages = client.calls[1][0]
-    sent = next(m for m in second_messages if m.get("role") == "tool")
-    assert len(sent["content"]) == 50_000  # type: ignore[typeddict-item]
+    if expected_truncated:
+        assert len(sent["content"]) <= 200  # type: ignore[typeddict-item]
+        assert sent["content"].endswith("[truncated]")  # type: ignore[typeddict-item]
+    else:
+        assert len(sent["content"]) == 50_000  # type: ignore[typeddict-item]
 
 
 # Hooks
@@ -382,7 +379,16 @@ async def test_approve_tool_denied_skips_handler(hook: Any) -> None:
 # Parallel vs sequential execution
 
 
-async def test_parallel_execution_runs_handlers_concurrently() -> None:
+@pytest.mark.parametrize(
+    "execution, expected_max_concurrent",
+    [
+        pytest.param("parallel", 2, id="parallel"),
+        pytest.param("sequential", 1, id="sequential"),
+    ],
+)
+async def test_execution_policy_controls_concurrency(
+    execution: str, expected_max_concurrent: int
+) -> None:
     state = {"current": 0, "max": 0}
 
     async def handler(_args: dict[str, Any]) -> str:
@@ -410,43 +416,10 @@ async def test_parallel_execution_runs_handlers_concurrently() -> None:
             FakeChatStream(chunks=["done"]),
         ],
         mcp_tools=[tool],
-        execution="parallel",
+        execution=execution,  # type: ignore[arg-type]
     )
     await session.send("go")
-    assert state["max"] == 2
-
-
-async def test_sequential_execution_runs_handlers_one_at_a_time() -> None:
-    state = {"current": 0, "max": 0}
-
-    async def handler(_args: dict[str, Any]) -> str:
-        state["current"] += 1
-        state["max"] = max(state["max"], state["current"])
-        await asyncio.sleep(0.02)
-        state["current"] -= 1
-        return "ok"
-
-    tool = McpTool(
-        name="t",
-        description="",
-        input_schema={"type": "object", "properties": {}},
-        handler=handler,
-    )
-    session, _ = make_session(
-        [
-            FakeChatStream(
-                chunks=[],
-                tool_calls=[
-                    make_tool_call("t", {}, call_id="a"),
-                    make_tool_call("t", {}, call_id="b"),
-                ],
-            ),
-            FakeChatStream(chunks=["done"]),
-        ],
-        mcp_tools=[tool],
-    )
-    await session.send("go")
-    assert state["max"] == 1
+    assert state["max"] == expected_max_concurrent
 
 
 # Per-round tool refresh
@@ -520,15 +493,6 @@ def test_conversation_state_snapshot_round_trip() -> None:
 
 
 async def test_save_and_load_via_store_round_trips_state() -> None:
-    storage: dict[str, ConversationSnapshot] = {}
-
-    class FakeStore:
-        def save(self, session_id: str, snapshot: ConversationSnapshot) -> None:
-            storage[session_id] = snapshot
-
-        def load(self, session_id: str) -> ConversationSnapshot:
-            return storage[session_id]
-
     store = FakeStore()
     session, _ = make_session(
         [FakeChatStream(chunks=["hello"])],
@@ -552,15 +516,6 @@ async def test_save_and_load_via_store_round_trips_state() -> None:
 
 async def test_load_classmethod_ignores_system_kwarg() -> None:
     """The system prompt is taken from the snapshot, not the kwargs."""
-    storage: dict[str, ConversationSnapshot] = {}
-
-    class FakeStore:
-        def save(self, session_id: str, snapshot: ConversationSnapshot) -> None:
-            storage[session_id] = snapshot
-
-        def load(self, session_id: str) -> ConversationSnapshot:
-            return storage[session_id]
-
     store = FakeStore()
     session, _ = make_session(
         [FakeChatStream(chunks=["x"])],
@@ -581,33 +536,44 @@ async def test_load_classmethod_ignores_system_kwarg() -> None:
     assert session2.system == "original"
 
 
-async def test_load_without_session_id_starts_fresh() -> None:
-    """`session_id=None` means 'start a new session', not 'fail to load'.
+@pytest.mark.parametrize(
+    "session_id_arg, expected_id_check",
+    [
+        # `session_id=None` → fresh id is generated; just check it's non-empty.
+        pytest.param(None, lambda sid: bool(sid), id="none_generates_fresh_id"),
+        # `session_id="..."` but missing in store → fresh session, id pinned.
+        pytest.param(
+            "not-yet-saved",
+            lambda sid: sid == "not-yet-saved",
+            id="unknown_id_pins_to_caller_value",
+        ),
+    ],
+)
+async def test_load_starts_fresh_when_no_snapshot(
+    session_id_arg: str | None,
+    expected_id_check: Any,
+) -> None:
+    """`AgentSession.load()` is a get-or-create entry point.
 
-    The store is still wired up so the new session can be `save()`d later.
+    Either `session_id=None` or a `session_id` that has no snapshot in the
+    store should produce an empty session that's still wired up to the
+    store, so the first `save()` lands under the right id. The previous
+    behaviour required callers to probe the store themselves before
+    deciding whether to construct or restore.
     """
-    storage: dict[str, ConversationSnapshot] = {}
-
-    class FakeStore:
-        def save(self, session_id: str, snapshot: ConversationSnapshot) -> None:
-            storage[session_id] = snapshot
-
-        def load(self, session_id: str) -> ConversationSnapshot:
-            return storage[session_id]
-
     store = FakeStore()
     fake = FakeClient(responses=[FakeChatStream(chunks=["hi"])])
     session = AgentSession.load(
         client=cast(LLMClientBase, fake),
         store=store,
-        # session_id omitted — should generate a fresh one
+        session_id=session_id_arg,
     )
     assert session.messages == []
-    assert session.session_id  # non-empty, generated
+    assert expected_id_check(session.session_id)
     assert session.store is store
     await session.send("hi")
     session.save()
-    assert session.session_id in storage  # save lands in store under the generated id
+    assert session.session_id in store.storage
 
 
 async def test_load_rejects_both_model_and_client() -> None:
@@ -617,22 +583,7 @@ async def test_load_rejects_both_model_and_client() -> None:
     adding model= — their client would be swapped for a fresh `LLMClient`
     with default auth, turning tests into real network calls.
     """
-    storage: dict[str, ConversationSnapshot] = {}
-
-    class FakeStore:
-        def save(self, session_id: str, snapshot: ConversationSnapshot) -> None:
-            storage[session_id] = snapshot
-
-        def load(self, session_id: str) -> ConversationSnapshot:
-            return storage[session_id]
-
     store = FakeStore()
-    session, _ = make_session(
-        [FakeChatStream(chunks=["x"])], store=store, session_id="abc", system="sys"
-    )
-    await session.send("hi")
-    session.save()
-
     fake = FakeClient(responses=[FakeChatStream(chunks=["y"])])
     with pytest.raises(ValueError, match="exactly one of model= or client="):
         AgentSession.load(
@@ -643,34 +594,329 @@ async def test_load_rejects_both_model_and_client() -> None:
         )
 
 
-async def test_aenter_skips_already_open_client() -> None:
-    """Regression: AgentSession.__aenter__ used to unconditionally enter
-    the client, orphaning the original session and leaking HTTP state.
-    Now it detects `is_open` and skips.
+@pytest.mark.parametrize(
+    "pre_open, expected_session_managed",
+    [
+        # Caller already entered the client → session must leave it alone.
+        pytest.param(True, False, id="pre_open_session_skips"),
+        # Fresh client → session enters and exits it.
+        pytest.param(False, True, id="fresh_session_manages"),
+    ],
+)
+async def test_aenter_respects_client_lifecycle(
+    pre_open: bool, expected_session_managed: bool
+) -> None:
+    """Regression: `AgentSession.__aenter__` used to unconditionally enter
+    the client, orphaning any pre-existing session and leaking HTTP state.
+    Now it detects `is_open` and only manages clients that aren't already
+    open. Resources opened by the caller stay owned by the caller.
     """
     fake = FakeClient(responses=[FakeChatStream(chunks=["ok"])])
-    # Pretend the caller already entered the client elsewhere
-    await fake.__aenter__()
-    assert fake.aenter_count == 1
+    if pre_open:
+        await fake.__aenter__()
+    initial_aenter = fake.aenter_count
 
     async with AgentSession(client=cast(LLMClientBase, fake)) as session:
         await session.send("hi")
 
-    # AgentSession must NOT have re-entered the already-open client
+    if expected_session_managed:
+        # The session opened it (1 enter) and closed it on exit (1 exit).
+        assert fake.aenter_count == initial_aenter + 1
+        assert fake.aexit_count == 1
+    else:
+        # The session must not have touched the lifecycle at all.
+        assert fake.aenter_count == initial_aenter
+        assert fake.aexit_count == 0
+        # Caller cleanup still works.
+        await fake.__aexit__(None, None, None)
+        assert fake.aexit_count == 1
+
+
+@dataclass
+class _FakeTransport:
+    """Minimal McpTransport stand-in for collision/prefix tests.
+
+    Holds a static list of tools and exposes the `name_prefix` /
+    `auto_prefix` / `is_open` / `tools` surface that AgentSession
+    consults. Doesn't open/close anything.
+    """
+
+    _tools: list[McpTool]
+    name_prefix: str | None = None
+    auto_prefix_value: str = "transport"
+
+    @property
+    def tools(self) -> list[McpTool]:
+        return self._tools
+
+    @property
+    def is_open(self) -> bool:
+        return True
+
+    @property
+    def auto_prefix(self) -> str:
+        return self.auto_prefix_value
+
+    async def __aenter__(self) -> "_FakeTransport":
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
+
+
+def _make_local_tool(name: str, payload: str) -> McpTool:
+    async def handler(_args: dict[str, Any]) -> str:
+        return payload
+
+    return McpTool(
+        name=name,
+        description=name,
+        input_schema={"type": "object", "properties": {}},
+        handler=handler,
+    )
+
+
+async def test_duplicate_local_tool_names_raise() -> None:
+    """Regression: two **local** tools sharing a name used to silently
+    overwrite each other in the dispatch dict — every call to that name
+    would hit whichever handler was registered last, while both
+    definitions were advertised to the model. Local tools have no
+    transport to derive an auto-prefix from, so the session raises.
+    """
+    session, _ = make_session(
+        [FakeChatStream(chunks=["unused"])],
+        mcp_tools=[_make_local_tool("search", "a"), _make_local_tool("search", "b")],
+    )
+    with pytest.raises(ValueError, match="Duplicate tool name 'search'"):
+        await session.send("hi")
+
+
+async def test_collision_auto_prefixes_transports() -> None:
+    """Two MCP transports exposing the same tool name without explicit
+    `name_prefix` should both get auto-prefixed (consistent naming for
+    every tool from the same transport, not just the colliding one).
+    """
+    transport_a = _FakeTransport(
+        _tools=[
+            _make_local_tool("search", "a-search"),
+            _make_local_tool("filter", "a-filter"),  # not colliding
+        ],
+        auto_prefix_value="src_a",
+    )
+    transport_b = _FakeTransport(
+        _tools=[_make_local_tool("search", "b-search")],
+        auto_prefix_value="src_b",
+    )
+    session, client = make_session(
+        [FakeChatStream(chunks=["done"])],
+        mcp_tools=cast(Sequence[McpTool], [transport_a, transport_b]),
+    )
+    await session.send("hi")
+    advertised = {t["name"] for t in client.calls[0][1]}
+    # Every tool from each colliding transport gets prefixed for
+    # consistency, so a prompt that uses one prefix can rely on it.
+    assert advertised == {"src_a__search", "src_a__filter", "src_b__search"}
+
+
+async def test_collision_skips_transport_with_explicit_prefix() -> None:
+    """Explicit `name_prefix` wins: a transport that already has one
+    keeps it untouched, while the un-prefixed colliding transport gets
+    auto-prefixed instead.
+    """
+    transport_a = _FakeTransport(
+        _tools=[_make_local_tool("search", "a")],
+        name_prefix="weather",
+    )
+    transport_b = _FakeTransport(
+        _tools=[_make_local_tool("search", "b")],
+        auto_prefix_value="src_b",
+    )
+    # transport_a's tool already arrives as "search" because the fake
+    # doesn't run _build_tools — simulate the prefixed name directly.
+    transport_a._tools = [_make_local_tool("weather__search", "a")]
+    session, client = make_session(
+        [FakeChatStream(chunks=["done"])],
+        mcp_tools=cast(Sequence[McpTool], [transport_a, transport_b]),
+    )
+    await session.send("hi")
+    advertised = {t["name"] for t in client.calls[0][1]}
+    # No collision in the first place — both already-distinct names go through.
+    assert advertised == {"weather__search", "search"}
+
+
+async def test_collision_with_two_explicit_prefixes_colliding_raises() -> None:
+    """If two transports both have explicit `name_prefix` set to the
+    same value (or to values that produce the same prefixed name),
+    auto-prefixing is skipped because the operator already declared
+    intent — fall back to raising so they fix the source.
+    """
+    # Simulate both transports applying the same explicit prefix
+    transport_a = _FakeTransport(
+        _tools=[_make_local_tool("weather__search", "a")],
+        name_prefix="weather",
+    )
+    transport_b = _FakeTransport(
+        _tools=[_make_local_tool("weather__search", "b")],
+        name_prefix="weather",
+    )
+    session, _ = make_session(
+        [FakeChatStream(chunks=["unused"])],
+        mcp_tools=cast(Sequence[McpTool], [transport_a, transport_b]),
+    )
+    with pytest.raises(ValueError, match="Duplicate tool name 'weather__search'"):
+        await session.send("hi")
+
+
+# `_extract_text` regression tests for tool result normalization
+
+
+@pytest.mark.parametrize(
+    "result, expected",
+    [
+        pytest.param("plain text", "plain text", id="plain-string"),
+        pytest.param(
+            {"content": [{"type": "text", "text": "only block"}]},
+            "only block",
+            id="single-text-block",
+        ),
+        pytest.param(
+            {
+                "content": [
+                    {"type": "text", "text": "summary"},
+                    {"type": "text", "text": "details"},
+                ]
+            },
+            "summary\ndetails",
+            id="multiple-text-blocks-concatenated",
+        ),
+        pytest.param(
+            {
+                "content": [
+                    {"type": "image", "data": "base64..."},
+                    {"type": "text", "text": "caption"},
+                    {"type": "resource", "uri": "file://x"},
+                    {"type": "text", "text": "footer"},
+                ]
+            },
+            json.dumps(
+                {
+                    "content": [
+                        {"type": "image", "data": "base64..."},
+                        {"type": "text", "text": "caption"},
+                        {"type": "resource", "uri": "file://x"},
+                        {"type": "text", "text": "footer"},
+                    ]
+                }
+            ),
+            id="non-text-blocks-roundtrip-as-json",
+        ),
+        pytest.param(
+            {"content": []},
+            '{"content": []}',
+            id="no-text-blocks-fallback-to-json",
+        ),
+        pytest.param(
+            {"foo": "bar"},
+            '{"foo": "bar"}',
+            id="non-mcp-dict-fallback-to-json",
+        ),
+        pytest.param(
+            {
+                "content": [{"type": "text", "text": "summary"}],
+                "structuredContent": {"answer": 42},
+            },
+            json.dumps(
+                {
+                    "content": [{"type": "text", "text": "summary"}],
+                    "structuredContent": {"answer": 42},
+                }
+            ),
+            id="text-with-structured-content-roundtrips-as-json",
+        ),
+        pytest.param(
+            {
+                "content": [{"type": "text", "text": "boom"}],
+                "isError": True,
+            },
+            json.dumps(
+                {
+                    "content": [{"type": "text", "text": "boom"}],
+                    "isError": True,
+                }
+            ),
+            id="is-error-flag-preserved",
+        ),
+        pytest.param(
+            {"structuredContent": {"answer": 42}},
+            json.dumps({"structuredContent": {"answer": 42}}),
+            id="structured-content-only",
+        ),
+    ],
+)
+def test_extract_text(result: Any, expected: str) -> None:
+    """Regression: `_extract_text` used to return only the first text
+    block from an MCP tool result. The first round of fixes started
+    concatenating every text block — but still silently dropped
+    `structuredContent`, `isError`, and non-text content blocks
+    (image/resource), which made JSON-only MCP tools unusable
+    end-to-end. The agent now JSON-encodes any dict that carries
+    fields beyond pure text blocks so the model sees the full payload.
+    """
+    assert _extract_text(result) == expected
+
+
+# Startup-failure rollback tests
+
+
+@dataclass
+class _FailingTransport:
+    """Fake McpTransport that raises during `__aenter__` (after the first
+    successful entry of an earlier resource).
+    """
+
+    fail_message: str = "boom: server unavailable"
+    aenter_count: int = 0
+    aexit_count: int = 0
+    _is_open: bool = False
+
+    @property
+    def is_open(self) -> bool:
+        return self._is_open
+
+    @property
+    def tools(self) -> list[McpTool]:
+        return []
+
+    async def __aenter__(self) -> "_FailingTransport":
+        self.aenter_count += 1
+        raise RuntimeError(self.fail_message)
+
+    async def __aexit__(self, *_: object) -> None:
+        self.aexit_count += 1
+        self._is_open = False
+
+
+async def test_aenter_unwinds_on_partial_failure() -> None:
+    """Regression: if `client` opened successfully and then a transport
+    fails to enter, `AgentSession.__aenter__` returned with the exit
+    stack still owning the live client (and earlier transports), but
+    `__aexit__` would never run because the constructor was raising.
+    The leak left HTTP sessions and subprocesses alive across retries.
+    """
+    fake = FakeClient(responses=[FakeChatStream(chunks=["ignored"])])
+    failing = _FailingTransport()
+
+    with pytest.raises(RuntimeError, match="boom: server unavailable"):
+        async with AgentSession(
+            client=cast(LLMClientBase, fake),
+            mcp_tools=cast(Sequence[McpTool], [failing]),
+        ):
+            pytest.fail("AgentSession.__aenter__ should have raised")
+
+    # The client we successfully opened must have been closed by the
+    # rollback, not left dangling.
     assert fake.aenter_count == 1
-    assert fake.aexit_count == 0  # and must not have closed it either
-    # Caller is still responsible for cleanup
-    await fake.__aexit__(None, None, None)
     assert fake.aexit_count == 1
-
-
-async def test_aenter_opens_fresh_client() -> None:
-    """Happy path: a brand-new client gets entered and exited by the session."""
-    fake = FakeClient(responses=[FakeChatStream(chunks=["ok"])])
-    assert fake.aenter_count == 0
-
-    async with AgentSession(client=cast(LLMClientBase, fake)) as session:
-        await session.send("hi")
-        assert fake.aenter_count == 1  # entered by AgentSession
-
-    assert fake.aexit_count == 1  # and exited on scope exit
+    assert fake.is_open is False
+    # The failing transport's `__aenter__` was attempted exactly once.
+    assert failing.aenter_count == 1

@@ -2,6 +2,8 @@ import asyncio
 import enum
 import functools
 import json
+import os.path
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -16,11 +18,13 @@ from typing import (
     runtime_checkable,
 )
 from http import HTTPStatus
+from urllib.parse import urlparse
 
 from importlib.metadata import version as _pkg_version
 
 import niquests
 
+from ._json import loads as _json_loads
 from .logs import log
 from .models import ToolDefinition
 
@@ -105,12 +109,24 @@ class McpTransport(Protocol):
     can detect an already-entered instance, and is usable as an async
     context manager so its session can be initialized on entry and torn
     down on exit.
+
+    `name_prefix` lets the caller pin a stable, human-readable namespace
+    for tools coming from this transport (e.g. ``"weather"`` produces
+    ``weather__forecast``). When ``None``, `auto_prefix` exposes a
+    fallback derived from the transport's identity (URL host for
+    streamable, ``args[0]``/command basename for stdio) — `AgentSession`
+    only applies it when an actual collision is detected, so
+    single-transport setups keep clean bare names.
     """
+
+    name_prefix: str | None
 
     @property
     def tools(self) -> list[McpTool]: ...
     @property
     def is_open(self) -> bool: ...
+    @property
+    def auto_prefix(self) -> str: ...
     async def __aenter__(self) -> Self: ...
     async def __aexit__(self, *args: object) -> None: ...
 
@@ -118,11 +134,34 @@ class McpTransport(Protocol):
 # Shared helpers
 
 
-def _build_tools(raw_tools: list[dict[str, Any]], call_fn: Callable) -> list[McpTool]:
-    """Build McpTool list from a tools/list result."""
+def _sanitize_prefix(s: str) -> str:
+    """Make a string safe for use as a function-name prefix.
+
+    Provider function-name regexes (OpenAI, Gemini, Anthropic) only allow
+    `[a-zA-Z0-9_-]`. Replace anything else with underscore, collapse runs,
+    and never return empty (fall back to ``"mcp"``).
+    """
+    cleaned = re.sub(r"[^a-zA-Z0-9_]+", "_", s).strip("_")
+    return cleaned or "mcp"
+
+
+def _build_tools(
+    raw_tools: list[dict[str, Any]],
+    call_fn: Callable,
+    name_prefix: str | None = None,
+) -> list[McpTool]:
+    """Build McpTool list from a tools/list result.
+
+    When `name_prefix` is not ``None``, every tool's public name becomes
+    ``f"{name_prefix}__{wire_name}"`` while the handler stays bound to
+    the underlying wire name. Lets a caller expose a transport's tools
+    under a stable namespace without confusing the dispatch path.
+    """
     return [
         McpTool(
-            name=t["name"],
+            name=(
+                f"{name_prefix}__{t['name']}" if name_prefix is not None else t["name"]
+            ),
             description=t.get("description") or "",
             input_schema=t.get("inputSchema") or {"type": "object", "properties": {}},
             handler=lambda args, _n=t["name"]: call_fn(_n, args),
@@ -131,15 +170,22 @@ def _build_tools(raw_tools: list[dict[str, Any]], call_fn: Callable) -> list[Mcp
     ]
 
 
-def _extract_text_content(result: dict[str, Any]) -> dict[str, Any]:
-    """Extract text content blocks from a tools/call result."""
-    return {
-        "content": [
-            {"type": c["type"], "text": c.get("text", "")}
-            for c in result.get("content", [])
-            if c.get("type") == "text"
-        ]
-    }
+def _normalize_call_result(result: Any) -> dict[str, Any]:
+    """Pass a `tools/call` result through unchanged, only normalising the
+    `content` field's presence.
+
+    The MCP `tools/call` response can carry far more than just `text`
+    content blocks: `image`/`resource` blocks, an `isError` flag, and
+    `structuredContent` for machine-readable tools (the whole point of
+    JSON-only MCP servers). The previous implementation rebuilt the
+    result from text blocks only, silently dropping every other field
+    and turning a JSON-only tool into `{"content": []}` before the
+    agent ever saw it. Now we return the dict as-is so downstream
+    consumers (`agent._extract_text`) can decide how to reduce it.
+    """
+    if not isinstance(result, dict):
+        return {"content": []}
+    return result
 
 
 def _mcp_headers(
@@ -202,6 +248,12 @@ class McpStreamable:
     on_progress: Callable[[ProgressEvent], Any] | None = None
     client_name: str = "padwan-llm"
     client_version: str = __version__
+    name_prefix: str | None = None
+    """Optional namespace for this transport's tools. When set, every
+    discovered tool is renamed to ``f"{name_prefix}__{wire_name}"`` so
+    multiple transports can coexist without colliding. Leave as ``None``
+    to use bare wire names; `AgentSession` will fall back to `auto_prefix`
+    if (and only if) it detects a collision at runtime."""
     _tools: list[McpTool] = field(init=False, default_factory=list)
     _http: niquests.AsyncSession = field(
         init=False, default_factory=niquests.AsyncSession
@@ -220,14 +272,35 @@ class McpStreamable:
         """True once the transport has been entered and the listener task is live."""
         return self._bg_task is not None
 
+    @property
+    def auto_prefix(self) -> str:
+        """Fallback prefix derived from the URL host (e.g.
+        ``mcp.data.gouv.fr`` → ``mcp_data_gouv_fr``). Only used by
+        `AgentSession` when a collision forces disambiguation."""
+        host = urlparse(self.url).hostname or "mcp"
+        return _sanitize_prefix(host)
+
     async def __aenter__(self) -> Self:
         if self._bg_task is not None:
             raise RuntimeError(
                 "McpStreamable is already open; re-entering is not supported"
             )
-        await self._initialize()
-        await self._refresh_tools()
-        self._bg_task = asyncio.create_task(self._listen())
+        try:
+            await self._initialize()
+            await self._refresh_tools()
+            self._bg_task = asyncio.create_task(self._listen())
+        except BaseException:
+            # If initialize succeeded but refresh_tools failed (or the
+            # listener failed to schedule), the server has already handed
+            # us a session id and our HTTP client is still open. `__aexit__`
+            # would never run because this method is raising, so clean up
+            # everything ourselves before propagating. Swallow cleanup
+            # failures so they don't mask the original error.
+            try:
+                await self.__aexit__(None, None, None)
+            except Exception:
+                log.exception("MCP cleanup after failed startup raised")
+            raise
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -436,11 +509,13 @@ class McpStreamable:
         # Mutate the list in place so external references (e.g. AgentSession
         # holding onto `mcp.tools`) see the refreshed contents.
         result = await self._rpc("tools/list")
-        self._tools[:] = _build_tools(result.get("tools", []), self._call)
+        self._tools[:] = _build_tools(
+            result.get("tools", []), self._call, self.name_prefix
+        )
 
     async def _call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         result = await self._rpc("tools/call", {"name": name, "arguments": args})
-        return _extract_text_content(result)
+        return _normalize_call_result(result)
 
     async def ping(self) -> None:
         """Send a ping request to verify the server is responsive."""
@@ -481,6 +556,9 @@ class McpStdio:
     on_progress: Callable[[ProgressEvent], Any] | None = None
     client_name: str = "padwan-llm"
     client_version: str = __version__
+    name_prefix: str | None = None
+    """Optional namespace for this transport's tools (see
+    `McpStreamable.name_prefix`)."""
 
     _tools: list[McpTool] = field(init=False, default_factory=list)
     _process: asyncio.subprocess.Process | None = field(init=False, default=None)
@@ -491,6 +569,26 @@ class McpStdio:
     _loop: asyncio.AbstractEventLoop = field(init=False)
 
     @property
+    def auto_prefix(self) -> str:
+        """Fallback prefix derived from `args[0]` if present, otherwise
+        from the command basename. The first arg is usually the actual
+        server identity (script path, npm package name) — much more
+        readable than ``"npx"`` or ``"python"``. Stripped of common
+        suffixes (`.py`, `.js`) and namespace prefixes
+        (e.g. ``@modelcontextprotocol/``)."""
+        source = self.args[0] if self.args else self.command
+        base = os.path.basename(source)
+        # Drop common script extensions and npm scope prefixes so the
+        # prefix doesn't carry packaging noise into prompts.
+        for suffix in (".py", ".js", ".ts", ".mjs"):
+            if base.endswith(suffix):
+                base = base[: -len(suffix)]
+                break
+        if base.startswith("@") and "/" in base:
+            base = base.split("/", 1)[1]
+        return _sanitize_prefix(base)
+
+    @property
     def is_open(self) -> bool:
         """True while the child process is running and the reader task is live."""
         return self._process is not None
@@ -499,19 +597,31 @@ class McpStdio:
         if self._process is not None:
             raise RuntimeError("McpStdio is already open; re-entering is not supported")
         self._loop = asyncio.get_running_loop()
-        self._process = await asyncio.create_subprocess_exec(
-            self.command,
-            *self.args,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=self.env,
-            cwd=self.cwd,
-        )
-        self._reader_task = asyncio.create_task(self._reader())
-        self._stderr_task = asyncio.create_task(self._drain_stderr())
-        await self._initialize()
-        await self._refresh_tools()
+        try:
+            self._process = await asyncio.create_subprocess_exec(
+                self.command,
+                *self.args,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=self.env,
+                cwd=self.cwd,
+            )
+            self._reader_task = asyncio.create_task(self._reader())
+            self._stderr_task = asyncio.create_task(self._drain_stderr())
+            await self._initialize()
+            await self._refresh_tools()
+        except BaseException:
+            # A failure after spawning the subprocess (bad handshake,
+            # crash, malformed JSON-RPC) would otherwise leak the child
+            # and both background tasks — `__aexit__` never runs because
+            # this method is raising. `__aexit__` is defensive about None
+            # fields, so it's safe to call partway through startup.
+            try:
+                await self.__aexit__(None, None, None)
+            except Exception:
+                log.exception("MCP stdio cleanup after failed startup raised")
+            raise
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -538,6 +648,16 @@ class McpStdio:
                     await asyncio.wait_for(self._process.wait(), timeout=2.0)
                 except asyncio.TimeoutError:
                     self._process.kill()
+                    # SIGKILL is reliable but POSIX still requires us to
+                    # call wait() to reap the zombie. Without this, every
+                    # wedged child becomes a defunct process the parent
+                    # never collects, and callers that recycle stdio
+                    # transports accumulate them. Bounded so a truly
+                    # un-killable child can't hang shutdown.
+                    try:
+                        await asyncio.wait_for(self._process.wait(), timeout=2.0)
+                    except asyncio.TimeoutError:
+                        log.warning("MCP stdio child did not exit after SIGKILL")
         for fut in self._pending.values():
             if not fut.done():
                 fut.set_exception(RuntimeError("MCP stdio connection closed"))
@@ -616,7 +736,7 @@ class McpStdio:
                 if not line:
                     continue
                 try:
-                    msg: dict[str, Any] = json.loads(line)
+                    msg: dict[str, Any] = _json_loads(line)
                 except json.JSONDecodeError:
                     log.warning("MCP stdio: ignoring malformed line: %s", line)
                     continue
@@ -681,11 +801,13 @@ class McpStdio:
         # Mutate the list in place so external references (e.g. AgentSession
         # holding onto `mcp.tools`) see the refreshed contents.
         result = await self._rpc("tools/list")
-        self._tools[:] = _build_tools(result.get("tools", []), self._call)
+        self._tools[:] = _build_tools(
+            result.get("tools", []), self._call, self.name_prefix
+        )
 
     async def _call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         result = await self._rpc("tools/call", {"name": name, "arguments": args})
-        return _extract_text_content(result)
+        return _normalize_call_result(result)
 
     async def ping(self) -> None:
         """Send a ping request to verify the server is responsive."""

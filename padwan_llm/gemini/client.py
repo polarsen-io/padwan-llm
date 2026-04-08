@@ -26,6 +26,7 @@ from .models import (
 )
 from .tools import GeminiToolMixin
 from .._base import ChatStream, LLMClientBase, Provider
+from .._json import loads as _json_loads
 from ..conversation import AssistantToolMessage, ChatMessage, ToolResultMessage
 from ..errors import QuotaExceededError, TooManyRequestsError, LLMError
 from ..models import (
@@ -163,7 +164,7 @@ class GeminiRetry(Retry):
     def get_retry_after(self, response: HTTPResponse) -> float | None:
         """Extract retry delay from response body (google.rpc.RetryInfo)."""
         try:
-            data = json.loads(response.data.decode("utf-8"))
+            data = _json_loads(response.data.decode("utf-8"))
             for detail in data.get("error", {}).get("details", []):
                 if detail.get("@type") == "type.googleapis.com/google.rpc.RetryInfo":
                     delay_str = detail.get("retryDelay", "")
@@ -401,7 +402,7 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
             if line.startswith("data: "):
                 data_str = line[6:]  # Remove "data: " prefix
                 try:
-                    yield json.loads(data_str)
+                    yield _json_loads(data_str)
                 except json.JSONDecodeError as e:
                     raise LLMError(self.provider, f"Stream parse error: {e}") from e
 

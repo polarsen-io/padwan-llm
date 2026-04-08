@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, Self
 
 from ._base import LLMClientBase
+from ._json import loads as _json_loads
 from .client import LLMClient
 from .conversation import (
     AssistantToolMessage,
@@ -41,17 +42,37 @@ class ConversationStore(Protocol):
 def _extract_text(result: Any) -> str:
     """Reduce a tool result to a string suitable for ToolResultMessage.content.
 
-    Recognises the MCP wire format (`{"content": [{"type": "text", "text":
-    ...}]}`), passes plain strings through unchanged, and falls back to
-    JSON-encoding any other value.
+    The MCP `tools/call` response can carry far more than just text:
+    `image`/`resource` blocks, an `isError` flag, `structuredContent`
+    for machine-readable JSON tools, and arbitrary server extensions.
+    This helper preserves all of it on the round-trip to the LLM:
+
+    - Plain strings pass through unchanged.
+    - A dict whose *only* meaningful field is a `content` array of pure
+      `text` blocks collapses to a newline-joined string — that's the
+      common conversational case and the model gets clean text.
+    - Any dict that also carries `structuredContent`, `isError`, or
+      non-text content blocks (image, resource, …) is JSON-encoded so
+      the model receives every field the server sent. Without this
+      escape hatch, JSON-only MCP tools were silently turning into
+      empty strings before the agent ever forwarded them.
     """
     if isinstance(result, str):
         return result
-    if isinstance(result, dict):
-        for block in result.get("content") or []:
-            if isinstance(block, dict) and block.get("type") == "text":
-                return block.get("text") or ""
+    if not isinstance(result, dict):
         return json.dumps(result)
+
+    content = result.get("content") or []
+    has_only_content_key = set(result.keys()) <= {"content"}
+    text_only_blocks = all(
+        isinstance(b, dict) and b.get("type") == "text" for b in content
+    )
+    if has_only_content_key and text_only_blocks:
+        texts = [b.get("text") for b in content if b.get("text")]
+        if texts:
+            return "\n".join(texts)
+    # Anything richer than pure text blocks (or pure text alongside
+    # structured/error fields) round-trips as JSON so nothing is dropped.
     return json.dumps(result)
 
 
@@ -118,15 +139,26 @@ class AgentSession:
         already open — detected via `is_open` — are left alone: the caller
         still owns their lifecycle. Only resources we open here are
         registered with the exit stack for cleanup on `__aexit__`.
+
+        If any resource fails to enter after others have already been
+        opened, the exit stack is unwound before the exception propagates,
+        so a partial startup cannot leak live HTTP sessions or MCP
+        subprocesses. Without this rollback, `__aexit__` would never run
+        (since `__aenter__` raised) and previously-entered resources
+        would stay alive until the event loop shuts down.
         """
         await self._exit_stack.__aenter__()
-        if not self.client.is_open:
-            await self._exit_stack.enter_async_context(self.client)
-        for item in self.mcp_tools:
-            if isinstance(item, McpTool):
-                continue
-            if not item.is_open:
-                await self._exit_stack.enter_async_context(item)
+        try:
+            if not self.client.is_open:
+                await self._exit_stack.enter_async_context(self.client)
+            for item in self.mcp_tools:
+                if isinstance(item, McpTool):
+                    continue
+                if not item.is_open:
+                    await self._exit_stack.enter_async_context(item)
+        except BaseException:
+            await self._exit_stack.aclose()
+            raise
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -150,11 +182,17 @@ class AgentSession:
     ) -> Self:
         """Construct an AgentSession, optionally restoring state from `store`.
 
-        If `session_id` is provided, the matching snapshot is fetched from
-        `store` and used to restore the conversation history, total usage,
-        and system prompt. If it's `None`, a fresh `session_id` is generated
-        and the session starts empty; future `save()` calls still go to the
-        configured store.
+        If `session_id` is provided and the store has a matching snapshot,
+        the conversation history, total usage, and system prompt are
+        restored from it. If the snapshot is missing (store raises
+        `LookupError`, e.g. `KeyError`), the session is built fresh but
+        pinned to the caller-supplied `session_id`, so subsequent `save()`
+        calls land under that id — making this a natural get-or-create
+        entry point for callers that key sessions by a stable handle.
+
+        If `session_id` is `None`, a fresh id is generated and the session
+        starts empty; future `save()` calls still go to the configured
+        store.
 
         Pass `model` to have an `LLMClient` created automatically (intended
         for use as an async context manager). Pass `client` directly when you
@@ -179,7 +217,12 @@ class AgentSession:
             # constructor's session_id default_factory.
             return cls(client=_client, store=store, **kwargs)
 
-        snapshot = store.load(session_id)
+        try:
+            snapshot = store.load(session_id)
+        except LookupError:
+            # Store doesn't have this session yet — start fresh but pin the
+            # caller-supplied id so save() lands under the expected key.
+            return cls(client=_client, store=store, session_id=session_id, **kwargs)
         kwargs.pop("system", None)
         instance = cls(
             client=_client,
@@ -214,6 +257,81 @@ class AgentSession:
                     )
             out.append(msg)
         return out
+
+    def _build_round_dispatch(
+        self,
+    ) -> tuple[list[ToolDefinition], dict[str, McpTool]]:
+        """Build the per-round tool registry, auto-prefixing on collision.
+
+        First pass: collect every tool from every item in `mcp_tools`,
+        tracking which transport (if any) it came from. If two tools
+        end up with the same public name, the colliding **transports**
+        get their `auto_prefix` applied to *all* their tools (consistent
+        naming inside one server) — but only if the transport doesn't
+        already have an explicit `name_prefix` set, since explicit
+        wins. Local `McpTool` instances stay bare regardless.
+
+        If even auto-prefixing leaves duplicates (two transports with
+        the same auto-derived prefix, two local tools with the same
+        name, or an explicit prefix that still collides), we raise so
+        the operator fixes the configuration at the source.
+        """
+        # (tool, source_transport_or_None) for everything in mcp_tools.
+        items: list[tuple[McpTool, McpTransport | None]] = []
+        for item in self.mcp_tools:
+            if isinstance(item, McpTool):
+                items.append((item, None))
+            else:
+                for t in item.tools:
+                    items.append((t, item))
+
+        # First pass: count names to find collisions.
+        name_counts: dict[str, int] = {}
+        for tool, _ in items:
+            name_counts[tool.name] = name_counts.get(tool.name, 0) + 1
+
+        # Determine which transports need auto-prefixing. Only those
+        # contributing a colliding name AND with no explicit prefix.
+        needs_auto: set[int] = set()
+        for tool, src in items:
+            if (
+                name_counts[tool.name] > 1
+                and src is not None
+                and src.name_prefix is None
+            ):
+                needs_auto.add(id(src))
+
+        if needs_auto:
+            log.warning(
+                "MCP tool name collision detected; auto-prefixing %d transport(s) "
+                "with their derived prefix. Set `name_prefix=` on each "
+                "transport to control the namespace explicitly.",
+                len(needs_auto),
+            )
+
+        tool_defs: list[ToolDefinition] = []
+        dispatch: dict[str, McpTool] = {}
+        for tool, src in items:
+            if src is not None and id(src) in needs_auto:
+                prefix = src.auto_prefix
+                public = McpTool(
+                    name=f"{prefix}__{tool.name}",
+                    description=tool.description,
+                    input_schema=tool.input_schema,
+                    handler=tool.handler,
+                )
+            else:
+                public = tool
+            if public.name in dispatch:
+                raise ValueError(
+                    f"Duplicate tool name {public.name!r} in mcp_tools after "
+                    "auto-prefixing. Set an explicit `name_prefix=` on the "
+                    "conflicting transport(s), or rename a local McpTool, "
+                    "so every tool has a unique public name."
+                )
+            tool_defs.append(public.to_tool_def())
+            dispatch[public.name] = public
+        return tool_defs, dispatch
 
     async def _approve(self, tool: McpTool, args: dict[str, Any]) -> bool:
         if self.approve_tool is None:
@@ -261,7 +379,7 @@ class AgentSession:
         for tc in tool_calls:
             name = tc["function"]["name"]
             try:
-                args = json.loads(tc["function"]["arguments"])
+                args = _json_loads(tc["function"]["arguments"])
             except json.JSONDecodeError as exc:
                 log.warning("Bad tool args for %r: %s", name, exc)
                 args = {}
@@ -301,13 +419,7 @@ class AgentSession:
                 calls_remaining -= 1
 
             # Read mcp_tools at the top of every round — picks up tools/list_changed updates.
-            tool_defs: list[ToolDefinition] = []
-            dispatch: dict[str, McpTool] = {}
-            for item in self.mcp_tools:
-                tools = [item] if isinstance(item, McpTool) else item.tools
-                for t in tools:
-                    tool_defs.append(t.to_tool_def())
-                    dispatch[t.name] = t
+            tool_defs, dispatch = self._build_round_dispatch()
             chunks: list[str] = []
             chat_stream = self.client.stream_chat(
                 self._context_messages(),

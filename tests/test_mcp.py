@@ -8,7 +8,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from mcp.server.fastmcp import FastMCP
 
-from padwan_llm.mcp import McpStreamable, McpStdio, McpTool, _to_sse_url
+from padwan_llm.mcp import (
+    McpStreamable,
+    McpStdio,
+    McpTool,
+    _build_tools,
+    _normalize_call_result,
+    _sanitize_prefix,
+    _to_sse_url,
+)
 
 
 def _make_server() -> FastMCP:
@@ -130,6 +138,163 @@ class TestToSseUrl:
     )
     def test_convert(self, url, expected):
         assert _to_sse_url(url) == expected
+
+
+@pytest.mark.parametrize(
+    "raw_in, expected",
+    [
+        pytest.param("simple", "simple", id="passthrough"),
+        pytest.param("mcp.data.gouv.fr", "mcp_data_gouv_fr", id="dots_to_underscore"),
+        pytest.param(
+            "server-filesystem", "server_filesystem", id="dashes_to_underscore"
+        ),
+        pytest.param("__weird__", "weird", id="strip_leading_trailing_underscores"),
+        pytest.param("", "mcp", id="empty_falls_back_to_mcp"),
+        pytest.param("///", "mcp", id="all_invalid_falls_back"),
+        pytest.param("a.b/c-d:e", "a_b_c_d_e", id="mixed_separators"),
+    ],
+)
+def test_sanitize_prefix(raw_in: str, expected: str):
+    """`_sanitize_prefix` reduces arbitrary host/command strings to a
+    function-name-safe identifier (matches the OpenAI/Gemini/Anthropic
+    `[a-zA-Z0-9_-]` regex). Empty input falls back to ``"mcp"`` so the
+    auto-prefix path always produces something usable."""
+    assert _sanitize_prefix(raw_in) == expected
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        pytest.param(
+            "https://mcp.data.gouv.fr/mcp", "mcp_data_gouv_fr", id="dotted_host"
+        ),
+        pytest.param("http://localhost:8080/mcp", "localhost", id="localhost"),
+        pytest.param(
+            "https://api.weather.example.com/v1/mcp",
+            "api_weather_example_com",
+            id="subdomain",
+        ),
+    ],
+)
+def test_streamable_auto_prefix(url, expected):
+    """`McpStreamable.auto_prefix` derives a stable, readable namespace
+    from the URL host so collision-driven auto-prefixing produces
+    something the model can actually use in prompts."""
+    assert McpStreamable(url=url).auto_prefix == expected
+
+
+@pytest.mark.parametrize(
+    "command, args, expected",
+    [
+        pytest.param(
+            "npx",
+            ["@modelcontextprotocol/server-filesystem", "/path"],
+            "server_filesystem",
+            id="strips_npm_scope",
+        ),
+        pytest.param("python", ["main.py"], "main", id="strips_py_extension"),
+        pytest.param("node", ["index.js"], "index", id="strips_js_extension"),
+        pytest.param("npx", [], "npx", id="empty_args_falls_back_to_command"),
+        pytest.param(
+            "/usr/bin/python", ["server.py"], "server", id="basename_strips_py"
+        ),
+        pytest.param(
+            "node",
+            ["/abs/path/to/server-foo.mjs"],
+            "server_foo",
+            id="basename_strips_mjs_and_dashes",
+        ),
+    ],
+)
+def test_stdio_auto_prefix(command, args, expected):
+    """`McpStdio.auto_prefix` prefers `args[0]` (the script/package
+    being launched) over the launcher binary, since `npx`/`python` are
+    rarely meaningful identifiers on their own."""
+    assert McpStdio(command=command, args=args).auto_prefix == expected
+
+
+@pytest.mark.parametrize(
+    "name_prefix, expected_names",
+    [
+        pytest.param(None, ["forecast", "alerts"], id="no_prefix_uses_wire_names"),
+        pytest.param(
+            "weather",
+            ["weather__forecast", "weather__alerts"],
+            id="explicit_prefix_applied",
+        ),
+    ],
+)
+def test_build_tools_applies_name_prefix(
+    name_prefix: str | None, expected_names: list[str]
+):
+    """With `name_prefix=None`, tools keep their wire names. With an
+    explicit prefix, every tool is renamed to `<prefix>__<wire>` while
+    the handler stays bound to the underlying wire name so the
+    tools/call dispatch still hits the right backend method.
+    """
+
+    async def fake_call(name, args):
+        return {"called": name, "args": args}
+
+    raw = [
+        {"name": "forecast", "description": "Get forecast", "inputSchema": {}},
+        {"name": "alerts", "description": "Get alerts", "inputSchema": {}},
+    ]
+    built = _build_tools(raw, fake_call, name_prefix=name_prefix)
+    assert [t.name for t in built] == expected_names
+    # Handler must always call the underlying wire name, not the prefixed one.
+    result = asyncio.run(built[0].handler({"city": "Paris"}))
+    assert result == {"called": "forecast", "args": {"city": "Paris"}}
+
+
+@pytest.mark.parametrize(
+    "result, expected",
+    [
+        pytest.param(
+            {"content": [{"type": "text", "text": "hello"}]},
+            {"content": [{"type": "text", "text": "hello"}]},
+            id="text_only_passthrough",
+        ),
+        pytest.param(
+            {
+                "content": [
+                    {"type": "text", "text": "summary"},
+                    {"type": "image", "data": "base64...", "mimeType": "image/png"},
+                    {"type": "resource", "resource": {"uri": "file://x"}},
+                ]
+            },
+            {
+                "content": [
+                    {"type": "text", "text": "summary"},
+                    {"type": "image", "data": "base64...", "mimeType": "image/png"},
+                    {"type": "resource", "resource": {"uri": "file://x"}},
+                ]
+            },
+            id="non_text_blocks_preserved",
+        ),
+        pytest.param(
+            {"structuredContent": {"answer": 42}, "content": []},
+            {"structuredContent": {"answer": 42}, "content": []},
+            id="structured_content_preserved",
+        ),
+        pytest.param(
+            {"content": [{"type": "text", "text": "boom"}], "isError": True},
+            {"content": [{"type": "text", "text": "boom"}], "isError": True},
+            id="is_error_flag_preserved",
+        ),
+        pytest.param({"content": []}, {"content": []}, id="empty_content"),
+        pytest.param(None, {"content": []}, id="none_normalised"),
+        pytest.param("not a dict", {"content": []}, id="non_dict_normalised"),
+    ],
+)
+def test_normalize_call_result(result, expected):
+    """Regression: `_extract_text_content` used to rebuild the result from
+    text blocks only, silently dropping `structuredContent`, `isError`,
+    and any image/resource blocks. JSON-only MCP servers were rendered
+    unusable because the model never saw the actual tool output. Now
+    we pass the dict through unchanged.
+    """
+    assert _normalize_call_result(result) == expected
 
 
 # McpStreamable — helpers
@@ -668,6 +833,44 @@ class TestMcpStreamable:
             assert client.is_open
         assert not client.is_open
 
+    async def test_aenter_cleans_up_on_failed_refresh_tools(self, mock_http):
+        """Regression: if `_initialize` succeeds but `_refresh_tools` raises
+        (e.g. server returns a JSON-RPC error on `tools/list`), the
+        transport used to leak: `_session_id` stayed populated, the HTTP
+        session stayed open, and `is_open` stayed False but the next
+        retry would carry a stale session id into a new `_initialize`.
+        Now `__aenter__` runs the cleanup path before re-raising.
+        """
+        # init succeeds, initialized notification succeeds, tools/list fails
+        broken_tools_resp = _make_response(
+            {
+                "jsonrpc": "2.0",
+                "id": "x",
+                "error": {"code": -32000, "message": "tools listing broken"},
+            }
+        )
+        self._setup_post_responses(
+            mock_http,
+            _make_response(_INIT_RESULT),
+            _make_response({}),
+            broken_tools_resp,
+        )
+        client = McpStreamable(url="https://example.com/mcp")
+        client._http = mock_http
+        original_http = client._http
+
+        with pytest.raises(RuntimeError, match="tools listing broken"):
+            await client.__aenter__()
+
+        # State must be fully reset — same shape `__aexit__` leaves behind.
+        assert client._bg_task is None
+        assert client._session_id is None
+        assert client._last_event_id is None
+        assert not client.is_open
+        # The HTTP session that we partially used must have been replaced
+        # with a fresh one (so a retry doesn't reuse a half-closed one).
+        assert client._http is not original_http
+
 
 # McpStdio
 
@@ -861,3 +1064,69 @@ class TestMcpStdio:
             result = await greet.handler({"name": "again"})
             assert any("Hello, again!" in c["text"] for c in result["content"])
         assert not client.is_open
+
+    async def test_aexit_reaps_process_after_sigkill(self):
+        """Regression: after `kill()`, `__aexit__` used to clear `_process`
+        without awaiting `wait()`. POSIX requires the parent to call
+        `wait()` to reap the zombie — without it, every wedged child
+        becomes a defunct process the parent never collects, and
+        recycling stdio transports leaks them. We mock the process so
+        the SIGKILL path runs deterministically: `wait()` raises
+        `TimeoutError` directly (so `asyncio.wait_for` re-raises it
+        immediately, no real 2 s sleeps) until `kill()` is called.
+        """
+        wait_calls = {"count": 0}
+        kill_called = {"value": False}
+
+        async def fake_wait():
+            wait_calls["count"] += 1
+            if not kill_called["value"]:
+                # `wait_for` propagates exceptions from the inner coro,
+                # so raising TimeoutError here looks identical to the
+                # real timeout firing — but instantly.
+                raise asyncio.TimeoutError()
+            return 0
+
+        proc = MagicMock()
+        proc.wait = fake_wait
+        proc.stdin = None
+        proc.terminate = MagicMock()
+        proc.kill = MagicMock(side_effect=lambda: kill_called.update(value=True))
+
+        client = McpStdio(command="anything", args=[])
+        client._process = proc
+        # Pretend the reader/stderr tasks were never created so
+        # __aexit__'s task-cleanup branches no-op.
+        client._reader_task = None
+        client._stderr_task = None
+
+        await client.__aexit__()
+
+        proc.terminate.assert_called_once()
+        proc.kill.assert_called_once()
+        # Three wait_for(wait()) calls: clean exit, post-terminate,
+        # post-kill. The third one MUST happen — it's the regression.
+        assert wait_calls["count"] == 3
+        # And state must be reset just like a normal exit.
+        assert client._process is None
+
+    async def test_aenter_cleans_up_on_failed_initialize(self):
+        """Regression: a server that crashes during the MCP handshake used
+        to leave the child process and the reader/stderr tasks running.
+        `__aexit__` would never run because `__aenter__` was raising,
+        so `_process`/`_reader_task`/`_stderr_task` stayed populated and
+        `is_open` stayed True on a transport that never actually
+        initialized — leaking subprocesses across retries.
+        """
+        # Server that exits immediately so `_initialize` cannot complete.
+        bad_script = "import sys\nsys.stderr.write('boom\\n')\nsys.exit(1)\n"
+        client = McpStdio(command=sys.executable, args=["-c", bad_script])
+
+        with pytest.raises(Exception):
+            await client.__aenter__()
+
+        # State must be fully reset just like a clean `__aexit__` leaves it.
+        assert not client.is_open
+        assert client._process is None
+        assert client._reader_task is None
+        assert client._stderr_task is None

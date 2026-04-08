@@ -17,6 +17,7 @@ from .batch import BatchJob, BatchRequest, BatchResult
 from .tools import OpenAIToolMixin
 from .types import Batch, ListBatchesResponse, OpenAIFile
 from .._base import ChatStream, LLMClientBase, LLMError, Provider
+from .._json import loads as _json_loads
 from ..conversation import ChatMessage
 from ..errors import QuotaExceededError, TooManyRequestsError
 from ..models import (
@@ -264,7 +265,7 @@ class _OpenAIBase(LLMClientBase[Retry], OpenAIToolMixin):
                     continue
                 try:
                     yield cast(
-                        "CreateChatCompletionStreamResponse", json.loads(data_str)
+                        "CreateChatCompletionStreamResponse", _json_loads(data_str)
                     )
                 except json.JSONDecodeError as e:
                     raise LLMError(self.provider, f"Stream parse error: {e}") from e
@@ -508,5 +509,5 @@ class OpenAIClient(_OpenAIBase):
             line = line.strip()
             if not line:
                 continue
-            results.append(BatchResult.from_line(json.loads(line)))
+            results.append(BatchResult.from_line(_json_loads(line)))
         return results
