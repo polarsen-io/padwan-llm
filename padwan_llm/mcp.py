@@ -324,7 +324,15 @@ class McpStreamable:
                 self._last_event_id = event.id
             if event.retry is not None:
                 self._retry_ms = event.retry
-            data: dict[str, Any] = event.json()
+            # Empty `data:` frames are valid SSE keep-alives, not malformed
+            # JSON. Skip them before attempting to parse.
+            if not event.data:
+                continue
+            try:
+                data: dict[str, Any] = event.json()
+            except ValueError:
+                log.warning("MCP: ignoring malformed SSE event: %s", event.data)
+                continue
             if "result" in data or "error" in data:
                 _check_rpc_error(data)
                 return data.get("result")
@@ -361,6 +369,13 @@ class McpStreamable:
                         self._last_event_id = event.id
                     if event.retry is not None:
                         self._retry_ms = event.retry
+                    # Empty `data:` frames are valid SSE keep-alives, not
+                    # malformed JSON. Skip them silently — servers (e.g.
+                    # https://mcp.data.gouv.fr/mcp) emit them every few
+                    # seconds to keep the connection alive, and parsing
+                    # them would flood the logs with bogus warnings.
+                    if not event.data:
+                        continue
                     try:
                         msg: dict[str, Any] = event.json()
                     except ValueError:

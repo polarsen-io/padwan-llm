@@ -193,12 +193,20 @@ def _make_sse_event(
     event_id: str = "",
     retry: int | None = None,
 ) -> MagicMock:
-    """Build a mock ServerSentEvent."""
+    """Build a mock ServerSentEvent.
+
+    Empty `data` represents an SSE keep-alive frame; `event.json()` is
+    wired to raise `ValueError` so the test fails loudly if production
+    code accidentally tries to parse it instead of skipping it.
+    """
     ev = MagicMock()
     ev.id = event_id
     ev.retry = retry
     ev.data = data
-    ev.json = MagicMock(return_value=json.loads(data))
+    if data:
+        ev.json = MagicMock(return_value=json.loads(data))
+    else:
+        ev.json = MagicMock(side_effect=ValueError("empty SSE data"))
     return ev
 
 
@@ -446,6 +454,89 @@ class TestMcpStreamable:
         async with client:
             await asyncio.sleep(0.05)
             assert client._retry_ms == 5000
+
+    async def test_listen_skips_sse_keepalives(self, mock_http, caplog):
+        """Empty `data:` SSE frames are keep-alives, not malformed JSON.
+
+        Regression: `_listen()` used to call `event.json()` unconditionally
+        and only catch `ValueError` afterwards, logging every keep-alive
+        as `MCP: ignoring malformed SSE event:` — flooding the chat UI
+        on servers like https://mcp.data.gouv.fr/mcp that emit them
+        every few seconds.
+        """
+        keepalive = _make_sse_event("")
+        real = _make_sse_event('{"method":"ping"}')
+        get_resp = _make_sse_response([keepalive, real])
+        stop_resp = AsyncMock()
+        stop_resp.status_code = HTTPStatus.METHOD_NOT_ALLOWED
+        mock_http.get = AsyncMock(side_effect=[get_resp, stop_resp])
+        self._setup_post_responses(
+            mock_http,
+            _make_response(_INIT_RESULT),
+            _make_response({}),
+            _make_response(_TOOLS_RESULT),
+        )
+        client = McpStreamable(url="https://example.com/mcp")
+        client._http = mock_http
+        client._retry_ms = 0
+        with caplog.at_level("WARNING", logger="padwan_llm"):
+            async with client:
+                await asyncio.sleep(0.05)
+        # The keep-alive must NOT have triggered event.json() at all,
+        # and must NOT have produced a "malformed SSE event" warning.
+        keepalive.json.assert_not_called()
+        assert not any(
+            "malformed SSE event" in rec.message for rec in caplog.records
+        ), [rec.message for rec in caplog.records]
+
+    async def test_read_sse_response_skips_keepalives(self, mock_http):
+        """Same fix on the foreground RPC channel.
+
+        Regression: `_read_sse_response` called `event.json()` with no
+        error handling at all, so a stray keep-alive arriving between
+        notifications and the actual JSON-RPC reply would crash the RPC.
+        """
+        keepalive = _make_sse_event("")
+        rpc_reply = _make_sse_event(
+            json.dumps({"jsonrpc": "2.0", "id": "1", "result": {"tools": []}})
+        )
+        sse_resp = AsyncMock()
+        sse_resp.status_code = 200
+        sse_resp.headers = {
+            "content-type": "text/event-stream",
+            "MCP-Session-Id": "sess-1",
+        }
+        sse_resp.raise_for_status = MagicMock(return_value=sse_resp)
+        ext = MagicMock()
+        ext.closed = False
+        payloads = [keepalive, rpc_reply, None]
+        idx = {"i": 0}
+
+        async def _next(**_kw):
+            if idx["i"] < len(payloads):
+                val = payloads[idx["i"]]
+                idx["i"] += 1
+                if val is None:
+                    ext.closed = True
+                return val
+            ext.closed = True
+            return None
+
+        ext.next_payload = _next
+        sse_resp.extension = ext
+
+        self._setup_post_responses(
+            mock_http,
+            _make_response(_INIT_RESULT),
+            _make_response({}),
+            sse_resp,  # the tools/list call returns SSE with a keep-alive
+        )
+        client = McpStreamable(url="https://example.com/mcp")
+        client._http = mock_http
+        async with client:
+            pass  # _refresh_tools (called from __aenter__) drives _read_sse_response
+        # No exception means the keep-alive was skipped before json().
+        keepalive.json.assert_not_called()
 
     async def test_listen_stops_after_max_retries(self, mock_http):
         """_listen gives up after _MAX_LISTEN_RETRIES consecutive failures."""
