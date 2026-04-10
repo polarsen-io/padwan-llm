@@ -491,19 +491,19 @@ def test_conversation_state_snapshot_round_trip() -> None:
 
 
 @pytest.mark.parametrize(
-    "source_chunks, source_system, load_kwargs, expected_system",
+    "source_chunks, source_system, load_system, expected_system",
     [
         pytest.param(
             ["hello"],
             "be helpful",
-            {},
+            None,
             "be helpful",
             id="round_trips_state",
         ),
         pytest.param(
             ["x"],
             "original",
-            {"system": "overridden — should be ignored"},
+            "overridden — should be ignored",
             "original",
             id="ignores_system_kwarg",
         ),
@@ -512,7 +512,7 @@ def test_conversation_state_snapshot_round_trip() -> None:
 async def test_load_restores_state_from_store(
     source_chunks: list[str],
     source_system: str,
-    load_kwargs: dict[str, str],
+    load_system: str | None,
     expected_system: str,
 ) -> None:
     store = FakeStore()
@@ -530,7 +530,7 @@ async def test_load_restores_state_from_store(
         client=cast(LLMClientBase, client2),
         store=store,
         session_id="abc",
-        **load_kwargs,
+        system=load_system,
     )
     assert session2.messages == session.messages
     assert session2.system == expected_system

@@ -359,7 +359,12 @@ class TestOpenAIStream:
             make_sse_event(json.dumps(chunk2)),
         ]
         client.session.post.return_value = make_sse_resp(events)
-        chunks = [c async for c in OpenAIClient.stream(client, {"model": "gpt-4o"})]
+        chunks = [
+            c
+            async for c in OpenAIClient.stream(
+                client, {"model": "gpt-4o", "messages": []}
+            )
+        ]
         assert chunks == [chunk1, chunk2]
 
     @pytest.mark.asyncio
@@ -374,7 +379,12 @@ class TestOpenAIStream:
             make_sse_event(json.dumps({"should": "not appear"})),
         ]
         client.session.post.return_value = make_sse_resp(events)
-        chunks = [c async for c in OpenAIClient.stream(client, {"model": "gpt-4o"})]
+        chunks = [
+            c
+            async for c in OpenAIClient.stream(
+                client, {"model": "gpt-4o", "messages": []}
+            )
+        ]
         assert chunks == [chunk]
 
     @pytest.mark.asyncio
@@ -386,7 +396,12 @@ class TestOpenAIStream:
             make_sse_event(""),
         ]
         client.session.post.return_value = make_sse_resp(events)
-        chunks = [c async for c in OpenAIClient.stream(client, {"model": "gpt-4o"})]
+        chunks = [
+            c
+            async for c in OpenAIClient.stream(
+                client, {"model": "gpt-4o", "messages": []}
+            )
+        ]
         assert chunks == [chunk]
 
     @pytest.mark.asyncio
@@ -397,7 +412,12 @@ class TestOpenAIStream:
         resp.extension = None
         client.session.post.return_value = resp
         with pytest.raises(LLMError, match="SSE extension"):
-            _ = [c async for c in OpenAIClient.stream(client, {"model": "gpt-4o"})]
+            _ = [
+                c
+                async for c in OpenAIClient.stream(
+                    client, {"model": "gpt-4o", "messages": []}
+                )
+            ]
 
     @pytest.mark.asyncio
     async def test_malformed_json_raises(self, client, make_sse_resp):
@@ -406,7 +426,12 @@ class TestOpenAIStream:
         ev.json = MagicMock(side_effect=ValueError("parse error"))
         client.session.post.return_value = make_sse_resp([ev])
         with pytest.raises(LLMError, match="Stream parse error"):
-            _ = [c async for c in OpenAIClient.stream(client, {"model": "gpt-4o"})]
+            _ = [
+                c
+                async for c in OpenAIClient.stream(
+                    client, {"model": "gpt-4o", "messages": []}
+                )
+            ]
 
 
 class TestBatchResultFromLine:
