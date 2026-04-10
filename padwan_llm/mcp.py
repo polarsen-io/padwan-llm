@@ -1,7 +1,6 @@
 import asyncio
 import enum
 import functools
-import json
 import os.path
 import re
 import uuid
@@ -24,7 +23,8 @@ from importlib.metadata import version as _pkg_version
 
 import niquests
 
-from ._json import loads as _json_loads
+from ._base import to_sse_url as _to_sse_url
+from ._json import dumps as _json_dumps, loads as _json_loads
 from .logs import log
 from .models import ToolDefinition
 
@@ -35,7 +35,7 @@ __all__ = ("McpTool", "McpTransport", "McpStreamable", "McpStdio", "ProgressEven
 _JSONRPC = "2.0"
 _PROTOCOL_VERSION = "2025-11-25"
 _MAX_LISTEN_RETRIES = 5
-_DEFAULT_RETRY_MS = 3000
+_DEFAULT_RETRY_MS = 3_000
 
 
 class _Notification(enum.StrEnum):
@@ -65,14 +65,6 @@ class _JsonRpcNotification(TypedDict):
 
 class _JsonRpcRequest(_JsonRpcNotification):
     id: str
-
-
-def _to_sse_url(url: str) -> str:
-    """Convert http(s):// URL to the niquests SSE scheme (psse:// or sse://)."""
-    stripped = url.removeprefix("https://")
-    if stripped is not url:
-        return "sse://" + stripped
-    return "psse://" + url.removeprefix("http://")
 
 
 @dataclass
@@ -622,38 +614,9 @@ class McpStdio:
         return self
 
     async def __aexit__(self, *_: object) -> None:
-        if self._reader_task:
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except asyncio.CancelledError:
-                pass
-        if self._stderr_task:
-            self._stderr_task.cancel()
-            try:
-                await self._stderr_task
-            except asyncio.CancelledError:
-                pass
-        if self._process:
-            self._process.stdin.close()
-            try:
-                await asyncio.wait_for(self._process.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
-                self._process.terminate()
-                try:
-                    await asyncio.wait_for(self._process.wait(), timeout=2.0)
-                except asyncio.TimeoutError:
-                    self._process.kill()
-                    # SIGKILL is reliable but POSIX still requires us to
-                    # call wait() to reap the zombie. Without this, every
-                    # wedged child becomes a defunct process the parent
-                    # never collects, and callers that recycle stdio
-                    # transports accumulate them. Bounded so a truly
-                    # un-killable child can't hang shutdown.
-                    try:
-                        await asyncio.wait_for(self._process.wait(), timeout=2.0)
-                    except asyncio.TimeoutError:
-                        log.warning("MCP stdio child did not exit after SIGKILL")
+        await self._cancel_task(self._reader_task)
+        await self._cancel_task(self._stderr_task)
+        await self._shutdown_process()
         for fut in self._pending.values():
             if not fut.done():
                 fut.set_exception(RuntimeError("MCP stdio connection closed"))
@@ -667,6 +630,31 @@ class McpStdio:
         self._stderr_task = None
         self._next_id = 0
 
+    @staticmethod
+    async def _cancel_task(task: asyncio.Task[None] | None) -> None:
+        if task is None:
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    async def _shutdown_process(self) -> None:
+        """Graceful close → SIGTERM → SIGKILL, with zombie reaping."""
+        if self._process is None:
+            return
+        self._process.stdin.close()  # type: ignore[union-attr]
+        for signal in (None, "terminate", "kill"):
+            if signal is not None:
+                getattr(self._process, signal)()
+            try:
+                await asyncio.wait_for(self._process.wait(), timeout=2.0)
+                return
+            except asyncio.TimeoutError:
+                continue
+        log.warning("MCP stdio child did not exit after SIGKILL")
+
     @property
     def tools(self) -> list[McpTool]:
         return self._tools
@@ -675,7 +663,7 @@ class McpStdio:
         if not self._process:
             raise RuntimeError("MCP stdio process not running")
         # Newline-Delimited JSON framing
-        data = json.dumps(msg).encode() + b"\n"
+        data = _json_dumps(msg).encode() + b"\n"
         self._process.stdin.write(data)
         await self._process.stdin.drain()
 
@@ -729,7 +717,7 @@ class McpStdio:
                     continue
                 try:
                     msg: dict[str, Any] = _json_loads(line)
-                except json.JSONDecodeError:
+                except ValueError:
                     log.warning("MCP stdio: ignoring malformed line: %s", line)
                     continue
                 msg_id = msg.get("id")

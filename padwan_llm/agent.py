@@ -1,14 +1,13 @@
 import asyncio
 import contextlib
 import inspect
-import json
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol, Self, cast
+from typing import Any, Literal, Protocol, Self
 
 from ._base import LLMClientBase
-from ._json import loads as _json_loads
+from ._json import dumps as _json_dumps, loads as _json_loads
 from .client import LLMClient
 from .conversation import (
     AssistantToolMessage,
@@ -23,7 +22,6 @@ from .models import ToolCall, ToolDefinition, UsageToken
 
 __all__ = ("AgentSession", "ConversationStore")
 
-
 type ToolErrorHandler = Callable[[McpTool, dict[str, Any], Exception], str]
 type ApprovalHook = Callable[[McpTool, dict[str, Any]], bool | Awaitable[bool]]
 
@@ -36,44 +34,53 @@ class ConversationStore(Protocol):
     """
 
     def save(self, session_id: str, snapshot: ConversationSnapshot) -> None: ...
+
     def load(self, session_id: str) -> ConversationSnapshot: ...
 
 
 def _extract_text(result: Any) -> str:
     """Reduce a tool result to a string suitable for ToolResultMessage.content.
 
-    The MCP `tools/call` response can carry far more than just text:
-    `image`/`resource` blocks, an `isError` flag, `structuredContent`
-    for machine-readable JSON tools, and arbitrary server extensions.
-    This helper preserves all of it on the round-trip to the LLM:
+    Plain strings pass through unchanged::
 
-    - Plain strings pass through unchanged.
-    - A dict whose *only* meaningful field is a `content` array of pure
-      `text` blocks collapses to a newline-joined string — that's the
-      common conversational case and the model gets clean text.
-    - Any dict that also carries `structuredContent`, `isError`, or
-      non-text content blocks (image, resource, …) is JSON-encoded so
-      the model receives every field the server sent. Without this
-      escape hatch, JSON-only MCP tools were silently turning into
-      empty strings before the agent ever forwarded them.
+        "Hello world"  →  "Hello world"
+
+    A dict whose only field is a ``content`` array of pure text blocks
+    collapses to newline-joined text::
+
+        {"content": [
+            {"type": "text", "text": "File contents here"},
+            {"type": "text", "text": "More output"}
+        ]}
+        →  "File contents here\nMore output"
+
+    Anything richer (``structuredContent``, ``isError``, non-text blocks)
+    round-trips as JSON so nothing is dropped::
+
+        {"content": [{"type": "text", "text": "summary"}],
+         "structuredContent": {"rows": [{"id": 1, "name": "foo"}]},
+         "isError": false}
+        →  '{"content": [...], "structuredContent": {...}, "isError": false}'
     """
     if isinstance(result, str):
         return result
     if not isinstance(result, dict):
-        return json.dumps(result)
+        return _json_dumps(result)
 
     content = result.get("content") or []
-    has_only_content_key = set(result.keys()) <= {"content"}
-    text_only_blocks = all(
-        isinstance(b, dict) and b.get("type") == "text" for b in content
-    )
-    if has_only_content_key and text_only_blocks:
-        texts = [b.get("text") for b in content if b.get("text")]
-        if texts:
-            return "\n".join(texts)
+    if set(result.keys()) <= {"content"}:
+        texts: list[str] = []
+        for b in content:
+            if not isinstance(b, dict) or b.get("type") != "text":
+                break
+            if t := b.get("text"):
+                texts.append(t)
+        else:
+            if texts:
+                return "\n".join(texts)
     # Anything richer than pure text blocks (or pure text alongside
     # structured/error fields) round-trips as JSON so nothing is dropped.
-    return json.dumps(result)
+    return _json_dumps(result)
 
 
 @dataclass
@@ -95,16 +102,32 @@ class AgentSession:
     client: LLMClientBase
     system: str | None = None
     mcp_tools: Sequence[McpTool | McpTransport] = field(default_factory=list)
-    max_tool_rounds: int | None = 30
+    max_tool_rounds: int | None = 5
+    """Max LLM round-trips per ``send()`` call. None disables the limit."""
     max_tool_result_chars: int | None = 8_000
+    """Truncate tool results sent back to the model. None disables truncation."""
     execution: Literal["sequential", "parallel"] = "sequential"
+    """Run tool calls sequentially or in parallel within each round."""
     on_tool: Callable[[str, dict[str, Any]], None] | None = None
+    """Hook notified before each tool dispatch, for logging or side-effects."""
     on_tool_error: ToolErrorHandler | None = None
+    """Custom error handler, replaces the default JSON-serialised error message."""
     approve_tool: ApprovalHook | None = None
+    """Gate that can deny individual tool calls before they execute."""
     session_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     store: ConversationStore | None = None
     _state: ConversationState = field(init=False)
     _exit_stack: contextlib.AsyncExitStack = field(init=False)
+    _dispatch_cache: tuple[list[ToolDefinition], dict[str, McpTool]] | None = field(
+        init=False,
+        default=None,
+        repr=False,
+    )
+    _dispatch_fingerprint: tuple[int, ...] | None = field(
+        init=False,
+        default=None,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         if self.max_tool_rounds is not None and self.max_tool_rounds < 1:
@@ -149,8 +172,7 @@ class AgentSession:
         """
         await self._exit_stack.__aenter__()
         try:
-            if not self.client.is_open:
-                await self._exit_stack.enter_async_context(self.client)
+            await self._exit_stack.enter_async_context(self.client)
             for item in self.mcp_tools:
                 if isinstance(item, McpTool):
                     continue
@@ -178,61 +200,62 @@ class AgentSession:
         session_id: str | None = None,
         model: str | None = None,
         client: LLMClientBase | None = None,
-        **kwargs: Any,
+        system: str | None = None,
+        mcp_tools: Sequence[McpTool | McpTransport] = (),
+        max_tool_rounds: int | None = 30,
+        max_tool_result_chars: int | None = 8_000,
+        execution: Literal["sequential", "parallel"] = "sequential",
+        on_tool: Callable[[str, dict[str, Any]], None] | None = None,
+        on_tool_error: ToolErrorHandler | None = None,
+        approve_tool: ApprovalHook | None = None,
     ) -> Self:
         """Construct an AgentSession, optionally restoring state from `store`.
 
         If `session_id` is provided and the store has a matching snapshot,
         the conversation history, total usage, and system prompt are
-        restored from it. If the snapshot is missing (store raises
-        `LookupError`, e.g. `KeyError`), the session is built fresh but
+        restored from it. If the snapshot is missing, the session is built fresh but
         pinned to the caller-supplied `session_id`, so subsequent `save()`
-        calls land under that id — making this a natural get-or-create
-        entry point for callers that key sessions by a stable handle.
+        calls land under that id.
 
         If `session_id` is `None`, a fresh id is generated and the session
         starts empty; future `save()` calls still go to the configured
         store.
 
-        Pass `model` to have an `LLMClient` created automatically (intended
-        for use as an async context manager). Pass `client` directly when you
-        need a pre-configured or fake client (e.g. in tests). Exactly one of
-        the two must be provided.
+        Pass `model` to have an `LLMClient` created automatically, or
+        `client` for a pre-configured or fake client. Exactly one must
+        be provided.
 
         When restoring, the `system` prompt is taken from the persisted
-        snapshot; any `system` value in `kwargs` is ignored.
+        snapshot; the `system` parameter is ignored.
         """
         if model is None and client is None:
             raise ValueError("Either model= or client= must be provided")
         if model is not None and client is not None:
-            raise ValueError(
-                "Provide exactly one of model= or client=, not both — "
-                "passing both would silently drop the custom client."
-            )
-        _client = (
-            LLMClient(model=model) if model is not None else cast(LLMClientBase, client)
-        )
+            raise ValueError("Provide exactly one of model= or client=, not both")
+        _client = LLMClient(model=model) if model is not None else client
 
-        if session_id is None:
-            # Fresh session — no snapshot to restore, rely on the main
-            # constructor's session_id default_factory.
-            return cls(client=_client, store=store, **kwargs)
+        snapshot: ConversationSnapshot | None = None
+        if session_id is not None:
+            try:
+                snapshot = store.load(session_id)
+            except LookupError:
+                pass
 
-        try:
-            snapshot = store.load(session_id)
-        except LookupError:
-            # Store doesn't have this session yet — start fresh but pin the
-            # caller-supplied id so save() lands under the expected key.
-            return cls(client=_client, store=store, session_id=session_id, **kwargs)
-        kwargs.pop("system", None)
         instance = cls(
             client=_client,
             store=store,
-            session_id=session_id,
-            system=snapshot.get("system"),
-            **kwargs,
+            system=snapshot.get("system") if snapshot else system,
+            **({} if session_id is None else {"session_id": session_id}),
+            mcp_tools=mcp_tools,
+            max_tool_rounds=max_tool_rounds,
+            max_tool_result_chars=max_tool_result_chars,
+            execution=execution,
+            on_tool=on_tool,
+            on_tool_error=on_tool_error,
+            approve_tool=approve_tool,
         )
-        instance._state = ConversationState.from_snapshot(snapshot)
+        if snapshot:
+            instance._state = ConversationState.from_snapshot(snapshot)
         return instance
 
     def _context_messages(self) -> list[ChatMessage]:
@@ -279,12 +302,22 @@ class AgentSession:
         """
         # (tool, source_transport_or_None) for everything in mcp_tools.
         items: list[tuple[McpTool, McpTransport | None]] = []
+        tool_ids: list[int] = []
         for item in self.mcp_tools:
             if isinstance(item, McpTool):
                 items.append((item, None))
+                tool_ids.append(id(item))
             else:
                 for t in item.tools:
                     items.append((t, item))
+                    tool_ids.append(id(t))
+
+        fingerprint = tuple(tool_ids)
+        if (
+            fingerprint == self._dispatch_fingerprint
+            and self._dispatch_cache is not None
+        ):
+            return self._dispatch_cache
 
         # First pass: count names to find collisions.
         name_counts: dict[str, int] = {}
@@ -332,6 +365,8 @@ class AgentSession:
                 )
             tool_defs.append(public.to_tool_def())
             dispatch[public.name] = public
+        self._dispatch_fingerprint = fingerprint
+        self._dispatch_cache = (tool_defs, dispatch)
         return tool_defs, dispatch
 
     async def _approve(self, tool: McpTool, args: dict[str, Any]) -> bool:
@@ -351,9 +386,9 @@ class AgentSession:
     ) -> str:
         name = tc["function"]["name"]
         if tool is None:
-            return json.dumps({"error": f"Unknown tool: {name}"})
+            return _json_dumps({"error": f"Unknown tool: {name}"})
         if not approved:
-            return json.dumps({"error": f"Tool call denied by approval hook: {name}"})
+            return _json_dumps({"error": f"Tool call denied by approval hook: {name}"})
         try:
             result: Any = tool.handler(args)
             if inspect.isawaitable(result):
@@ -362,7 +397,7 @@ class AgentSession:
             log.warning("Tool %r raised: %s", name, exc, exc_info=True)
             if self.on_tool_error is not None:
                 return self.on_tool_error(tool, args, exc)
-            return json.dumps({"error": str(exc)})
+            return _json_dumps({"error": str(exc)})
         return _extract_text(result)
 
     async def _run_tool_calls(
@@ -381,7 +416,7 @@ class AgentSession:
             name = tc["function"]["name"]
             try:
                 args = _json_loads(tc["function"]["arguments"])
-            except json.JSONDecodeError as exc:
+            except ValueError as exc:
                 log.warning("Bad tool args for %r: %s", name, exc)
                 args = {}
             if self.on_tool is not None:

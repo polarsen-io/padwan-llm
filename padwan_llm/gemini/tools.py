@@ -1,4 +1,3 @@
-import json
 from collections.abc import Sequence
 from typing import Any
 
@@ -10,7 +9,7 @@ from .models import (
     GeminiTool,
     Part,
 )
-from .._json import loads as _json_loads
+from .._json import dumps as _json_dumps, loads as _json_loads
 from ..conversation import AssistantToolMessage, ToolResultMessage
 from ..models import ToolCall, ToolCallFunction, ToolDefinition
 
@@ -53,7 +52,7 @@ class GeminiToolMixin:
                     type="function",
                     function=ToolCallFunction(
                         name=fc["name"],
-                        arguments=json.dumps(fc.get("args", {})),
+                        arguments=_json_dumps(fc.get("args", {})),
                     ),
                 )
                 if sig := part.get("thoughtSignature"):
@@ -70,7 +69,7 @@ class GeminiToolMixin:
         """
         try:
             response_data = _json_loads(msg["content"])
-        except (json.JSONDecodeError, TypeError):  # fmt: skip
+        except (ValueError, TypeError):
             response_data = {"result": msg["content"]}
         if not isinstance(response_data, dict):
             response_data = {"result": response_data}
@@ -101,7 +100,7 @@ class GeminiToolMixin:
             args = tc["function"]["arguments"]
             try:
                 parsed_args = _json_loads(args)
-            except (json.JSONDecodeError, TypeError):  # fmt: skip
+            except (ValueError, TypeError):  # fmt: skip
                 parsed_args = {}
             part: FunctionCallPart = {
                 "functionCall": {

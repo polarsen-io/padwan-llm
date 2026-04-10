@@ -4,7 +4,6 @@ import dataclasses
 import typing
 from dataclasses import field
 from functools import partial
-import json
 import os
 from collections.abc import AsyncIterator, Sequence
 from http import HTTPStatus
@@ -17,7 +16,7 @@ from .batch import BatchJob, BatchRequest, BatchResult
 from .tools import OpenAIToolMixin
 from .types import Batch, ListBatchesResponse, OpenAIFile
 from .._base import ChatStream, LLMClientBase, LLMError, Provider
-from .._json import loads as _json_loads
+from .._json import dumps as _json_dumps, loads as _json_loads
 from ..conversation import ChatMessage
 from ..errors import QuotaExceededError, TooManyRequestsError
 from ..models import (
@@ -240,35 +239,25 @@ class _OpenAIBase(LLMClientBase[Retry], OpenAIToolMixin):
     ) -> AsyncIterator[CreateChatCompletionStreamResponse]:
         """Stream chat completions, yielding response chunks as they arrive via SSE."""
         resp = await self.session.post(
-            "/chat/completions",
+            self._sse_url("/chat/completions"),
             json={**body, "stream": True},
-            stream=True,
         )
         _check_resp_status(resp)
-
-        # SSE responses are UTF-8 per the W3C spec, but some providers
-        # (xAI/Grok) omit the charset from Content-Type. niquests'
-        # iter_lines(decode_unicode=True) falls back to yielding raw
-        # bytes when resp.encoding is None — force UTF-8 so the loop
-        # below always sees str.
-        if resp.encoding is None:
-            resp.encoding = "utf-8"
-
-        done = False
-        async for raw_line in resp.iter_lines(decode_unicode=True):  # pyright: ignore[reportGeneralTypeIssues]
-            if not raw_line or done:
+        ext = resp.extension
+        if ext is None:
+            raise LLMError(self.provider, "SSE extension not available on response")
+        while not ext.closed:
+            event = await ext.next_payload()
+            if event is None:
+                break
+            if not event.data:
                 continue
-            if raw_line.startswith("data: "):
-                data_str = raw_line[6:]
-                if data_str == "[DONE]":
-                    done = True
-                    continue
-                try:
-                    yield cast(
-                        "CreateChatCompletionStreamResponse", _json_loads(data_str)
-                    )
-                except json.JSONDecodeError as e:
-                    raise LLMError(self.provider, f"Stream parse error: {e}") from e
+            if event.data == "[DONE]":
+                break
+            try:
+                yield cast("CreateChatCompletionStreamResponse", event.json())
+            except ValueError as e:
+                raise LLMError(self.provider, f"Stream parse error: {e}") from e
 
     async def complete_chat(
         self,
@@ -430,7 +419,7 @@ class OpenAIClient(_OpenAIBase):
                 "url": "/v1/chat/completions",
                 "body": {**req.body, "model": _model},
             }
-            lines.append(json.dumps(line))
+            lines.append(_json_dumps(line))
         content = "\n".join(lines)
 
         resp = await self.session.post(

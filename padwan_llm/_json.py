@@ -1,11 +1,16 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from json import loads as loads
+    from json import dumps, loads
 else:
     try:
-        from orjson import loads
-    except ImportError:
-        from json import loads
+        import orjson as _orjson
 
-__all__ = ("loads",)
+        loads = _orjson.loads
+
+        def dumps(obj: Any) -> str:
+            return _orjson.dumps(obj).decode()
+    except ImportError:
+        from json import dumps, loads
+
+__all__ = ("dumps", "loads")

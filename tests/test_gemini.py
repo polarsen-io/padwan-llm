@@ -2,7 +2,7 @@ import json
 import re
 from contextlib import nullcontext
 from typing import get_type_hints
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from google.genai.types import (
@@ -227,6 +227,65 @@ class TestGeminiChatStream:
     )
     def test_extract_usage(self, chunk: dict, expected: dict | None):
         assert self.stream._extract_usage(chunk) == expected
+
+
+class TestGeminiStream:
+    """Tests for GeminiClient.stream() SSE parsing."""
+
+    @pytest.fixture
+    def client(self):
+        c = MagicMock(spec=GeminiClient)
+        c.provider = "gemini"
+        c.model = "gemini-2.5-flash"
+        c.base_url = "https://generativelanguage.googleapis.com/v1beta/"
+        c.temperature = 0.2
+        c._sse_url = GeminiClient._sse_url.__get__(c)
+        c._build_gen_config = MagicMock(return_value={"temperature": 0.2})
+        c.session = AsyncMock()
+        return c
+
+    @pytest.mark.asyncio
+    async def test_yields_parsed_chunks(self, client, make_sse_event, make_sse_resp):
+        chunk1 = {"candidates": [{"content": {"parts": [{"text": "Hi"}]}}]}
+        chunk2 = {"candidates": [{"content": {"parts": [{"text": " there"}]}}]}
+        events = [
+            make_sse_event(json.dumps(chunk1)),
+            make_sse_event(json.dumps(chunk2)),
+        ]
+        client.session.post.return_value = make_sse_resp(events)
+        chunks = [c async for c in GeminiClient.stream(client, {"contents": []})]
+        assert chunks == [chunk1, chunk2]
+
+    @pytest.mark.asyncio
+    async def test_skips_keepalive_frames(self, client, make_sse_event, make_sse_resp):
+        chunk = {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+        events = [
+            make_sse_event(""),
+            make_sse_event(json.dumps(chunk)),
+            make_sse_event(""),
+        ]
+        client.session.post.return_value = make_sse_resp(events)
+        chunks = [c async for c in GeminiClient.stream(client, {"contents": []})]
+        assert chunks == [chunk]
+
+    @pytest.mark.asyncio
+    async def test_no_extension_raises(self, client):
+        resp = AsyncMock()
+        resp.status_code = 200
+        resp.raise_for_status = MagicMock(return_value=resp)
+        resp.extension = None
+        client.session.post.return_value = resp
+        with pytest.raises(LLMError, match="SSE extension"):
+            _ = [c async for c in GeminiClient.stream(client, {"contents": []})]
+
+    @pytest.mark.asyncio
+    async def test_malformed_json_raises(self, client, make_sse_resp):
+        ev = MagicMock()
+        ev.data = "{bad"
+        ev.json = MagicMock(side_effect=ValueError("parse error"))
+        client.session.post.return_value = make_sse_resp([ev])
+        with pytest.raises(LLMError, match="Stream parse error"):
+            _ = [c async for c in GeminiClient.stream(client, {"contents": []})]
 
 
 class TestGenConfig:

@@ -34,6 +34,14 @@ class ChatStream(abc.ABC):
         ...
 
 
+def to_sse_url(url: str) -> str:
+    """Convert http(s):// URL to the niquests SSE scheme (``sse://`` or ``psse://``)."""
+    stripped = url.removeprefix("https://")
+    if stripped is not url:
+        return "sse://" + stripped
+    return "psse://" + url.removeprefix("http://")
+
+
 @dataclass
 class LLMClientBase[RetryT: Retry](abc.ABC):
     """Abstract base class for LLM provider clients.
@@ -100,18 +108,15 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
             )
         return self._session
 
-    def _build_session(self) -> niquests.AsyncSession:
-        """Create and configure an async HTTP session with retry logic."""
-        session = niquests.AsyncSession(
-            timeout=self.timeout, retries=self._retry, base_url=self.base_url
-        )
-        self._set_auth_headers(session)
-        return session
+    def _sse_url(self, path: str) -> str:
+        """Build a full SSE-scheme URL for the given path.
 
-    @property
-    def is_open(self) -> bool:
-        """True while the underlying HTTP session is live."""
-        return self._session is not None
+        niquests activates its SSE extension (``r.extension``) only when
+        the request URL uses the ``sse://`` (TLS) or ``psse://`` (plain)
+        scheme. This helper resolves *path* against ``base_url`` and
+        swaps the scheme so streaming requests get proper SSE parsing.
+        """
+        return to_sse_url(self.base_url.rstrip("/") + "/" + path.lstrip("/"))
 
     async def __aenter__(self) -> Self:
         if self._session is not None:
@@ -119,7 +124,10 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
                 f"{type(self).__name__} is already open; "
                 "using the same client in nested `async with` blocks is not supported"
             )
-        self._session = self._build_session()
+        self._session = niquests.AsyncSession(
+            timeout=self.timeout, retries=self._retry, base_url=self.base_url
+        )
+        self._set_auth_headers(self._session)
         return self
 
     async def __aexit__(

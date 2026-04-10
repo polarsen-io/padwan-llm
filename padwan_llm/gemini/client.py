@@ -4,7 +4,6 @@ import dataclasses
 import typing
 from dataclasses import field
 from functools import partial
-import json
 import math
 import os
 from collections.abc import AsyncIterator, Callable, Sequence
@@ -114,20 +113,6 @@ def _check_resp_status(resp: niquests.Response) -> niquests.Response:
         _raise_error_from_resp(data, resp, e)
 
 
-async def _async_check_resp_status(
-    resp: niquests.AsyncResponse,
-) -> niquests.AsyncResponse:
-    """Check HTTP status for a streaming response, raising appropriate errors."""
-    try:
-        return resp.raise_for_status()  # type: ignore[return-value]
-    except niquests.exceptions.HTTPError as e:
-        try:
-            data = await resp.json()
-        except Exception:
-            raise e
-        _raise_error_from_resp(data, resp, e)
-
-
 def _check_resp(resp: niquests.Response) -> typing.Any:
     """Check Gemini HTTP response and return the parsed JSON body."""
     return (_check_resp_status(resp)).json()
@@ -169,7 +154,7 @@ class GeminiRetry(Retry):
                 if detail.get("@type") == "type.googleapis.com/google.rpc.RetryInfo":
                     delay_str = detail.get("retryDelay", "")
                     return math.ceil(float(delay_str.rstrip("s")))
-        except (json.JSONDecodeError, ValueError, KeyError):  # fmt: skip
+        except (ValueError, KeyError):  # fmt: skip
             pass
         return None
 
@@ -388,23 +373,24 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
             payload["tools"] = gemini_tools
 
         resp = await self.session.post(
-            f"/models/{self.model}:streamGenerateContent",
+            self._sse_url(f"/models/{self.model}:streamGenerateContent"),
             params={"alt": "sse"},
             json=payload,
-            stream=True,
         )
-        await _async_check_resp_status(resp)
-        resp.encoding = "utf-8"
-
-        async for line in resp.iter_lines(decode_unicode=True):  # pyright: ignore[reportGeneralTypeIssues]
-            if not line:
+        _check_resp_status(resp)
+        ext = resp.extension
+        if ext is None:
+            raise LLMError(self.provider, "SSE extension not available on response")
+        while not ext.closed:
+            event = await ext.next_payload()
+            if event is None:
+                break
+            if not event.data:
                 continue
-            if line.startswith("data: "):
-                data_str = line[6:]  # Remove "data: " prefix
-                try:
-                    yield _json_loads(data_str)
-                except json.JSONDecodeError as e:
-                    raise LLMError(self.provider, f"Stream parse error: {e}") from e
+            try:
+                yield event.json()
+            except ValueError as e:
+                raise LLMError(self.provider, f"Stream parse error: {e}") from e
 
     async def complete_chat(
         self,

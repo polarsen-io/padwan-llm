@@ -71,7 +71,7 @@ AgentSession(
     client=...,                    # LLMClientBase (e.g. LLMClient(model=...))
     system=None,                   # system prompt, stored in ConversationState
     mcp_tools=[],                  # McpTool | McpTransport instances
-    max_tool_rounds=30,            # round cap; None = unbounded (use with care)
+    max_tool_rounds=5,             # round cap; None = unbounded (use with care)
     max_tool_result_chars=8_000,   # truncate tool results sent to the LLM; None = no limit
     execution="sequential",        # "sequential" or "parallel"
     on_tool=None,                  # callback fired per tool call: (name, args) -> None

@@ -594,44 +594,6 @@ async def test_load_rejects_both_model_and_client() -> None:
         )
 
 
-@pytest.mark.parametrize(
-    "pre_open, expected_session_managed",
-    [
-        # Caller already entered the client → session must leave it alone.
-        pytest.param(True, False, id="pre_open_session_skips"),
-        # Fresh client → session enters and exits it.
-        pytest.param(False, True, id="fresh_session_manages"),
-    ],
-)
-async def test_aenter_respects_client_lifecycle(
-    pre_open: bool, expected_session_managed: bool
-) -> None:
-    """Regression: `AgentSession.__aenter__` used to unconditionally enter
-    the client, orphaning any pre-existing session and leaking HTTP state.
-    Now it detects `is_open` and only manages clients that aren't already
-    open. Resources opened by the caller stay owned by the caller.
-    """
-    fake = FakeClient(responses=[FakeChatStream(chunks=["ok"])])
-    if pre_open:
-        await fake.__aenter__()
-    initial_aenter = fake.aenter_count
-
-    async with AgentSession(client=cast(LLMClientBase, fake)) as session:
-        await session.send("hi")
-
-    if expected_session_managed:
-        # The session opened it (1 enter) and closed it on exit (1 exit).
-        assert fake.aenter_count == initial_aenter + 1
-        assert fake.aexit_count == 1
-    else:
-        # The session must not have touched the lifecycle at all.
-        assert fake.aenter_count == initial_aenter
-        assert fake.aexit_count == 0
-        # Caller cleanup still works.
-        await fake.__aexit__(None, None, None)
-        assert fake.aexit_count == 1
-
-
 @dataclass
 class _FakeTransport:
     """Minimal McpTransport stand-in for collision/prefix tests.

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
 import typing
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, cast
 
+from .._json import dumps as _json_dumps
 from ..models import ToolCall, ToolCallFunction, ToolDefinition
 
 if TYPE_CHECKING:
@@ -48,7 +48,7 @@ class OpenAIToolMixin:
         for tc in raw_calls:
             func = tc["function"]
             args = func["arguments"]
-            arguments = json.dumps(args) if isinstance(args, dict) else args
+            arguments = _json_dumps(args) if isinstance(args, dict) else args
             result.append(
                 ToolCall(
                     id=tc["id"],

@@ -23,7 +23,7 @@ __all__ = (
     "TERMINAL_STATES",
 )
 
-TERMINAL_STATES: frozenset[str] = frozenset(
+TERMINAL_STATES: frozenset[BatchState] = frozenset(
     {
         "JOB_STATE_SUCCEEDED",
         "JOB_STATE_FAILED",

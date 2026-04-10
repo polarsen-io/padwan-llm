@@ -6,7 +6,7 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "niquests>=3.17.0",
+    "niquests>=3.18.5",
     "typing_extensions>=4.10; python_version < '3.14'",
     "urllib3-future>=2.19.902",
 ]
@@ -21,6 +21,7 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-root = ""
 module-name = "padwan_llm"
+
 
 [dependency-groups]
 dev = [

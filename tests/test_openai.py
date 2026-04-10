@@ -1,5 +1,6 @@
+import json
 from contextlib import nullcontext
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -334,6 +335,78 @@ class TestStreamForwardsThoughts:
         produced = [t async for t in stream]
         assert "".join(produced) == expected_text
         assert thoughts == expected_thoughts
+
+
+class TestOpenAIStream:
+    """Tests for _OpenAIBase.stream() SSE parsing."""
+
+    @pytest.fixture
+    def client(self):
+        c = MagicMock(spec=OpenAIClient)
+        c.provider = "openai"
+        c.model = "gpt-4o"
+        c.base_url = "https://api.openai.com/v1/"
+        c._sse_url = OpenAIClient._sse_url.__get__(c)
+        c.session = AsyncMock()
+        return c
+
+    @pytest.mark.asyncio
+    async def test_yields_parsed_chunks(self, client, make_sse_event, make_sse_resp):
+        chunk1 = {"choices": [{"delta": {"content": "Hello"}}]}
+        chunk2 = {"choices": [{"delta": {"content": " world"}}]}
+        events = [
+            make_sse_event(json.dumps(chunk1)),
+            make_sse_event(json.dumps(chunk2)),
+        ]
+        client.session.post.return_value = make_sse_resp(events)
+        chunks = [c async for c in OpenAIClient.stream(client, {"model": "gpt-4o"})]
+        assert chunks == [chunk1, chunk2]
+
+    @pytest.mark.asyncio
+    async def test_done_sentinel_stops(self, client, make_sse_event, make_sse_resp):
+        chunk = {"choices": [{"delta": {"content": "hi"}}]}
+        done_ev = MagicMock()
+        done_ev.data = "[DONE]"
+        done_ev.json = MagicMock(side_effect=ValueError)
+        events = [
+            make_sse_event(json.dumps(chunk)),
+            done_ev,
+            make_sse_event(json.dumps({"should": "not appear"})),
+        ]
+        client.session.post.return_value = make_sse_resp(events)
+        chunks = [c async for c in OpenAIClient.stream(client, {"model": "gpt-4o"})]
+        assert chunks == [chunk]
+
+    @pytest.mark.asyncio
+    async def test_skips_keepalive_frames(self, client, make_sse_event, make_sse_resp):
+        chunk = {"choices": [{"delta": {"content": "ok"}}]}
+        events = [
+            make_sse_event(""),
+            make_sse_event(json.dumps(chunk)),
+            make_sse_event(""),
+        ]
+        client.session.post.return_value = make_sse_resp(events)
+        chunks = [c async for c in OpenAIClient.stream(client, {"model": "gpt-4o"})]
+        assert chunks == [chunk]
+
+    @pytest.mark.asyncio
+    async def test_no_extension_raises(self, client):
+        resp = AsyncMock()
+        resp.status_code = 200
+        resp.raise_for_status = MagicMock(return_value=resp)
+        resp.extension = None
+        client.session.post.return_value = resp
+        with pytest.raises(LLMError, match="SSE extension"):
+            _ = [c async for c in OpenAIClient.stream(client, {"model": "gpt-4o"})]
+
+    @pytest.mark.asyncio
+    async def test_malformed_json_raises(self, client, make_sse_resp):
+        ev = MagicMock()
+        ev.data = "{bad json"
+        ev.json = MagicMock(side_effect=ValueError("parse error"))
+        client.session.post.return_value = make_sse_resp([ev])
+        with pytest.raises(LLMError, match="Stream parse error"):
+            _ = [c async for c in OpenAIClient.stream(client, {"model": "gpt-4o"})]
 
 
 class TestBatchResultFromLine:
