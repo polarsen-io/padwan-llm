@@ -232,7 +232,9 @@ class AgentSession:
             raise ValueError("Either model= or client= must be provided")
         if model is not None and client is not None:
             raise ValueError("Provide exactly one of model= or client=, not both")
-        _client = LLMClient(model=model) if model is not None else client
+        _client: LLMClientBase = (
+            LLMClient(model=model) if model is not None else client  # type: ignore[assignment]
+        )
 
         snapshot: ConversationSnapshot | None = None
         if session_id is not None:

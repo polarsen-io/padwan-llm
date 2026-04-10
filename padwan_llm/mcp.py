@@ -660,12 +660,13 @@ class McpStdio:
         return self._tools
 
     async def _send(self, msg: _JsonRpcNotification | _JsonRpcRequest) -> None:
-        if not self._process:
+        proc = self._process
+        if not proc or not proc.stdin:
             raise RuntimeError("MCP stdio process not running")
         # Newline-Delimited JSON framing
         data = _json_dumps(msg).encode() + b"\n"
-        self._process.stdin.write(data)
-        await self._process.stdin.drain()
+        proc.stdin.write(data)
+        await proc.stdin.drain()
 
     async def _drain_stderr(self) -> None:
         """Background task that forwards the child process's stderr to logs.
@@ -675,7 +676,10 @@ class McpStdio:
         blocks on its next stderr write — wedging the whole session.
         """
         try:
-            async for raw_line in self._process.stderr:
+            stderr = self._process.stderr if self._process else None
+            if stderr is None:
+                return
+            async for raw_line in stderr:
                 line = raw_line.decode(errors="replace").rstrip()
                 if line:
                     log.debug("MCP stdio stderr: %s", line)
@@ -711,7 +715,10 @@ class McpStdio:
     async def _reader(self) -> None:
         """Read stdout line-by-line and dispatch JSON-RPC messages."""
         try:
-            async for raw_line in self._process.stdout:
+            stdout = self._process.stdout if self._process else None
+            if stdout is None:
+                return
+            async for raw_line in stdout:
                 line = raw_line.strip()
                 if not line:
                     continue
