@@ -83,7 +83,7 @@ async with LLMClient("gpt-4o") as client:
 All clients support streaming responses:
 
 ```python
-from padwan_llm.conversation import Message
+from padwan_llm import LLMClient, Message
 
 async with LLMClient("gpt-4o") as client:
     stream = client.stream_chat([

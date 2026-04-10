@@ -202,7 +202,7 @@ class AgentSession:
         client: LLMClientBase | None = None,
         system: str | None = None,
         mcp_tools: Sequence[McpTool | McpTransport] = (),
-        max_tool_rounds: int | None = 30,
+        max_tool_rounds: int | None = 5,
         max_tool_result_chars: int | None = 8_000,
         execution: Literal["sequential", "parallel"] = "sequential",
         on_tool: Callable[[str, dict[str, Any]], None] | None = None,
