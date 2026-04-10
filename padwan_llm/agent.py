@@ -228,13 +228,14 @@ class AgentSession:
         When restoring, the `system` prompt is taken from the persisted
         snapshot; the `system` parameter is ignored.
         """
-        if model is None and client is None:
-            raise ValueError("Either model= or client= must be provided")
         if model is not None and client is not None:
             raise ValueError("Provide exactly one of model= or client=, not both")
-        _client: LLMClientBase = (
-            LLMClient(model=model) if model is not None else client  # type: ignore[assignment]
-        )
+        if model is not None:
+            _client: LLMClientBase = LLMClient(model=model)
+        elif client is not None:
+            _client = client
+        else:
+            raise ValueError("Either model= or client= must be provided")
 
         snapshot: ConversationSnapshot | None = None
         if session_id is not None:

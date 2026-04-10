@@ -50,6 +50,7 @@ async def test_agent_session_tool_round_trip(model: str) -> None:
         client=LLMClient(model=model),
         mcp_tools=[weather],
         system="Use the provided tools to answer questions about the weather.",
+        max_tool_rounds=10,
     ) as session:
         text = await session.send("What is the weather in Paris right now?")
 

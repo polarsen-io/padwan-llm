@@ -256,7 +256,7 @@ def test_on_thought_lifted_to_base(cls: type, kwargs: dict):
         pytest.param(GrokClient, "GROK_API_KEY", {}, id="grok"),
         pytest.param(
             OpenAIClient,
-            None,
+            "OPENAI_API_KEY",
             {"base_url": "http://localhost:8080/v1/"},
             id="openai-no-key",
         ),
