@@ -606,6 +606,7 @@ class _FakeTransport:
     _tools: list[McpTool]
     name_prefix: str | None = None
     auto_prefix_value: str = "transport"
+    label_value: str = "fake-transport"
 
     @property
     def tools(self) -> list[McpTool]:
@@ -618,6 +619,10 @@ class _FakeTransport:
     @property
     def auto_prefix(self) -> str:
         return self.auto_prefix_value
+
+    @property
+    def label(self) -> str:
+        return self.label_value
 
     async def __aenter__(self) -> "_FakeTransport":
         return self

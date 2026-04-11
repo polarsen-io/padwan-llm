@@ -120,6 +120,12 @@ class McpTransport(Protocol):
     streamable, ``args[0]``/command basename for stdio) — `AgentSession`
     only applies it when an actual collision is detected, so
     single-transport setups keep clean bare names.
+
+    `label` is a human-readable identifier for display purposes
+    (notifications, logs, UI). Unlike `auto_prefix`, it is not
+    regex-sanitized and preserves the original form the caller
+    configured — a full URL for streamable, a full command line for
+    stdio.
     """
 
     name_prefix: str | None
@@ -130,6 +136,8 @@ class McpTransport(Protocol):
     def is_open(self) -> bool: ...
     @property
     def auto_prefix(self) -> str: ...
+    @property
+    def label(self) -> str: ...
     async def __aenter__(self) -> Self: ...
     async def __aexit__(self, *args: object) -> None: ...
     async def ping(self) -> None: ...
@@ -288,6 +296,11 @@ class McpStreamable:
         host = urlparse(self.url).hostname or "mcp"
         return _sanitize_prefix(host)
 
+    @property
+    def label(self) -> str:
+        """Human-readable identifier for display; returns the configured URL."""
+        return self.url
+
     async def __aenter__(self) -> Self:
         if self._bg_task is not None:
             raise RuntimeError(
@@ -320,7 +333,10 @@ class McpStreamable:
                 except asyncio.CancelledError:
                     log.debug("MCP GET listener cancelled")
             if self._session_id:
-                await self._http.delete(self.url, headers=self._headers())
+                # Route through `sse://` so niquests' `cert_verify`
+                # early-returns — otherwise the not-idle pool triggers a
+                # spurious "TLS verification changed" warning.
+                await self._http.delete(self._sse_url, headers=self._headers())
         except Exception:
             log.warning("MCP session cleanup failed", exc_info=True)
             raise
@@ -512,7 +528,7 @@ class McpStreamable:
         )
         _check_protocol_version(result)
         await self._http.post(
-            self.url,
+            self._sse_url,
             json=_JsonRpcNotification(
                 jsonrpc=_JSONRPC, method=_Notification.INITIALIZED
             ),
@@ -541,7 +557,7 @@ class McpStreamable:
         if reason is not None:
             params["reason"] = reason
         await self._http.post(
-            self.url,
+            self._sse_url,
             json=_JsonRpcNotification(
                 jsonrpc=_JSONRPC,
                 method=_Notification.CANCELLED,
@@ -601,6 +617,15 @@ class McpStdio:
         if base.startswith("@") and "/" in base:
             base = base.split("/", 1)[1]
         return _sanitize_prefix(base)
+
+    @property
+    def label(self) -> str:
+        """Human-readable identifier for display; returns the full
+        command line (``command`` plus ``args``) as the caller
+        configured it."""
+        if not self.args:
+            return self.command
+        return f"{self.command} {' '.join(self.args)}"
 
     @property
     def is_open(self) -> bool:

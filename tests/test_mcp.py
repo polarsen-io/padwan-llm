@@ -207,6 +207,34 @@ def test_stdio_auto_prefix(command, args, expected):
     assert McpStdio(command=command, args=args).auto_prefix == expected
 
 
+def test_streamable_label_is_url():
+    """`McpStreamable.label` exposes the configured URL verbatim so
+    callers can show the transport in notifications/logs without
+    reaching into URL parsing or the sanitized `auto_prefix`."""
+    url = "https://mcp.data.gouv.fr/mcp"
+    assert McpStreamable(url=url).label == url
+
+
+@pytest.mark.parametrize(
+    "command, args, expected",
+    [
+        pytest.param(
+            "npx",
+            ["@modelcontextprotocol/server-filesystem", "/path"],
+            "npx @modelcontextprotocol/server-filesystem /path",
+            id="full_command_line",
+        ),
+        pytest.param("python", ["main.py"], "python main.py", id="single_arg"),
+        pytest.param("npx", [], "npx", id="empty_args_is_command_only"),
+    ],
+)
+def test_stdio_label(command, args, expected):
+    """`McpStdio.label` returns the full command line as the caller
+    configured it — unlike `auto_prefix`, nothing is stripped or
+    sanitized, so the label is suitable for display."""
+    assert McpStdio(command=command, args=args).label == expected
+
+
 @pytest.mark.parametrize(
     "name_prefix, expected_names",
     [
