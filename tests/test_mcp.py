@@ -845,6 +845,76 @@ class TestMcpStreamable:
         # with a fresh one (so a retry doesn't reuse a half-closed one).
         assert client._http is not original_http
 
+    @pytest.mark.parametrize(
+        "on_auth, extra_responses, expected, check_token",
+        [
+            pytest.param(
+                lambda _t: "new-token",
+                [_make_response(_jsonrpc_result({"tools": []}))],
+                nullcontext(),
+                "new-token",
+                id="sync-callback-retries",
+            ),
+            pytest.param(
+                None,
+                [],
+                pytest.raises(RuntimeError, match="requires authorization"),
+                None,
+                id="no-callback-raises",
+            ),
+            pytest.param(
+                lambda _t: (_ for _ in ()).throw(ValueError("cancelled")),
+                [],
+                pytest.raises(ValueError, match="cancelled"),
+                None,
+                id="callback-raises-propagates",
+            ),
+            pytest.param(
+                lambda _t: "token",
+                [_make_response({}, status=HTTPStatus.UNAUTHORIZED)],
+                pytest.raises(RuntimeError, match="requires authorization"),
+                None,
+                id="double-401-retries-only-once",
+            ),
+        ],
+    )
+    async def test_401_recovery(
+        self, mock_http, on_auth, extra_responses, expected, check_token
+    ):
+        self._setup_post_responses(
+            mock_http,
+            _make_response(_INIT_RESULT),
+            _make_response({}),
+            _make_response(_TOOLS_RESULT),
+            _make_response({}, status=HTTPStatus.UNAUTHORIZED),
+            *extra_responses,
+        )
+        client = McpStreamable(url="https://example.com/mcp", on_auth=on_auth)
+        client._http = mock_http
+        async with client:
+            with expected:
+                await client._rpc("tools/list")
+            if check_token is not None:
+                assert client.token == check_token
+
+    async def test_401_async_on_auth(self, mock_http):
+        async def _async_auth(_transport):
+            return "async-token"
+
+        self._setup_post_responses(
+            mock_http,
+            _make_response(_INIT_RESULT),
+            _make_response({}),
+            _make_response(_TOOLS_RESULT),
+            _make_response({}, status=HTTPStatus.UNAUTHORIZED),
+            _make_response(_jsonrpc_result({"tools": []})),
+        )
+        client = McpStreamable(url="https://example.com/mcp", on_auth=_async_auth)
+        client._http = mock_http
+        async with client:
+            await client._rpc("tools/list")
+            assert client.token == "async-token"
+
 
 # McpStdio
 

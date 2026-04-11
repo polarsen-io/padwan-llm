@@ -28,7 +28,7 @@ async with McpStdio(command="uvx", args=["my-mcp-server"]) as mcp:
 | Session management | ✅ | — |
 | SSE streaming | ✅ | — |
 | Reconnectable listener | ✅ (`Last-Event-ID`) | — |
-| Bearer token auth | ✅ | — |
+| Bearer token auth | ✅ (`token`, `on_auth` refresh) | — |
 | Progress notifications | ✅ (`on_progress`) | ✅ (`on_progress`) |
 | Ping | ✅ | ✅ |
 | Request cancellation | ✅ (`cancel()`) | ✅ (`cancel()`) |
@@ -107,6 +107,20 @@ sequenceDiagram
 ```
 
 The key thing to notice: the background `_listen` task is **spawned during `__aenter__`** and lives for the entire duration of the `async with` block. It runs in parallel with all your RPC calls and can deliver notifications at any moment.
+
+### Token refresh on 401
+
+Set `on_auth` to recover from expired bearer tokens. When an RPC returns HTTP 401, the client invokes the callback (sync or async), stores the returned token, and retries the request exactly once:
+
+```python
+async def refresh(transport: McpStreamable) -> str:
+    return await oauth.fetch_token(...)
+
+async with McpStreamable(url="...", token=initial_token, on_auth=refresh) as mcp:
+    ...
+```
+
+Without `on_auth`, a 401 raises `RuntimeError`.
 
 ## Reconnection with `Last-Event-ID`
 

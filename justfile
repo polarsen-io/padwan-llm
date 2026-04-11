@@ -1,7 +1,5 @@
 set quiet
 
-e2e_env := ".env"
-
 # List available recipes
 default:
     @just --list
@@ -14,8 +12,8 @@ test *args:
 
 # Run e2e tests (copy env.template to .env first, then fill in keys)
 [group('dev')]
-e2e *args:
-    uv run pytest tests/e2e/ -m e2e --env-file {{ e2e_env }} {{ args }}
+e2e env=".env" *args:
+    uv run pytest tests/e2e/ -m e2e --env-file {{ env }} {{ args }}
 
 # Type check
 [group('dev')]

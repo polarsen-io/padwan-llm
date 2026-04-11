@@ -1,6 +1,6 @@
 from typing import overload
 
-from ._base import LLMClientBase
+from ._base import LLMClientBase, OnThought
 from .gemini import GeminiClient, GeminiModel, is_gemini_model
 from .grok import GrokClient, GrokModel, is_grok_model
 from .mistral import MistralClient, MistralModel, is_mistral_model
@@ -16,6 +16,7 @@ def LLMClient(
     temperature: float = 0.2,
     timeout: float = 60,
     api_key: str | None = None,
+    on_thought: OnThought | None = None,
 ) -> OpenAIClient: ...
 @overload
 def LLMClient(
@@ -24,6 +25,7 @@ def LLMClient(
     temperature: float = 0.2,
     timeout: float = 60,
     api_key: str | None = None,
+    on_thought: OnThought | None = None,
 ) -> GeminiClient: ...
 @overload
 def LLMClient(
@@ -32,6 +34,7 @@ def LLMClient(
     temperature: float = 0.2,
     timeout: float = 60,
     api_key: str | None = None,
+    on_thought: OnThought | None = None,
 ) -> MistralClient: ...
 @overload
 def LLMClient(
@@ -40,6 +43,7 @@ def LLMClient(
     temperature: float = 0.2,
     timeout: float = 60,
     api_key: str | None = None,
+    on_thought: OnThought | None = None,
 ) -> GrokClient: ...
 @overload
 def LLMClient(
@@ -48,6 +52,7 @@ def LLMClient(
     temperature: float = 0.2,
     timeout: float = 60,
     api_key: str | None = None,
+    on_thought: OnThought | None = None,
 ) -> LLMClientBase: ...
 
 
@@ -57,26 +62,20 @@ def LLMClient(
     temperature: float = 0.2,
     timeout: float = 60,
     api_key: str | None = None,
+    on_thought: OnThought | None = None,
 ) -> LLMClientBase:
     """Create an LLM client based on model name.
 
-    Args:
-        model: Model name (e.g., 'gpt-4o', 'gemini-2.5-flash', 'mistral-large-latest')
-        temperature: Sampling temperature (default: 0.2)
-        timeout: Request timeout in seconds (default: 60)
-        api_key: API key (default: from environment variable)
-
-    Returns:
-        Provider-specific client instance
-
-    Raises:
-        ValueError: If model name doesn't match any known provider
+    The ``on_thought`` callback, when provided, receives reasoning/thinking
+    chunks from providers that support them (Gemini, Grok, Mistral).
+    Providers that don't emit thoughts simply never invoke it.
     """
     kwargs = {
         "model": model,
         "temperature": temperature,
         "timeout": timeout,
         "api_key": api_key,
+        "on_thought": on_thought,
     }
     if is_openai_model(model):
         return OpenAIClient(**kwargs)

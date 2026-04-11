@@ -1,11 +1,13 @@
 import asyncio
 import enum
 import functools
+import inspect
 import os.path
 import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from collections.abc import Awaitable
 from typing import (
     Any,
     Literal,
@@ -30,7 +32,16 @@ from .models import ToolDefinition
 
 __version__ = _pkg_version("padwan-llm")
 
-__all__ = ("McpTool", "McpTransport", "McpStreamable", "McpStdio", "ProgressEvent")
+__all__ = (
+    "McpTool",
+    "McpTransport",
+    "McpStreamable",
+    "McpStdio",
+    "OnAuth",
+    "ProgressEvent",
+)
+
+type OnAuth = Callable[["McpStreamable"], str | Awaitable[str]]
 
 _JSONRPC = "2.0"
 _PROTOCOL_VERSION = "2025-11-25"
@@ -121,6 +132,7 @@ class McpTransport(Protocol):
     def auto_prefix(self) -> str: ...
     async def __aenter__(self) -> Self: ...
     async def __aexit__(self, *args: object) -> None: ...
+    async def ping(self) -> None: ...
 
 
 # Shared helpers
@@ -238,6 +250,10 @@ class McpStreamable:
     url: str
     token: str | None = None
     on_progress: Callable[[ProgressEvent], Any] | None = None
+    on_auth: OnAuth | None = None
+    """Called on HTTP 401 to obtain a fresh token. Receives the transport
+    instance; must return a bearer token string or raise to abort.
+    When ``None`` (default), 401 raises ``RuntimeError``."""
     client_name: str = "padwan-llm"
     client_version: str = __version__
     name_prefix: str | None = None
@@ -337,11 +353,13 @@ class McpStreamable:
         params: dict[str, Any] | None = None,
         *,
         _reinit: bool = True,
+        _reauth: bool = True,
     ) -> Any:
         """POST a JSON-RPC request and return the result.
 
-        Handles both JSON and SSE response formats. On 404 with an active
-        session, re-initializes once and retries (per spec).
+        Handles both JSON and SSE response formats. On 401 with an
+        ``on_auth`` callback, refreshes the token and retries once. On 404
+        with an active session, re-initializes once and retries (per spec).
         """
         req_id = uuid.uuid4().hex
         payload: _JsonRpcRequest = {"jsonrpc": _JSONRPC, "id": req_id, "method": method}
@@ -353,6 +371,12 @@ class McpStreamable:
             headers=self._headers(accept="application/json, text/event-stream"),
         )
         if r.status_code == HTTPStatus.UNAUTHORIZED:
+            if self.on_auth is not None and _reauth:
+                token = self.on_auth(self)
+                if inspect.isawaitable(token):
+                    token = await token
+                self.token = token
+                return await self._rpc(method, params, _reinit=_reinit, _reauth=False)
             raise RuntimeError("MCP server requires authorization (HTTP 401)")
         # Server lost track of session
         if r.status_code == HTTPStatus.NOT_FOUND and self._session_id and _reinit:

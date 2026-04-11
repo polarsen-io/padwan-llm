@@ -1,8 +1,8 @@
 from importlib.metadata import version as _pkg_version
 
-from ._base import ChatStream, LLMClientBase
-from .agent import AgentSession, ConversationStore
-from .mcp import McpStreamable, McpStdio, McpTool, McpTransport, ProgressEvent
+from ._base import ChatStream, LLMClientBase, OnThought
+from .agent import AgentSession, ConversationStore, OnMcpConnect
+from .mcp import McpStreamable, McpStdio, McpTool, McpTransport, OnAuth, ProgressEvent
 from .client import LLMClient
 from .conversation import (
     AssistantToolMessage,
@@ -47,6 +47,9 @@ __all__ = (
     "McpStdio",
     "McpTool",
     "McpTransport",
+    "OnAuth",
+    "OnMcpConnect",
+    "OnThought",
     "ProgressEvent",
     "Message",
     "MistralClient",

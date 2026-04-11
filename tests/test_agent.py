@@ -625,6 +625,9 @@ class _FakeTransport:
     async def __aexit__(self, *_: object) -> None:
         return None
 
+    async def ping(self) -> None:
+        pass
+
 
 def _make_local_tool(name: str, payload: str) -> McpTool:
     async def handler(_args: dict[str, Any]) -> str:
@@ -855,6 +858,9 @@ class _FailingTransport:
         self.aexit_count += 1
         self._is_open = False
 
+    async def ping(self) -> None:
+        pass
+
 
 async def test_aenter_unwinds_on_partial_failure() -> None:
     """Regression: if `client` opened successfully and then a transport
@@ -880,3 +886,57 @@ async def test_aenter_unwinds_on_partial_failure() -> None:
     assert fake.is_open is False
     # The failing transport's `__aenter__` was attempted exactly once.
     assert failing.aenter_count == 1
+
+
+# on_mcp_connect
+
+
+@dataclass
+class _PingFailTransport(_FakeTransport):
+    """Transport whose ping() raises."""
+
+    async def ping(self) -> None:
+        raise RuntimeError("ping failed")
+
+
+@pytest.mark.parametrize(
+    "transports, expected_count",
+    [
+        pytest.param(
+            lambda: [
+                _FakeTransport(_tools=[]),
+                _FakeTransport(_tools=[]),
+            ],
+            2,
+            id="fires-per-transport",
+        ),
+        pytest.param(
+            lambda: [],
+            0,
+            id="none-is-silent",
+        ),
+    ],
+)
+async def test_on_mcp_connect(transports, expected_count) -> None:
+    connected: list[object] = []
+    fake = FakeClient(responses=[FakeChatStream(chunks=["hi"])])
+    async with AgentSession(
+        client=cast(LLMClientBase, fake),
+        mcp_tools=cast(Sequence[McpTool], transports()),
+        on_mcp_connect=connected.append,
+    ):
+        pass
+    assert len(connected) == expected_count
+
+
+async def test_on_mcp_connect_ping_failure_unwinds() -> None:
+    """If ping() fails, __aenter__ raises and the exit stack unwinds."""
+    fake = FakeClient(responses=[FakeChatStream(chunks=["hi"])])
+    failing = _PingFailTransport(_tools=[])
+    with pytest.raises(RuntimeError, match="ping failed"):
+        async with AgentSession(
+            client=cast(LLMClientBase, fake),
+            mcp_tools=cast(Sequence[McpTool], [failing]),
+        ):
+            pytest.fail("should have raised")
+    assert fake.aexit_count == 1

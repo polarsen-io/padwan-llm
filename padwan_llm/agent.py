@@ -20,10 +20,11 @@ from .logs import log
 from .mcp import McpTool, McpTransport
 from .models import ToolCall, ToolDefinition, UsageToken
 
-__all__ = ("AgentSession", "ConversationStore")
+__all__ = ("AgentSession", "ConversationStore", "OnMcpConnect")
 
 type ToolErrorHandler = Callable[[McpTool, dict[str, Any], Exception], str]
 type ApprovalHook = Callable[[McpTool, dict[str, Any]], bool | Awaitable[bool]]
+type OnMcpConnect = Callable[[McpTransport], Any]
 
 
 class ConversationStore(Protocol):
@@ -114,6 +115,8 @@ class AgentSession:
     """Custom error handler, replaces the default JSON-serialised error message."""
     approve_tool: ApprovalHook | None = None
     """Gate that can deny individual tool calls before they execute."""
+    on_mcp_connect: OnMcpConnect | None = None
+    """Fired after each MCP transport is entered and pinged successfully."""
     session_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     store: ConversationStore | None = None
     _state: ConversationState = field(init=False)
@@ -178,6 +181,9 @@ class AgentSession:
                     continue
                 if not item.is_open:
                     await self._exit_stack.enter_async_context(item)
+                await item.ping()
+                if self.on_mcp_connect is not None:
+                    self.on_mcp_connect(item)
         except BaseException:
             await self._exit_stack.aclose()
             raise
@@ -208,6 +214,7 @@ class AgentSession:
         on_tool: Callable[[str, dict[str, Any]], None] | None = None,
         on_tool_error: ToolErrorHandler | None = None,
         approve_tool: ApprovalHook | None = None,
+        on_mcp_connect: OnMcpConnect | None = None,
     ) -> Self:
         """Construct an AgentSession, optionally restoring state from `store`.
 
@@ -256,6 +263,7 @@ class AgentSession:
             on_tool=on_tool,
             on_tool_error=on_tool_error,
             approve_tool=approve_tool,
+            on_mcp_connect=on_mcp_connect,
         )
         if snapshot:
             instance._state = ConversationState.from_snapshot(snapshot)

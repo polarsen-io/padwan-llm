@@ -62,7 +62,7 @@ async with AgentSession(
     text = await session.send("Summarize the README and check the forecast.")
 ```
 
-On `__aenter__` the session enters every transport in order (via an `AsyncExitStack`), so they're all torn down in LIFO order on exit — even if one of them fails to initialize.
+On `__aenter__` the session enters every transport in order (via an `AsyncExitStack`), pings each one to prove the connection is live, and then fires the optional `on_mcp_connect` callback with the transport instance. All transports are torn down in LIFO order on exit — even if one of them fails to initialize or ping.
 
 ## Configuration
 
@@ -77,6 +77,7 @@ AgentSession(
     on_tool=None,                  # callback fired per tool call: (name, args) -> None
     on_tool_error=None,            # custom error formatter — see below
     approve_tool=None,             # pre-execution hook returning bool | Awaitable[bool]
+    on_mcp_connect=None,           # fired per MCP transport after entering + pinging
     session_id=...,                # auto-generated; override to resume a saved session
     store=None,                    # optional ConversationStore for persistence
 )
