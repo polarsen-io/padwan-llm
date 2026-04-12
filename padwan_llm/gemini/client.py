@@ -144,12 +144,26 @@ _BATCH_STATE_MAP: dict[str, str] = {
 
 
 class GeminiRetry(Retry):
-    """Custom retry that extracts retry delay from Gemini response body."""
+    """Custom retry that extracts retry delay from Gemini response body.
+
+    Reads ``response._body`` rather than the ``.data`` property: on
+    urllib3-future's async ``AsyncHTTPResponse``, ``.data`` is an async
+    property returning a coroutine, which this sync hook cannot await.
+    urllib3-future's retry path calls ``drain_conn(cache_content=True)``
+    before invoking the hook, so the body bytes are available on ``_body``.
+    """
 
     def get_retry_after(self, response: HTTPResponse) -> float | None:
-        """Extract retry delay from response body (google.rpc.RetryInfo)."""
+        body = getattr(response, "_body", None)
+        if not isinstance(body, (bytes, bytearray)):
+            # Fallback for test fixtures that stub `.data` directly.
+            data_attr = getattr(response, "data", None)
+            if isinstance(data_attr, (bytes, bytearray)):
+                body = data_attr
+        if not isinstance(body, (bytes, bytearray)):
+            return None
         try:
-            data = _json_loads(response.data.decode("utf-8"))
+            data = _json_loads(bytes(body).decode("utf-8"))
             for detail in data.get("error", {}).get("details", []):
                 if detail.get("@type") == "type.googleapis.com/google.rpc.RetryInfo":
                     delay_str = detail.get("retryDelay", "")
