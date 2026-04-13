@@ -11,7 +11,6 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, ClassVar, Literal, cast, get_args
 
 import niquests
-from urllib3 import HTTPResponse
 from urllib3.util.retry import Retry
 
 from .batch import BatchJob, BatchRequest
@@ -25,7 +24,6 @@ from .models import (
 )
 from .tools import GeminiToolMixin
 from .._base import ChatStream, LLMClientBase, Provider
-from .._json import loads as _json_loads
 from ..conversation import AssistantToolMessage, ChatMessage, ToolResultMessage
 from ..errors import QuotaExceededError, TooManyRequestsError, LLMError
 from ..models import (
@@ -143,47 +141,36 @@ _BATCH_STATE_MAP: dict[str, str] = {
 }
 
 
-class GeminiRetry(Retry):
-    """Custom retry that extracts retry delay from Gemini response body.
-
-    Reads ``response._body`` rather than the ``.data`` property: on
-    urllib3-future's async ``AsyncHTTPResponse``, ``.data`` is an async
-    property returning a coroutine, which this sync hook cannot await.
-    urllib3-future's retry path calls ``drain_conn(cache_content=True)``
-    before invoking the hook, so the body bytes are available on ``_body``.
-    """
-
-    def get_retry_after(self, response: HTTPResponse) -> float | None:
-        body = getattr(response, "_body", None)
-        if not isinstance(body, (bytes, bytearray)):
-            # Fallback for test fixtures that stub `.data` directly.
-            data_attr = getattr(response, "data", None)
-            if isinstance(data_attr, (bytes, bytearray)):
-                body = data_attr
-        if not isinstance(body, (bytes, bytearray)):
-            return None
-        try:
-            data = _json_loads(bytes(body).decode("utf-8"))
-            for detail in data.get("error", {}).get("details", []):
-                if detail.get("@type") == "type.googleapis.com/google.rpc.RetryInfo":
-                    delay_str = detail.get("retryDelay", "")
-                    return math.ceil(float(delay_str.rstrip("s")))
-        except (ValueError, KeyError):  # fmt: skip
-            pass
-        return None
+# TODO: restore body-based retry delay extraction once
+# https://github.com/jawah/urllib3.future/issues/346 lands.
+#
+# class GeminiRetry(Retry):
+#     async def async_get_retry_after(self, response):
+#         body = await response.data
+#         if not body:
+#             return None
+#         try:
+#             data = _json_loads(body.decode("utf-8"))
+#             for detail in data.get("error", {}).get("details", []):
+#                 if detail.get("@type") == "type.googleapis.com/google.rpc.RetryInfo":
+#                     delay_str = detail.get("retryDelay", "")
+#                     return math.ceil(float(delay_str.rstrip("s")))
+#         except (ValueError, KeyError):
+#             pass
+#         return None
 
 
 @dataclasses.dataclass
-class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
+class GeminiClient(LLMClientBase[Retry], GeminiToolMixin):
     """Gemini API client with structured output support."""
 
     provider: ClassVar[Provider] = "gemini"
     model: str | None = "gemini-2.5-flash"
     base_url: str = GEMINI_ENDPOINT
     thinking_config: ThinkingConfig | None = None
-    _retry: GeminiRetry = field(
+    _retry: Retry = field(
         default_factory=partial(
-            GeminiRetry,
+            Retry,
             total=3,
             backoff_factor=0.5,
             status_forcelist=[500, 502, 503, 504],
