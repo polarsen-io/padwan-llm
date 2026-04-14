@@ -100,7 +100,7 @@ class GeminiToolMixin:
             args = tc["function"]["arguments"]
             try:
                 parsed_args = _json_loads(args)
-            except (ValueError, TypeError):  # fmt: skip
+            except (ValueError, TypeError):
                 parsed_args = {}
             part: FunctionCallPart = {
                 "functionCall": {

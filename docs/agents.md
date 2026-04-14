@@ -129,14 +129,21 @@ session = AgentSession(
 
 ### Observation
 
-`on_tool` fires synchronously with the raw name and parsed arguments on every attempted tool call. Use it for logging, UI updates, or metrics:
+`on_tool` receives a `ToolCallContext(name, args)` and must return a context manager wrapped around each tool dispatch. Use it for logging, UI updates, metrics, or span/timer scopes that need to bracket the call:
 
 ```python
-def log_call(name, args):
-    print(f"→ {name}({args})")
+from contextlib import contextmanager
+
+@contextmanager
+def log_call(tc):
+    print(f"→ {tc.name}({tc.args})")
+    yield
+    print(f"← {tc.name} done")
 
 session = AgentSession(..., on_tool=log_call)
 ```
+
+For a fire-and-forget side-effect, `yield` immediately after the action.
 
 ## Persistence
 
