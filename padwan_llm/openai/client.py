@@ -132,6 +132,7 @@ __all__ = (
     "_OpenAIBase",
     "OpenAIClient",
     "OPENAI_MODELS",
+    "OPENAI_CHAT_MODELS",
     "OPENAI_ENDPOINT",
     "OpenAIModel",
     "is_openai_model",
@@ -174,6 +175,15 @@ def is_openai_model(model_name: str | None) -> bool:
 
 
 OPENAI_MODELS: set[str] = set(get_args(OpenAIModel))
+
+# Models in OPENAI_MODELS that do not accept /v1/chat/completions requests:
+#   - gpt-5.2-pro: reasoning/pro tier, exposed only via the /v1/responses API
+#   - codex-mini-latest: legacy /v1/completions endpoint (text completion)
+_OPENAI_NON_CHAT_MODELS: frozenset[str] = frozenset(
+    {"gpt-5.2-pro", "codex-mini-latest"}
+)
+
+OPENAI_CHAT_MODELS: frozenset[str] = frozenset(OPENAI_MODELS - _OPENAI_NON_CHAT_MODELS)
 
 OPENAI_ENDPOINT = "https://api.openai.com/v1/"
 

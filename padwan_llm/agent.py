@@ -3,6 +3,7 @@ import contextlib
 import inspect
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, Self
 
@@ -20,11 +21,22 @@ from .logs import log
 from .mcp import McpTool, McpTransport
 from .models import ToolCall, ToolDefinition, UsageToken
 
-__all__ = ("AgentSession", "ConversationStore", "OnMcpConnect")
+__all__ = ("AgentSession", "ConversationStore", "OnMcpConnect", "ToolCallContext")
 
 type ToolErrorHandler = Callable[[McpTool, dict[str, Any], Exception], str]
 type ApprovalHook = Callable[[McpTool, dict[str, Any]], bool | Awaitable[bool]]
 type OnMcpConnect = Callable[[McpTransport], Any]
+
+
+@dataclass
+class ToolCallContext:
+    """Context passed to ``on_tool``."""
+
+    name: str
+    args: dict[str, Any]
+
+
+type OnTool = Callable[[ToolCallContext], AbstractContextManager[None]]
 
 
 class ConversationStore(Protocol):
@@ -109,8 +121,8 @@ class AgentSession:
     """Truncate tool results sent back to the model. None disables truncation."""
     execution: Literal["sequential", "parallel"] = "sequential"
     """Run tool calls sequentially or in parallel within each round."""
-    on_tool: Callable[[str, dict[str, Any]], None] | None = None
-    """Hook notified before each tool dispatch, for logging or side-effects."""
+    on_tool: OnTool | None = None
+    """Context-manager hook around each tool dispatch"""
     on_tool_error: ToolErrorHandler | None = None
     """Custom error handler, replaces the default JSON-serialised error message."""
     approve_tool: ApprovalHook | None = None
@@ -211,7 +223,7 @@ class AgentSession:
         max_tool_rounds: int | None = 5,
         max_tool_result_chars: int | None = 8_000,
         execution: Literal["sequential", "parallel"] = "sequential",
-        on_tool: Callable[[str, dict[str, Any]], None] | None = None,
+        on_tool: OnTool | None = None,
         on_tool_error: ToolErrorHandler | None = None,
         approve_tool: ApprovalHook | None = None,
         on_mcp_connect: OnMcpConnect | None = None,
@@ -430,19 +442,34 @@ class AgentSession:
             except ValueError as exc:
                 log.warning("Bad tool args for %r: %s", name, exc)
                 args = {}
-            if self.on_tool is not None:
-                self.on_tool(name, args)
             tool = dispatch.get(name)
             approved = await self._approve(tool, args) if tool is not None else False
             plan.append((tc, tool, args, approved))
 
+        async def _dispatch_with_hook(
+            tc: ToolCall,
+            tool: McpTool | None,
+            args: dict[str, Any],
+            ok: bool,
+        ) -> str:
+            cm = (
+                self.on_tool(ToolCallContext(name=tc["function"]["name"], args=args))
+                if self.on_tool
+                else nullcontext()
+            )
+            with cm:
+                return await self._dispatch_one(tc, tool, args, ok)
+
         if self.execution == "parallel":
             results = await asyncio.gather(
-                *(self._dispatch_one(tc, tool, args, ok) for tc, tool, args, ok in plan)
+                *(
+                    _dispatch_with_hook(tc, tool, args, ok)
+                    for tc, tool, args, ok in plan
+                )
             )
         else:
             results = [
-                await self._dispatch_one(tc, tool, args, ok)
+                await _dispatch_with_hook(tc, tool, args, ok)
                 for tc, tool, args, ok in plan
             ]
 

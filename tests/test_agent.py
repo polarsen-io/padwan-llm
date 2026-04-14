@@ -1,6 +1,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -305,6 +306,11 @@ async def test_tool_result_context_truncation(
 # Hooks
 
 
+@contextmanager
+def _noop_cm(_: Any = None):
+    yield
+
+
 async def test_on_tool_callback_receives_name_and_args() -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
 
@@ -323,7 +329,7 @@ async def test_on_tool_callback_receives_name_and_args() -> None:
             FakeChatStream(chunks=["done"]),
         ],
         mcp_tools=[tool],
-        on_tool=lambda name, args: calls.append((name, args)),
+        on_tool=lambda tc: _noop_cm(calls.append((tc.name, tc.args))),
     )
     await session.send("go")
     assert calls == [("t", {"k": 1})]
@@ -446,9 +452,11 @@ async def test_per_round_tool_refresh_picks_up_new_tools() -> None:
     tools: list[McpTool] = [tool_a]
 
     # When the model calls `a`, mutate the registry to add `b` before round 2.
-    def maybe_add_b(name: str, _args: dict[str, Any]) -> None:
-        if name == "a" and tool_b not in tools:
+    @contextmanager
+    def maybe_add_b(tc):
+        if tc.name == "a" and tool_b not in tools:
             tools.append(tool_b)
+        yield
 
     session, client = make_session(
         [

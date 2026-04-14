@@ -1,5 +1,6 @@
 from .batch import BatchJob, BatchRequest, BatchResult
 from .client import (
+    OPENAI_CHAT_MODELS,
     OPENAI_ENDPOINT,
     OPENAI_MODELS,
     OpenAIClient,
@@ -14,6 +15,7 @@ __all__ = (
     "OpenAIClient",
     "OpenAIModel",
     "OPENAI_MODELS",
+    "OPENAI_CHAT_MODELS",
     "OPENAI_ENDPOINT",
     "is_openai_model",
 )
