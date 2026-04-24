@@ -204,7 +204,17 @@ class _OpenAIBase(LLMClientBase[Retry], OpenAIToolMixin):
             Retry,
             total=3,
             backoff_factor=0.5,
-            status_forcelist=[500, 502, 503, 504],
+            status_forcelist=[
+                # Standard
+                500,  # Internal Server Error
+                502,  # Bad Gateway
+                503,  # Service Unavailable
+                504,  # Gateway Timeout
+                # Cloudflare-proprietary
+                520,  # Unknown Error
+                522,  # Connection Timed Out
+                524,  # A Timeout Occurred
+            ],
             allowed_methods=["POST"],
         )
     )
@@ -309,48 +319,59 @@ class _OpenAIBase(LLMClientBase[Retry], OpenAIToolMixin):
         self,
         messages: Sequence[ChatMessage],
         tools: Sequence[ToolDefinition] | None = None,
+        extra_params: dict[str, typing.Any] | None = None,
     ) -> OpenAIChatStream:
         """Stream a chat conversation, yielding text chunks.
 
         Usage and tool_calls are available on the returned stream object after iteration.
+        The optional ``extra_params`` dict is merged into the request body verbatim,
+        so provider-specific fields (e.g. NVIDIA's ``chat_template_kwargs``) can be
+        passed without modifying the client.
         """
-        return OpenAIChatStream(self, messages, tools)
+        return OpenAIChatStream(self, messages, tools, extra_params=extra_params)
 
 
 @dataclasses.dataclass
 class OpenAIChatStream(ChatStream, OpenAIToolMixin):
     """ChatStream implementation for OpenAI-compatible APIs."""
 
-    _client: _OpenAIBase
-    _messages: Sequence[ChatMessage]
-    _tools: Sequence[ToolDefinition] | None = None
+    client: _OpenAIBase
+    messages: Sequence[ChatMessage]
+    tools: Sequence[ToolDefinition] | None = None
+    extra_params: dict[str, typing.Any] | None = None
     usage: UsageToken | None = None
     tool_calls: list[ToolCall] | None = None
+    finish_reason: str | None = None
 
     async def __aiter__(self) -> AsyncIterator[str]:
-        if not self._client.model:
-            raise LLMError(self._client.provider, "No model specified")
+        if not self.client.model:
+            raise LLMError(self.client.provider, "No model specified")
         body: CreateChatCompletionRequest = {
-            "model": self._client.model,
-            "messages": cast(list, self._messages),
-            "temperature": self._client.temperature,
+            "model": self.client.model,
+            "messages": cast(list, self.messages),
+            "temperature": self.client.temperature,
             "stream_options": {"include_usage": True},
         }
-        if self._tools:
-            body["tools"] = cast(list, self._tools_to_openai(self._tools))
+        if self.tools:
+            body["tools"] = cast(list, self._tools_to_openai(self.tools))
+        if self.extra_params:
+            body.update(cast(typing.Any, self.extra_params))
 
         # Accumulate tool call deltas keyed by index
         pending: dict[int, dict[str, str]] = {}
 
-        async for chunk in self._client.stream(body):
+        async for chunk in self.client.stream(body):
             delta = self._delta(chunk)
             if delta is not None:
-                if self._client.on_thought and (
+                if self.client.on_thought and (
                     thought := _extract_thought_payload(delta)
                 ):
-                    self._client.on_thought(thought)
+                    self.client.on_thought(thought)
                 if text := _extract_text_payload(delta):
                     yield text
+            if choices := chunk.get("choices"):
+                if reason := choices[0].get("finish_reason"):
+                    self.finish_reason = reason
             self._accumulate_tool_call_deltas(chunk, pending)
             if usage := self._extract_usage(chunk):
                 self.usage = usage
@@ -387,9 +408,8 @@ class OpenAIChatStream(ChatStream, OpenAIToolMixin):
         delta = self._delta(chunk)
         return _extract_text_payload(delta) if delta else None
 
-    def _extract_usage(
-        self, chunk: CreateChatCompletionStreamResponse
-    ) -> UsageToken | None:
+    @staticmethod
+    def _extract_usage(chunk: CreateChatCompletionStreamResponse) -> UsageToken | None:
         """Extract usage info from an OpenAI stream response chunk (final chunk)."""
         if usage := chunk.get("usage"):
             token: UsageToken = {

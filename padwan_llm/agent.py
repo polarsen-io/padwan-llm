@@ -129,6 +129,8 @@ class AgentSession:
     """Gate that can deny individual tool calls before they execute."""
     on_mcp_connect: OnMcpConnect | None = None
     """Fired after each MCP transport is entered and pinged successfully."""
+    extra_params: dict[str, Any] | None = None
+    """Extra fields merged verbatim into every request body (e.g. provider-specific kwargs)."""
     session_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     store: ConversationStore | None = None
     _state: ConversationState = field(init=False)
@@ -227,6 +229,7 @@ class AgentSession:
         on_tool_error: ToolErrorHandler | None = None,
         approve_tool: ApprovalHook | None = None,
         on_mcp_connect: OnMcpConnect | None = None,
+        extra_params: dict[str, Any] | None = None,
     ) -> Self:
         """Construct an AgentSession, optionally restoring state from `store`.
 
@@ -276,6 +279,7 @@ class AgentSession:
             on_tool_error=on_tool_error,
             approve_tool=approve_tool,
             on_mcp_connect=on_mcp_connect,
+            extra_params=extra_params,
         )
         if snapshot:
             instance._state = ConversationState.from_snapshot(snapshot)
@@ -498,6 +502,7 @@ class AgentSession:
             chat_stream = self.client.stream_chat(
                 self._context_messages(),
                 tools=tool_defs or None,
+                extra_params=self.extra_params,
             )
 
             async for text in chat_stream:

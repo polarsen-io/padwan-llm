@@ -450,6 +450,7 @@ class GeminiClient(LLMClientBase[Retry], GeminiToolMixin):
         self,
         messages: Sequence[ChatMessage],
         tools: Sequence[ToolDefinition] | None = None,
+        extra_params: dict[str, typing.Any] | None = None,
     ) -> GeminiChatStream:
         """Stream a chat conversation, yielding text chunks.
 

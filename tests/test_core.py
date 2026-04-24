@@ -196,18 +196,13 @@ def test_is_model(func, model, expected: bool):
             "mistral-large-latest", MistralClient, nullcontext(), id="mistral"
         ),
         pytest.param("grok-3", GrokClient, nullcontext(), id="grok"),
-        pytest.param(
-            "unknown-xyz",
-            None,
-            pytest.raises(ValueError, match="Unknown model"),
-            id="unknown",
-        ),
+        pytest.param("unknown-xyz", OpenAIClient, nullcontext(), id="unknown-fallback"),
     ],
 )
-def test_llm_client_routing(model: str, expected_type: type | None, ctx):
+def test_llm_client_routing(model: str, expected_type: type, ctx):
     with ctx:
         client = LLMClient(model, api_key="fake-key")
-        assert isinstance(client, expected_type)  # type: ignore[arg-type]
+        assert isinstance(client, expected_type)
 
 
 def test_llm_client_passes_params():

@@ -60,6 +60,7 @@ class FakeClient:
         self,
         messages: Sequence[ChatMessage],
         tools: Sequence[ToolDefinition] | None = None,
+        extra_params: dict[str, Any] | None = None,
     ) -> ChatStream:
         self.calls.append((list(messages), list(tools or [])))
         return self.responses.pop(0)

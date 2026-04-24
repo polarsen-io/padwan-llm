@@ -159,12 +159,18 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
         self,
         messages: Sequence[ChatMessage],
         tools: Sequence[ToolDefinition] | None = None,
+        extra_params: dict[str, Any] | None = None,
     ) -> ChatStream:
         """Stream a chat conversation, yielding text chunks.
 
         This is a higher-level API than stream() that handles provider-specific
         body building and response extraction. Usage and tool_calls are available
         on the returned ChatStream object after iteration completes.
+
+        The optional ``extra_params`` dict is merged into the request body before
+        it is sent, letting callers pass provider-specific fields that are not
+        part of the standard interface (e.g. NVIDIA's ``chat_template_kwargs``).
+        Providers that don't support extra body fields may silently ignore it.
         """
         ...
 
