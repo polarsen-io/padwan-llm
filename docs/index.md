@@ -1,6 +1,6 @@
 # Padwan LLM
 
-Unified async client for OpenAI, Gemini, Mistral, and Grok APIs.
+Unified client for OpenAI, Gemini, Mistral, and Grok APIs. Supports also OpenAI-compatible endpoints.
 
 ## Why
 
@@ -63,7 +63,9 @@ uv add padwan-llm
 
 ## Agentic loop
 
-`AgentSession` wraps a conversation with the loop that calls the LLM, dispatches any tool calls, feeds the results back, and repeats until the model produces a plain text answer. It accepts individual `McpTool` instances and whole `McpTransport` servers in the same list — transports are entered as part of the session lifecycle:
+`AgentSession` wraps a conversation with the loop that calls the LLM, dispatches any tool calls, feeds the results back, 
+and repeats until the model produces a plain text answer.
+It accepts individual `McpTool` instances and whole `McpTransport` servers in the same list, transports are entered as part of the session lifecycle:
 
 ```python
 from padwan_llm import AgentSession, LLMClient, McpStdio

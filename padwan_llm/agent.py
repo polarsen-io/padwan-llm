@@ -173,20 +173,7 @@ class AgentSession:
         self._state.clear()
 
     async def __aenter__(self) -> Self:
-        """Enter the session, opening any resources the caller hasn't already.
-
-        Resources (`client` and each `McpTransport` in `mcp_tools`) that are
-        already open — detected via `is_open` — are left alone: the caller
-        still owns their lifecycle. Only resources we open here are
-        registered with the exit stack for cleanup on `__aexit__`.
-
-        If any resource fails to enter after others have already been
-        opened, the exit stack is unwound before the exception propagates,
-        so a partial startup cannot leak live HTTP sessions or MCP
-        subprocesses. Without this rollback, `__aexit__` would never run
-        (since `__aenter__` raised) and previously-entered resources
-        would stay alive until the event loop shuts down.
-        """
+        """Enter the session, opening any resources the caller hasn't already"""
         await self._exit_stack.__aenter__()
         try:
             await self._exit_stack.enter_async_context(self.client)

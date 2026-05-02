@@ -108,4 +108,6 @@ def LLMClient(
         return MistralClient(**kwargs)
     if is_grok_model(model):
         return GrokClient(**kwargs)
+    if kwargs["api_key"] is None:
+        kwargs["api_key"] = "no-key-required"
     return OpenAIClient(**kwargs)
