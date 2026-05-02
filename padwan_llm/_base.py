@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import abc
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
@@ -16,8 +18,11 @@ if TYPE_CHECKING:
 __all__ = (
     "ChatStream",
     "LLMClientBase",
+    "OnThought",
     "Provider",
 )
+
+OnThought = Callable[[str], None]
 
 
 class ChatStream(abc.ABC):
@@ -30,6 +35,14 @@ class ChatStream(abc.ABC):
     def __aiter__(self) -> AsyncIterator[str]:
         """Iterate over text chunks from the stream."""
         ...
+
+
+def to_sse_url(url: str) -> str:
+    """Convert http(s):// URL to the niquests SSE scheme (``sse://`` or ``psse://``)."""
+    stripped = url.removeprefix("https://")
+    if stripped is not url:
+        return "sse://" + stripped
+    return "psse://" + url.removeprefix("http://")
 
 
 @dataclass
@@ -50,6 +63,10 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
     """Request timeout in seconds."""
     api_key: str | None = field(default=None, repr=False)
     """API key. If None, reads from provider's environment variable."""
+    on_thought: OnThought | None = field(default=None, repr=False)
+    """Callback invoked with each chunk of model "thinking" / reasoning text.
+    Clients that don't support thinking yet simply never
+    invoke it."""
 
     _api_key: str = field(init=False, repr=False)
     base_url: str = field(init=False, default="", repr=False)
@@ -87,16 +104,26 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
             )
         return self._session
 
-    def _build_session(self) -> niquests.AsyncSession:
-        """Create and configure an async HTTP session with retry logic."""
-        session = niquests.AsyncSession(
-            timeout=self.timeout, retries=self._retry, base_url=self.base_url
-        )
-        self._set_auth_headers(session)
-        return session
+    def _sse_url(self, path: str) -> str:
+        """Build a full SSE-scheme URL for the given path.
+
+        niquests activates its SSE extension (``r.extension``) only when
+        the request URL uses the ``sse://`` (TLS) or ``psse://`` (plain)
+        scheme. This helper resolves *path* against ``base_url`` and
+        swaps the scheme so streaming requests get proper SSE parsing.
+        """
+        return to_sse_url(self.base_url.rstrip("/") + "/" + path.lstrip("/"))
 
     async def __aenter__(self) -> Self:
-        self._session = self._build_session()
+        if self._session is not None:
+            raise RuntimeError(
+                f"{type(self).__name__} is already open; "
+                "using the same client in nested `async with` blocks is not supported"
+            )
+        self._session = niquests.AsyncSession(
+            timeout=self.timeout, retries=self._retry, base_url=self.base_url
+        )
+        self._set_auth_headers(self._session)
         return self
 
     async def __aexit__(
@@ -132,12 +159,18 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
         self,
         messages: Sequence[ChatMessage],
         tools: Sequence[ToolDefinition] | None = None,
+        extra_params: dict[str, Any] | None = None,
     ) -> ChatStream:
         """Stream a chat conversation, yielding text chunks.
 
         This is a higher-level API than stream() that handles provider-specific
         body building and response extraction. Usage and tool_calls are available
         on the returned ChatStream object after iteration completes.
+
+        The optional ``extra_params`` dict is merged into the request body before
+        it is sent, letting callers pass provider-specific fields that are not
+        part of the standard interface (e.g. NVIDIA's ``chat_template_kwargs``).
+        Providers that don't support extra body fields may silently ignore it.
         """
         ...
 

@@ -196,24 +196,47 @@ def test_is_model(func, model, expected: bool):
             "mistral-large-latest", MistralClient, nullcontext(), id="mistral"
         ),
         pytest.param("grok-3", GrokClient, nullcontext(), id="grok"),
-        pytest.param(
-            "unknown-xyz",
-            None,
-            pytest.raises(ValueError, match="Unknown model"),
-            id="unknown",
-        ),
+        pytest.param("unknown-xyz", OpenAIClient, nullcontext(), id="unknown-fallback"),
     ],
 )
-def test_llm_client_routing(model: str, expected_type: type | None, ctx):
+def test_llm_client_routing(model: str, expected_type: type, ctx):
     with ctx:
         client = LLMClient(model, api_key="fake-key")
-        assert isinstance(client, expected_type)  # type: ignore[arg-type]
+        assert isinstance(client, expected_type)
 
 
 def test_llm_client_passes_params():
     client = LLMClient("gpt-4o", temperature=0.8, timeout=120, api_key="k")
     assert client.temperature == 0.8
     assert client.timeout == 120
+
+
+@pytest.mark.parametrize(
+    "cls, kwargs",
+    [
+        pytest.param(OpenAIClient, {"api_key": "k"}, id="openai"),
+        pytest.param(GeminiClient, {"api_key": "k"}, id="gemini"),
+        pytest.param(MistralClient, {"api_key": "k"}, id="mistral"),
+        pytest.param(GrokClient, {"api_key": "k"}, id="grok"),
+    ],
+)
+def test_on_thought_lifted_to_base(cls: type, kwargs: dict):
+    """`on_thought` is a base-class field so every provider client accepts
+    it, even those that don't yet emit reasoning content. Producers (e.g.
+    Gemini) translate their native shape into calls; non-producers
+    simply never invoke it.
+    """
+    captured: list[str] = []
+
+    def cb(text: str) -> None:
+        captured.append(text)
+
+    client = cls(on_thought=cb, **kwargs)
+    assert client.on_thought is cb
+    # And it must be invocable through the attribute (not just stored).
+    assert client.on_thought is not None
+    client.on_thought("hello")
+    assert captured == ["hello"]
 
 
 # Client init
@@ -228,7 +251,7 @@ def test_llm_client_passes_params():
         pytest.param(GrokClient, "GROK_API_KEY", {}, id="grok"),
         pytest.param(
             OpenAIClient,
-            None,
+            "OPENAI_API_KEY",
             {"base_url": "http://localhost:8080/v1/"},
             id="openai-no-key",
         ),

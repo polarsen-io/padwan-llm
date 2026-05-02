@@ -1,8 +1,15 @@
-import json
-import typing
 from collections.abc import Sequence
+from typing import Any
 
-from .models import FunctionDeclaration, GeminiTool
+from .models import (
+    Content,
+    FunctionCallPart,
+    FunctionDeclaration,
+    GeminiPart,
+    GeminiTool,
+    Part,
+)
+from .._json import dumps as _json_dumps, loads as _json_loads
 from ..conversation import AssistantToolMessage, ToolResultMessage
 from ..models import ToolCall, ToolCallFunction, ToolDefinition
 
@@ -29,7 +36,7 @@ class GeminiToolMixin:
 
     @staticmethod
     def _extract_gemini_tool_calls(
-        parts: Sequence[dict[str, typing.Any]],
+        parts: Sequence[dict[str, Any]],
         id_offset: int = 0,
     ) -> list[ToolCall]:
         """Extract ToolCall objects from Gemini response parts containing functionCall.
@@ -40,29 +47,32 @@ class GeminiToolMixin:
         result: list[ToolCall] = []
         for i, part in enumerate(parts):
             if fc := part.get("functionCall"):
-                result.append(
-                    ToolCall(
-                        id=f"call_{id_offset + i}",
-                        type="function",
-                        function=ToolCallFunction(
-                            name=fc["name"],
-                            arguments=json.dumps(fc.get("args", {})),
-                        ),
-                    )
+                tc = ToolCall(
+                    id=fc.get("id") or f"call_{id_offset + i}",
+                    type="function",
+                    function=ToolCallFunction(
+                        name=fc["name"],
+                        arguments=_json_dumps(fc.get("args", {})),
+                    ),
                 )
+                if sig := part.get("thoughtSignature"):
+                    tc["thought_signature"] = sig
+                result.append(tc)
         return result
 
     @staticmethod
-    def _convert_tool_result(msg: ToolResultMessage) -> dict[str, typing.Any]:
+    def _convert_tool_result(msg: ToolResultMessage) -> Content:
         """Convert a ToolResultMessage to a Gemini functionResponse content dict.
 
         Gemini expects tool results as a user message with a functionResponse part.
         The content is parsed as JSON if possible, otherwise wrapped in {"result": ...}.
         """
         try:
-            response_data = json.loads(msg["content"])
-        except (json.JSONDecodeError, TypeError):  # fmt: skip
+            response_data = _json_loads(msg["content"])
+        except (ValueError, TypeError):
             response_data = {"result": msg["content"]}
+        if not isinstance(response_data, dict):
+            response_data = {"result": response_data}
         return {
             "role": "user",
             "parts": [
@@ -78,26 +88,28 @@ class GeminiToolMixin:
     @staticmethod
     def _convert_assistant_tool_message(
         msg: AssistantToolMessage,
-    ) -> dict[str, typing.Any]:
+    ) -> Content:
         """Convert an AssistantToolMessage to a Gemini model content dict with functionCall parts.
 
         Includes a text part if the message has content alongside the tool calls.
         """
-        parts: list[dict[str, typing.Any]] = []
+        parts: list[GeminiPart] = []
         if msg["content"]:
-            parts.append({"text": msg["content"]})
+            parts.append(Part(text=msg["content"]))
         for tc in msg["tool_calls"]:
             args = tc["function"]["arguments"]
             try:
-                parsed_args = json.loads(args)
-            except (json.JSONDecodeError, TypeError):  # fmt: skip
+                parsed_args = _json_loads(args)
+            except (ValueError, TypeError):
                 parsed_args = {}
-            parts.append(
-                {
-                    "functionCall": {
-                        "name": tc["function"]["name"],
-                        "args": parsed_args,
-                    }
+            part: FunctionCallPart = {
+                "functionCall": {
+                    "name": tc["function"]["name"],
+                    "args": parsed_args,
+                    "id": tc["id"],
                 }
-            )
-        return {"role": "model", "parts": parts}
+            }
+            if sig := tc.get("thought_signature"):
+                part["thoughtSignature"] = sig
+            parts.append(part)
+        return Content(role="model", parts=parts)

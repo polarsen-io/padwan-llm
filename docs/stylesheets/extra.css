@@ -1,3 +1,5 @@
+/* Custom teal palette — wired to Zensical via primary="custom" / accent="custom" in zensical.toml */
+
 :root {
   --md-primary-fg-color: #1A8B9E;
   --md-primary-fg-color--light: #4FD1C5;
@@ -6,52 +8,90 @@
 }
 
 [data-md-color-scheme="slate"] {
-  --md-primary-fg-color: #4FD1C5;
-  --md-primary-fg-color--light: #7EDDD4;
-  --md-primary-fg-color--dark: #1A8B9E;
-  --md-accent-fg-color: #7EDDD4;
+  --md-primary-fg-color: #1A8B9E;
+  --md-primary-fg-color--light: #4FD1C5;
+  --md-primary-fg-color--dark: #14707F;
+  --md-accent-fg-color: #4FD1C5;
 }
 
-.md-header {
-  height: 2.4rem;
+[data-md-color-scheme="slate"] .md-header {
+  background-color: #1A8B9E;
 }
 
-.md-header__inner {
-  height: 2.4rem;
+/* Mermaid pan/zoom — CSS-transform approach (see docs/javascripts/mermaid.mjs) */
+
+.mermaid-zoom-wrapper {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--md-default-fg-color--lightest, #e0e0e0);
+  border-radius: 0.25rem;
+  margin: 1rem 0;
+  background: var(--md-default-bg-color, #fff);
 }
 
-.md-header__title {
-  font-size: 0.9rem;
-  line-height: 2.4rem;
+.mermaid-zoom-wrapper .mermaid-rendered {
+  display: block;
+  text-align: center;
+  padding: 1rem;
 }
 
-.md-nav__link--active {
-  border-left: 2px solid var(--md-accent-fg-color);
-  padding-left: 0.6rem;
-  margin-left: -0.6rem;
+.mermaid-zoom-controls {
+  position: absolute;
+  bottom: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  background: var(--md-default-bg-color, #fff);
+  border: 1px solid var(--md-default-fg-color--lightest, #e0e0e0);
+  border-radius: 0.375rem;
+  padding: 0.25rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  z-index: 2;
+  opacity: 0.6;
+  transition: opacity 0.15s ease-out;
 }
 
-.md-content a:not(.md-button) {
-  text-decoration: underline;
-  text-decoration-color: var(--md-accent-fg-color);
-  text-underline-offset: 2px;
+.mermaid-zoom-wrapper:hover .mermaid-zoom-controls {
+  opacity: 1;
 }
 
-.md-content a:not(.md-button):hover {
-  color: var(--md-accent-fg-color);
+.mermaid-zoom-row {
+  display: flex;
+  gap: 0.125rem;
+  justify-content: center;
 }
 
-.md-typeset code {
-  background-color: var(--md-code-bg-color);
-  border-radius: 0.2rem;
+.mermaid-zoom-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 1px solid var(--md-default-fg-color--lightest, #e0e0e0);
+  border-radius: 0.25rem;
+  background: var(--md-default-bg-color, #fff);
+  color: var(--md-default-fg-color, #333);
+  cursor: pointer;
+  transition: background 0.1s ease-out, transform 0.1s ease-out;
 }
 
-.md-typeset .admonition,
-.md-typeset details {
-  border-left-width: 4px;
+.mermaid-zoom-btn:hover {
+  background: var(--md-default-fg-color--lightest, #f0f0f0);
 }
 
-.md-tabs__link--active {
-  color: var(--md-accent-fg-color);
-  border-bottom: 2px solid var(--md-accent-fg-color);
+.mermaid-zoom-btn:active {
+  transform: scale(0.95);
+}
+
+.mermaid-zoom-btn svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* Spacer cells in the control grid (corners) */
+.mermaid-zoom-row > span {
+  width: 1.75rem;
+  height: 1.75rem;
 }

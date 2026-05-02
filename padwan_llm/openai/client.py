@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 import dataclasses
 import typing
 from dataclasses import field
 from functools import partial
-import json
 import os
 from collections.abc import AsyncIterator, Sequence
 from http import HTTPStatus
@@ -15,6 +16,7 @@ from .batch import BatchJob, BatchRequest, BatchResult
 from .tools import OpenAIToolMixin
 from .types import Batch, ListBatchesResponse, OpenAIFile
 from .._base import ChatStream, LLMClientBase, LLMError, Provider
+from .._json import dumps as _json_dumps, loads as _json_loads
 from ..conversation import ChatMessage
 from ..errors import QuotaExceededError, TooManyRequestsError
 from ..models import (
@@ -37,6 +39,61 @@ _OPENAI_FINISH_REASON_MAP: dict[str, FinishReason] = {
     "model_length": "length",
     "error": "error",
 }
+
+
+def _extract_text_payload(payload: dict[str, typing.Any]) -> str | None:
+    """Pull plain answer text out of a `delta` or `message` dict.
+
+    Handles two shapes interchangeably: a plain string `content` (OpenAI,
+    Grok), or Mistral's structured `content: list[ContentChunk]` where
+    we keep only `type: "text"` chunks and concatenate them. `thinking`
+    chunks are ignored here — they go through `_extract_thought_payload`.
+    """
+    content = payload.get("content")
+    if isinstance(content, str):
+        return content or None
+    if isinstance(content, list):
+        texts: list[str] = []
+        for chunk in content:
+            if isinstance(chunk, dict) and chunk.get("type") == "text":
+                if t := chunk.get("text"):
+                    texts.append(t)
+        if texts:
+            return "".join(texts)
+    return None
+
+
+def _extract_thought_payload(payload: dict[str, typing.Any]) -> str | None:
+    """Pull reasoning text out of a `delta` or `message` dict.
+
+    Handles two shapes:
+
+    - `reasoning_content: str` — xAI/Grok and DeepSeek-style reasoning
+      models surface their scratchpad as a sibling string field on the
+      delta/message.
+    - `content: list[{"type": "thinking", "thinking": [{"type": "text",
+      "text": ...}]}]` — Mistral's `Magistral` models embed reasoning as
+      a `ThinkChunk` inside a structured content array.
+
+    Returns the concatenated thought text, or `None` if neither shape
+    carries any reasoning content.
+    """
+    if rc := payload.get("reasoning_content"):
+        return rc if isinstance(rc, str) else None
+    content = payload.get("content")
+    if isinstance(content, list):
+        thoughts: list[str] = []
+        for chunk in content:
+            if not isinstance(chunk, dict) or chunk.get("type") != "thinking":
+                continue
+            for inner in chunk.get("thinking") or []:
+                if isinstance(inner, dict) and inner.get("type") == "text":
+                    if t := inner.get("text"):
+                        thoughts.append(t)
+        if thoughts:
+            return "".join(thoughts)
+    return None
+
 
 if TYPE_CHECKING:
     from .types import (
@@ -75,6 +132,7 @@ __all__ = (
     "_OpenAIBase",
     "OpenAIClient",
     "OPENAI_MODELS",
+    "OPENAI_CHAT_MODELS",
     "OPENAI_ENDPOINT",
     "OpenAIModel",
     "is_openai_model",
@@ -118,6 +176,15 @@ def is_openai_model(model_name: str | None) -> bool:
 
 OPENAI_MODELS: set[str] = set(get_args(OpenAIModel))
 
+# Models in OPENAI_MODELS that do not accept /v1/chat/completions requests:
+#   - gpt-5.2-pro: reasoning/pro tier, exposed only via the /v1/responses API
+#   - codex-mini-latest: legacy /v1/completions endpoint (text completion)
+_OPENAI_NON_CHAT_MODELS: frozenset[str] = frozenset(
+    {"gpt-5.2-pro", "codex-mini-latest"}
+)
+
+OPENAI_CHAT_MODELS: frozenset[str] = frozenset(OPENAI_MODELS - _OPENAI_NON_CHAT_MODELS)
+
 OPENAI_ENDPOINT = "https://api.openai.com/v1/"
 
 
@@ -137,7 +204,17 @@ class _OpenAIBase(LLMClientBase[Retry], OpenAIToolMixin):
             Retry,
             total=3,
             backoff_factor=0.5,
-            status_forcelist=[500, 502, 503, 504],
+            status_forcelist=[
+                # Standard
+                500,  # Internal Server Error
+                502,  # Bad Gateway
+                503,  # Service Unavailable
+                504,  # Gateway Timeout
+                # Cloudflare-proprietary
+                520,  # Unknown Error
+                522,  # Connection Timed Out
+                524,  # A Timeout Occurred
+            ],
             allowed_methods=["POST"],
         )
     )
@@ -182,26 +259,25 @@ class _OpenAIBase(LLMClientBase[Retry], OpenAIToolMixin):
     ) -> AsyncIterator[CreateChatCompletionStreamResponse]:
         """Stream chat completions, yielding response chunks as they arrive via SSE."""
         resp = await self.session.post(
-            "/chat/completions",
+            self._sse_url("/chat/completions"),
             json={**body, "stream": True},
-            stream=True,
         )
         _check_resp_status(resp)
-
-        async for raw_line in resp.iter_lines(decode_unicode=True):  # pyright: ignore[reportGeneralTypeIssues]
-            if not raw_line:
+        ext = resp.extension
+        if ext is None:
+            raise LLMError(self.provider, "SSE extension not available on response")
+        while not ext.closed:
+            event = await ext.next_payload()
+            if event is None:
+                break
+            if not event.data:
                 continue
-            line = raw_line.decode() if isinstance(raw_line, bytes) else raw_line
-            if line.startswith("data: "):
-                data_str = line[6:]
-                if data_str == "[DONE]":
-                    break
-                try:
-                    yield cast(
-                        "CreateChatCompletionStreamResponse", json.loads(data_str)
-                    )
-                except json.JSONDecodeError as e:
-                    raise LLMError(self.provider, f"Stream parse error: {e}") from e
+            if event.data == "[DONE]":
+                break
+            try:
+                yield cast("CreateChatCompletionStreamResponse", event.json())
+            except ValueError as e:
+                raise LLMError(self.provider, f"Stream parse error: {e}") from e
 
     async def complete_chat(
         self,
@@ -220,13 +296,20 @@ class _OpenAIBase(LLMClientBase[Retry], OpenAIToolMixin):
             body["tools"] = cast(list, self._tools_to_openai(tools))
         data, token = await self.complete(body)
         choice = data["choices"][0]
-        message = choice["message"]
+        message_dict = cast(dict[str, typing.Any], choice["message"])
         raw_reason = choice.get("finish_reason", "stop")
+        # Forward any reasoning content to on_thought before unpacking the
+        # answer text — keeps the final ChatResponse free of the model's
+        # internal scratchpad. Same shape on both wire formats handled by
+        # `_extract_thought_payload` (Grok `reasoning_content`, Mistral
+        # `ThinkChunk` inside a structured content array).
+        if self.on_thought and (thought := _extract_thought_payload(message_dict)):
+            self.on_thought(thought)
         response: ChatResponse = {
-            "content": message.get("content"),
+            "content": _extract_text_payload(message_dict),
             "finish_reason": _OPENAI_FINISH_REASON_MAP.get(raw_reason, "other"),
         }
-        if raw_tool_calls := message.get("tool_calls"):
+        if raw_tool_calls := message_dict.get("tool_calls"):
             response["tool_calls"] = self._extract_tool_calls(
                 cast(list, raw_tool_calls)
             )
@@ -236,42 +319,59 @@ class _OpenAIBase(LLMClientBase[Retry], OpenAIToolMixin):
         self,
         messages: Sequence[ChatMessage],
         tools: Sequence[ToolDefinition] | None = None,
+        extra_params: dict[str, typing.Any] | None = None,
     ) -> OpenAIChatStream:
         """Stream a chat conversation, yielding text chunks.
 
         Usage and tool_calls are available on the returned stream object after iteration.
+        The optional ``extra_params`` dict is merged into the request body verbatim,
+        so provider-specific fields (e.g. NVIDIA's ``chat_template_kwargs``) can be
+        passed without modifying the client.
         """
-        return OpenAIChatStream(self, messages, tools)
+        return OpenAIChatStream(self, messages, tools, extra_params=extra_params)
 
 
 @dataclasses.dataclass
 class OpenAIChatStream(ChatStream, OpenAIToolMixin):
     """ChatStream implementation for OpenAI-compatible APIs."""
 
-    _client: _OpenAIBase
-    _messages: Sequence[ChatMessage]
-    _tools: Sequence[ToolDefinition] | None = None
+    client: _OpenAIBase
+    messages: Sequence[ChatMessage]
+    tools: Sequence[ToolDefinition] | None = None
+    extra_params: dict[str, typing.Any] | None = None
     usage: UsageToken | None = None
     tool_calls: list[ToolCall] | None = None
+    finish_reason: str | None = None
 
     async def __aiter__(self) -> AsyncIterator[str]:
-        if not self._client.model:
-            raise LLMError(self._client.provider, "No model specified")
+        if not self.client.model:
+            raise LLMError(self.client.provider, "No model specified")
         body: CreateChatCompletionRequest = {
-            "model": self._client.model,
-            "messages": cast(list, self._messages),
-            "temperature": self._client.temperature,
+            "model": self.client.model,
+            "messages": cast(list, self.messages),
+            "temperature": self.client.temperature,
             "stream_options": {"include_usage": True},
         }
-        if self._tools:
-            body["tools"] = cast(list, self._tools_to_openai(self._tools))
+        if self.tools:
+            body["tools"] = cast(list, self._tools_to_openai(self.tools))
+        if self.extra_params:
+            body.update(cast(typing.Any, self.extra_params))
 
         # Accumulate tool call deltas keyed by index
         pending: dict[int, dict[str, str]] = {}
 
-        async for chunk in self._client.stream(body):
-            if text := self._extract_text(chunk):
-                yield text
+        async for chunk in self.client.stream(body):
+            delta = self._delta(chunk)
+            if delta is not None:
+                if self.client.on_thought and (
+                    thought := _extract_thought_payload(delta)
+                ):
+                    self.client.on_thought(thought)
+                if text := _extract_text_payload(delta):
+                    yield text
+            if choices := chunk.get("choices"):
+                if reason := choices[0].get("finish_reason"):
+                    self.finish_reason = reason
             self._accumulate_tool_call_deltas(chunk, pending)
             if usage := self._extract_usage(chunk):
                 self.usage = usage
@@ -288,16 +388,28 @@ class OpenAIChatStream(ChatStream, OpenAIToolMixin):
                 for tc in (pending[i] for i in sorted(pending))
             ]
 
-    def _extract_text(self, chunk: CreateChatCompletionStreamResponse) -> str | None:
-        """Extract text content from an OpenAI stream response chunk."""
+    @staticmethod
+    def _delta(
+        chunk: CreateChatCompletionStreamResponse,
+    ) -> dict[str, typing.Any] | None:
+        """Return the first choice's `delta` dict, or None if absent."""
         if choices := chunk.get("choices"):
             if delta := choices[0].get("delta"):
-                return delta.get("content")
+                return cast(dict[str, typing.Any], delta)
         return None
 
-    def _extract_usage(
-        self, chunk: CreateChatCompletionStreamResponse
-    ) -> UsageToken | None:
+    def _extract_text(self, chunk: CreateChatCompletionStreamResponse) -> str | None:
+        """Extract text content from an OpenAI stream response chunk.
+
+        Kept for backwards compatibility with subclasses that still call
+        it. New code should go through `__aiter__`'s shared payload
+        helpers (`_extract_text_payload`, `_extract_thought_payload`).
+        """
+        delta = self._delta(chunk)
+        return _extract_text_payload(delta) if delta else None
+
+    @staticmethod
+    def _extract_usage(chunk: CreateChatCompletionStreamResponse) -> UsageToken | None:
         """Extract usage info from an OpenAI stream response chunk (final chunk)."""
         if usage := chunk.get("usage"):
             token: UsageToken = {
@@ -337,7 +449,7 @@ class OpenAIClient(_OpenAIBase):
                 "url": "/v1/chat/completions",
                 "body": {**req.body, "model": _model},
             }
-            lines.append(json.dumps(line))
+            lines.append(_json_dumps(line))
         content = "\n".join(lines)
 
         resp = await self.session.post(
@@ -416,5 +528,5 @@ class OpenAIClient(_OpenAIBase):
             line = line.strip()
             if not line:
                 continue
-            results.append(BatchResult.from_line(json.loads(line)))
+            results.append(BatchResult.from_line(_json_loads(line)))
         return results

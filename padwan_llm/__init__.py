@@ -1,8 +1,13 @@
-from ._base import ChatStream, LLMClientBase
+from importlib.metadata import version as _pkg_version
+
+from ._base import ChatStream, LLMClientBase, OnThought
+from .agent import AgentSession, ConversationStore, OnMcpConnect, ToolCallContext
+from .mcp import McpStreamable, McpStdio, McpTool, McpTransport, OnAuth, ProgressEvent
 from .client import LLMClient
 from .conversation import (
     AssistantToolMessage,
     ChatMessage,
+    ConversationSnapshot,
     ConversationState,
     Message,
     ToolResultMessage,
@@ -19,14 +24,23 @@ from .models import (
     ToolDefinition,
     UsageToken,
 )
-from .openai import OPENAI_MODELS, OpenAIClient, OpenAIModel, is_openai_model
+from .openai import (
+    OPENAI_CHAT_MODELS,
+    OPENAI_MODELS,
+    OpenAIClient,
+    OpenAIModel,
+    is_openai_model,
+)
 
 __all__ = (
+    "AgentSession",
     "AssistantToolMessage",
     "ChatMessage",
     "ChatResponse",
     "ChatStream",
+    "ConversationSnapshot",
     "ConversationState",
+    "ConversationStore",
     "FinishReason",
     "GeminiClient",
     "GeminiModel",
@@ -35,12 +49,21 @@ __all__ = (
     "LLMClient",
     "LLMClientBase",
     "LLMError",
+    "McpStreamable",
+    "McpStdio",
+    "McpTool",
+    "McpTransport",
+    "OnAuth",
+    "OnMcpConnect",
+    "OnThought",
+    "ProgressEvent",
     "Message",
     "MistralClient",
     "MistralModel",
     "OpenAIClient",
     "OpenAIModel",
     "Provider",
+    "ToolCallContext",
     "ToolCall",
     "ToolCallFunction",
     "ToolDefinition",
@@ -50,8 +73,12 @@ __all__ = (
     "GROK_MODELS",
     "MISTRAL_MODELS",
     "OPENAI_MODELS",
+    "OPENAI_CHAT_MODELS",
     "is_gemini_model",
     "is_grok_model",
     "is_mistral_model",
     "is_openai_model",
+    "__version__",
 )
+
+__version__: str = _pkg_version("padwan-llm")

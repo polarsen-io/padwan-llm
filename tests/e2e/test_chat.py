@@ -3,6 +3,7 @@ import json
 import pytest
 
 from padwan_llm import LLMClient
+from padwan_llm.conversation import AssistantToolMessage, ToolResultMessage
 
 from .conftest import (
     PROMPT,
@@ -66,6 +67,9 @@ async def test_stream_chat(model: str) -> None:
     "model",
     [
         pytest.param("gemini-2.5-flash", id="gemini", marks=skip_no_gemini),
+        pytest.param(
+            "gemini-3-flash-preview", id="gemini-thinking", marks=skip_no_gemini
+        ),
         pytest.param("gpt-4o-mini", id="openai", marks=skip_no_openai),
         pytest.param("mistral-small-latest", id="mistral", marks=skip_no_mistral),
         pytest.param("grok-4-1-fast-non-reasoning", id="grok", marks=skip_no_grok),
@@ -90,6 +94,9 @@ async def test_complete_chat_tool_call(model: str) -> None:
     "model",
     [
         pytest.param("gemini-2.5-flash", id="gemini", marks=skip_no_gemini),
+        pytest.param(
+            "gemini-3-flash-preview", id="gemini-thinking", marks=skip_no_gemini
+        ),
         pytest.param("gpt-4o-mini", id="openai", marks=skip_no_openai),
         pytest.param("mistral-small-latest", id="mistral", marks=skip_no_mistral),
         pytest.param("grok-4-1-fast-non-reasoning", id="grok", marks=skip_no_grok),
@@ -109,3 +116,48 @@ async def test_stream_chat_tool_call(model: str) -> None:
     assert "city" in args
     assert stream.usage is not None
     assert stream.usage["total"] > 0
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        pytest.param("gemini-2.5-flash", id="gemini", marks=skip_no_gemini),
+        pytest.param(
+            "gemini-3-flash-preview", id="gemini-thinking", marks=skip_no_gemini
+        ),
+        pytest.param("gpt-4o-mini", id="openai", marks=skip_no_openai),
+        pytest.param("mistral-small-latest", id="mistral", marks=skip_no_mistral),
+        pytest.param("grok-4-1-fast-non-reasoning", id="grok", marks=skip_no_grok),
+    ],
+)
+async def test_stream_chat_tool_round_trip(model: str) -> None:
+    """Full tool call round-trip: model calls tool, we reply, model gives final answer."""
+    async with LLMClient(model=model) as client:
+        # Round 1: get tool call
+        stream = client.stream_chat(TOOL_PROMPT, tools=[WEATHER_TOOL])
+        async for _ in stream:
+            pass
+
+        assert stream.tool_calls, "Expected a tool call in round 1"
+        tc = stream.tool_calls[0]
+
+        # Round 2: send tool result, expect final text response
+        messages = [
+            *TOOL_PROMPT,
+            AssistantToolMessage(
+                role="assistant", content=None, tool_calls=stream.tool_calls
+            ),
+            ToolResultMessage(
+                role="tool",
+                tool_call_id=tc["id"],
+                name=tc["function"]["name"],
+                content='{"temperature": "18°C", "condition": "sunny"}',
+            ),
+        ]
+        stream2 = client.stream_chat(messages)
+        chunks: list[str] = []
+        async for chunk in stream2:
+            chunks.append(chunk)
+
+        text = "".join(chunks)
+        assert text, "Expected a final text response after tool result"

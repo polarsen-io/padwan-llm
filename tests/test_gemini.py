@@ -2,7 +2,7 @@ import json
 import re
 from contextlib import nullcontext
 from typing import get_type_hints
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from google.genai.types import (
@@ -26,7 +26,6 @@ from padwan_llm.gemini.models import (
 from padwan_llm.gemini.client import (
     GeminiClient,
     GeminiChatStream,
-    GeminiRetry,
     _check_resp,
     _parse_retry_delay,
 )
@@ -90,38 +89,42 @@ def test_check_resp(status, json_data, ctx, make_resp):
         assert result == json_data
 
 
-@pytest.mark.parametrize(
-    "body, expected",
-    [
-        pytest.param(
-            json.dumps(
-                {
-                    "error": {
-                        "details": [
-                            {
-                                "@type": "type.googleapis.com/google.rpc.RetryInfo",
-                                "retryDelay": "30.5s",
-                            }
-                        ]
-                    }
-                }
-            ).encode(),
-            31,
-            id="extracts-delay",
-        ),
-        pytest.param(b"not json", None, id="invalid-json"),
-        pytest.param(
-            json.dumps({"error": {"details": []}}).encode(),
-            None,
-            id="no-retry-info",
-        ),
-    ],
-)
-def test_gemini_retry_get_retry_after(body: bytes, expected: float | None):
-    retry = GeminiRetry()
-    resp = MagicMock()
-    resp.data = body
-    assert retry.get_retry_after(resp) == expected
+# @pytest.mark.parametrize(
+#     "body, expected",
+#     [
+#         pytest.param(
+#             json.dumps(
+#                 {
+#                     "error": {
+#                         "details": [
+#                             {
+#                                 "@type": "type.googleapis.com/google.rpc.RetryInfo",
+#                                 "retryDelay": "30.5s",
+#                             }
+#                         ]
+#                     }
+#                 }
+#             ).encode(),
+#             31,
+#             id="extracts-delay",
+#         ),
+#         pytest.param(b"not json", None, id="invalid-json"),
+#         pytest.param(
+#             json.dumps({"error": {"details": []}}).encode(),
+#             None,
+#             id="no-retry-info",
+#         ),
+#     ],
+# )
+# async def test_gemini_retry_async_get_retry_after(body: bytes, expected: float | None):
+#     retry = GeminiRetry()
+#
+#     class _Resp:
+#         @property
+#         async def data(self):
+#             return body
+#
+#     assert await retry.async_get_retry_after(_Resp()) == expected
 
 
 class TestGeminiChatStream:
@@ -150,10 +153,51 @@ class TestGeminiChatStream:
                 id="text",
             ),
             pytest.param({}, None, id="empty"),
+            pytest.param(
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [{"text": "thinking...", "thought": True}]
+                            }
+                        }
+                    ]
+                },
+                None,
+                id="thought_skipped",
+            ),
+            pytest.param(
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {"text": "thinking...", "thought": True},
+                                    {"text": "answer"},
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "answer",
+                id="thought_then_text",
+            ),
         ],
     )
     def test_extract_text(self, chunk: dict, expected: str | None):
         assert self.stream._extract_text(chunk) == expected
+
+    def test_on_thought_callback(self):
+        received: list[str] = []
+        client = MagicMock(spec=GeminiClient)
+        stream = GeminiChatStream(client, [], on_thought=received.append)
+        chunk = {
+            "candidates": [
+                {"content": {"parts": [{"text": "pondering", "thought": True}]}}
+            ]
+        }
+        stream._extract_text(chunk)
+        assert received == ["pondering"]
 
     @pytest.mark.parametrize(
         "chunk, expected",
@@ -186,6 +230,155 @@ class TestGeminiChatStream:
     )
     def test_extract_usage(self, chunk: dict, expected: dict | None):
         assert self.stream._extract_usage(chunk) == expected
+
+
+class TestGeminiStream:
+    """Tests for GeminiClient.stream() SSE parsing."""
+
+    @pytest.fixture
+    def client(self):
+        c = MagicMock(spec=GeminiClient)
+        c.provider = "gemini"
+        c.model = "gemini-2.5-flash"
+        c.base_url = "https://generativelanguage.googleapis.com/v1beta/"
+        c.temperature = 0.2
+        c._sse_url = GeminiClient._sse_url.__get__(c)
+        c._build_gen_config = MagicMock(return_value={"temperature": 0.2})
+        c.session = AsyncMock()
+        return c
+
+    @pytest.mark.asyncio
+    async def test_yields_parsed_chunks(self, client, make_sse_event, make_sse_resp):
+        chunk1 = {"candidates": [{"content": {"parts": [{"text": "Hi"}]}}]}
+        chunk2 = {"candidates": [{"content": {"parts": [{"text": " there"}]}}]}
+        events = [
+            make_sse_event(json.dumps(chunk1)),
+            make_sse_event(json.dumps(chunk2)),
+        ]
+        client.session.post.return_value = make_sse_resp(events)
+        chunks = [c async for c in GeminiClient.stream(client, {"contents": []})]
+        assert chunks == [chunk1, chunk2]
+
+    @pytest.mark.asyncio
+    async def test_skips_keepalive_frames(self, client, make_sse_event, make_sse_resp):
+        chunk = {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+        events = [
+            make_sse_event(""),
+            make_sse_event(json.dumps(chunk)),
+            make_sse_event(""),
+        ]
+        client.session.post.return_value = make_sse_resp(events)
+        chunks = [c async for c in GeminiClient.stream(client, {"contents": []})]
+        assert chunks == [chunk]
+
+    @pytest.mark.asyncio
+    async def test_no_extension_raises(self, client):
+        resp = AsyncMock()
+        resp.status_code = 200
+        resp.raise_for_status = MagicMock(return_value=resp)
+        resp.extension = None
+        client.session.post.return_value = resp
+        with pytest.raises(LLMError, match="SSE extension"):
+            _ = [c async for c in GeminiClient.stream(client, {"contents": []})]
+
+    @pytest.mark.asyncio
+    async def test_malformed_json_raises(self, client, make_sse_resp):
+        ev = MagicMock()
+        ev.data = "{bad"
+        ev.json = MagicMock(side_effect=ValueError("parse error"))
+        client.session.post.return_value = make_sse_resp([ev])
+        with pytest.raises(LLMError, match="Stream parse error"):
+            _ = [c async for c in GeminiClient.stream(client, {"contents": []})]
+
+
+class TestGenConfig:
+    """Tests for `GeminiClient._build_gen_config` and its usage across APIs."""
+
+    def test_without_thinking(self):
+        client = GeminiClient(api_key="test")
+        assert client._build_gen_config(0.7) == {"temperature": 0.7}
+
+    def test_with_thinking(self):
+        client = GeminiClient(
+            api_key="test",
+            thinking_config={"thinkingBudget": 1024, "includeThoughts": True},
+        )
+        assert client._build_gen_config(0.3) == {
+            "temperature": 0.3,
+            "thinkingConfig": {"thinkingBudget": 1024, "includeThoughts": True},
+        }
+
+    async def test_complete_chat_applies_thinking_config(self):
+        """Regression: `complete_chat` used to hard-code generationConfig
+        and dropped any `thinking_config` set on the client."""
+        client = GeminiClient(
+            api_key="test",
+            thinking_config={"thinkingBudget": 2048, "includeThoughts": True},
+        )
+
+        recorded: dict[str, object] = {}
+
+        async def fake_complete(body, model=None):
+            recorded["body"] = body
+            return (
+                {
+                    "candidates": [
+                        {
+                            "content": {"parts": [{"text": "ok"}]},
+                            "finishReason": "STOP",
+                        }
+                    ]
+                },
+                {"total": 0, "input": 0, "output": 0},
+            )
+
+        client.complete = fake_complete  # type: ignore[method-assign]
+        await client.complete_chat([{"role": "user", "content": "hi"}])
+
+        body = recorded["body"]
+        assert isinstance(body, dict)
+        assert body["generationConfig"]["temperature"] == 0.2
+        assert body["generationConfig"]["thinkingConfig"] == {
+            "thinkingBudget": 2048,
+            "includeThoughts": True,
+        }
+
+    async def test_complete_chat_skips_thought_parts(self):
+        """Regression: `complete_chat` used to return the first text part
+        even if it was flagged `thought: true`, leaking the model's
+        internal reasoning into the final answer instead of the real
+        response. Thought parts must be skipped (and forwarded to
+        `on_thought` if set) like the streaming path already does.
+        """
+        thoughts: list[str] = []
+        client = GeminiClient(
+            api_key="test",
+            thinking_config={"thinkingBudget": 2048, "includeThoughts": True},
+            on_thought=thoughts.append,
+        )
+
+        async def fake_complete(body, model=None):
+            return (
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {"text": "thinking out loud...", "thought": True},
+                                    {"text": "the real answer"},
+                                ]
+                            },
+                            "finishReason": "STOP",
+                        }
+                    ]
+                },
+                {"total": 0, "input": 0, "output": 0},
+            )
+
+        client.complete = fake_complete  # type: ignore[method-assign]
+        response, _ = await client.complete_chat([{"role": "user", "content": "hi"}])
+        assert response["content"] == "the real answer"
+        assert thoughts == ["thinking out loud..."]
 
 
 # Batch

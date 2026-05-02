@@ -1,16 +1,19 @@
+import json
 from contextlib import nullcontext
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from typing import TYPE_CHECKING
-
 from padwan_llm.errors import LLMError, QuotaExceededError, TooManyRequestsError
 from padwan_llm.openai.batch import BatchJob, BatchResult
-from padwan_llm.openai.client import OpenAIClient, OpenAIChatStream, _check_resp
-
-if TYPE_CHECKING:
-    from padwan_llm.openai.types import CreateChatCompletionStreamResponse
+from padwan_llm.openai.client import (
+    OpenAIClient,
+    OpenAIChatStream,
+    _check_resp,
+    _extract_text_payload,
+    _extract_thought_payload,
+)
+from padwan_llm.openai.types import CreateChatCompletionStreamResponse
 
 
 @pytest.mark.parametrize(
@@ -57,6 +60,42 @@ class TestOpenAIChatStreamExtraction:
             ),
             pytest.param({"choices": [{"delta": {}}]}, None, id="empty-delta"),
             pytest.param({}, None, id="empty"),
+            pytest.param(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "content": [
+                                    {"type": "text", "text": "Hello "},
+                                    {"type": "text", "text": "world"},
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "Hello world",
+                id="mistral-text-chunks",
+            ),
+            pytest.param(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "content": [
+                                    {
+                                        "type": "thinking",
+                                        "thinking": [
+                                            {"type": "text", "text": "Thinking..."}
+                                        ],
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                None,
+                id="mistral-thinking-only",
+            ),
         ],
     )
     def test_extract_text(
@@ -97,6 +136,298 @@ class TestOpenAIChatStreamExtraction:
         self, chunk: CreateChatCompletionStreamResponse, expected: dict | None
     ):
         assert self.stream._extract_usage(chunk) == expected
+
+
+class TestPayloadHelpers:
+    """`_extract_text_payload` and `_extract_thought_payload` are the
+    cross-provider routers used by `OpenAIChatStream` and
+    `_OpenAIBase.complete_chat`. They have to handle three wire shapes:
+    OpenAI/Grok plain string, Mistral structured chunk arrays, and the
+    Grok/DeepSeek `reasoning_content` sibling field.
+    """
+
+    @pytest.mark.parametrize(
+        "payload, expected",
+        [
+            pytest.param({"content": "hi"}, "hi", id="plain-string"),
+            pytest.param({"content": ""}, None, id="empty-string"),
+            pytest.param({"content": None}, None, id="null"),
+            pytest.param({}, None, id="missing"),
+            pytest.param(
+                {
+                    "content": [
+                        {"type": "text", "text": "Hello "},
+                        {"type": "text", "text": "world"},
+                    ]
+                },
+                "Hello world",
+                id="mistral-text-chunks",
+            ),
+            pytest.param(
+                {
+                    "content": [
+                        {
+                            "type": "thinking",
+                            "thinking": [{"type": "text", "text": "ignore me"}],
+                        },
+                        {"type": "text", "text": "the answer"},
+                    ]
+                },
+                "the answer",
+                id="mistral-mixed-skips-thinking",
+            ),
+            pytest.param(
+                {
+                    "content": [
+                        {
+                            "type": "thinking",
+                            "thinking": [{"type": "text", "text": "only thinking"}],
+                        }
+                    ]
+                },
+                None,
+                id="mistral-thinking-only",
+            ),
+        ],
+    )
+    def test_extract_text_payload(self, payload: dict, expected: str | None):
+        assert _extract_text_payload(payload) == expected
+
+    @pytest.mark.parametrize(
+        "payload, expected",
+        [
+            pytest.param(
+                {"reasoning_content": "thinking..."}, "thinking...", id="grok"
+            ),
+            pytest.param({"reasoning_content": ""}, None, id="grok-empty"),
+            pytest.param({"content": "just text"}, None, id="plain-no-thought"),
+            pytest.param(
+                {
+                    "content": [
+                        {
+                            "type": "thinking",
+                            "thinking": [
+                                {"type": "text", "text": "first "},
+                                {"type": "text", "text": "second"},
+                            ],
+                        },
+                        {"type": "text", "text": "answer"},
+                    ]
+                },
+                "first second",
+                id="mistral-thinking",
+            ),
+            pytest.param(
+                {
+                    "content": [
+                        {"type": "text", "text": "no thinking here"},
+                    ]
+                },
+                None,
+                id="mistral-text-only",
+            ),
+            pytest.param({}, None, id="missing"),
+        ],
+    )
+    def test_extract_thought_payload(self, payload: dict, expected: str | None):
+        assert _extract_thought_payload(payload) == expected
+
+
+class TestStreamForwardsThoughts:
+    """`OpenAIChatStream.__aiter__` must forward reasoning chunks to
+    `client.on_thought` for both Grok-style `reasoning_content` and
+    Mistral-style `ThinkChunk` payloads, while keeping the regular text
+    stream free of any thought content. When `on_thought` is unset,
+    reasoning chunks are silently dropped — never raised, never yielded.
+    """
+
+    @pytest.mark.parametrize(
+        "chunks, expected_text, expected_thoughts, with_callback",
+        [
+            pytest.param(
+                [
+                    {"choices": [{"delta": {"reasoning_content": "Let me think... "}}]},
+                    {"choices": [{"delta": {"reasoning_content": "ok done."}}]},
+                    {"choices": [{"delta": {"content": "The answer is 42"}}]},
+                ],
+                "The answer is 42",
+                ["Let me think... ", "ok done."],
+                True,
+                id="grok_reasoning_content",
+            ),
+            pytest.param(
+                [
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "content": [
+                                        {
+                                            "type": "thinking",
+                                            "thinking": [
+                                                {
+                                                    "type": "text",
+                                                    "text": "Reasoning step 1",
+                                                }
+                                            ],
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "content": [
+                                        {"type": "text", "text": "Final answer."},
+                                    ]
+                                }
+                            }
+                        ]
+                    },
+                ],
+                "Final answer.",
+                ["Reasoning step 1"],
+                True,
+                id="mistral_thinking_chunks",
+            ),
+            pytest.param(
+                [
+                    {
+                        "choices": [
+                            {"delta": {"reasoning_content": "internal scratchpad"}}
+                        ]
+                    },
+                    {"choices": [{"delta": {"content": "answer"}}]},
+                ],
+                "answer",
+                [],
+                False,  # on_thought=None
+                id="no_callback_drops_silently",
+            ),
+        ],
+    )
+    async def test_forwards_or_drops_thoughts(
+        self,
+        chunks: list[dict],
+        expected_text: str,
+        expected_thoughts: list[str],
+        with_callback: bool,
+    ):
+        async def fake_stream(_body):
+            for c in chunks:
+                yield c
+
+        thoughts: list[str] = []
+        client = MagicMock(spec=OpenAIClient)
+        client.model = "test-model"
+        client.temperature = 0.2
+        client.provider = "openai"
+        client.on_thought = thoughts.append if with_callback else None
+        client.stream = fake_stream
+        stream = OpenAIChatStream(client, [])
+        produced = [t async for t in stream]
+        assert "".join(produced) == expected_text
+        assert thoughts == expected_thoughts
+
+
+class TestOpenAIStream:
+    """Tests for _OpenAIBase.stream() SSE parsing."""
+
+    @pytest.fixture
+    def client(self):
+        c = MagicMock(spec=OpenAIClient)
+        c.provider = "openai"
+        c.model = "gpt-4o"
+        c.base_url = "https://api.openai.com/v1/"
+        c._sse_url = OpenAIClient._sse_url.__get__(c)
+        c.session = AsyncMock()
+        return c
+
+    @pytest.mark.asyncio
+    async def test_yields_parsed_chunks(self, client, make_sse_event, make_sse_resp):
+        chunk1 = {"choices": [{"delta": {"content": "Hello"}}]}
+        chunk2 = {"choices": [{"delta": {"content": " world"}}]}
+        events = [
+            make_sse_event(json.dumps(chunk1)),
+            make_sse_event(json.dumps(chunk2)),
+        ]
+        client.session.post.return_value = make_sse_resp(events)
+        chunks = [
+            c
+            async for c in OpenAIClient.stream(
+                client, {"model": "gpt-4o", "messages": []}
+            )
+        ]
+        assert chunks == [chunk1, chunk2]
+
+    @pytest.mark.asyncio
+    async def test_done_sentinel_stops(self, client, make_sse_event, make_sse_resp):
+        chunk = {"choices": [{"delta": {"content": "hi"}}]}
+        done_ev = MagicMock()
+        done_ev.data = "[DONE]"
+        done_ev.json = MagicMock(side_effect=ValueError)
+        events = [
+            make_sse_event(json.dumps(chunk)),
+            done_ev,
+            make_sse_event(json.dumps({"should": "not appear"})),
+        ]
+        client.session.post.return_value = make_sse_resp(events)
+        chunks = [
+            c
+            async for c in OpenAIClient.stream(
+                client, {"model": "gpt-4o", "messages": []}
+            )
+        ]
+        assert chunks == [chunk]
+
+    @pytest.mark.asyncio
+    async def test_skips_keepalive_frames(self, client, make_sse_event, make_sse_resp):
+        chunk = {"choices": [{"delta": {"content": "ok"}}]}
+        events = [
+            make_sse_event(""),
+            make_sse_event(json.dumps(chunk)),
+            make_sse_event(""),
+        ]
+        client.session.post.return_value = make_sse_resp(events)
+        chunks = [
+            c
+            async for c in OpenAIClient.stream(
+                client, {"model": "gpt-4o", "messages": []}
+            )
+        ]
+        assert chunks == [chunk]
+
+    @pytest.mark.asyncio
+    async def test_no_extension_raises(self, client):
+        resp = AsyncMock()
+        resp.status_code = 200
+        resp.raise_for_status = MagicMock(return_value=resp)
+        resp.extension = None
+        client.session.post.return_value = resp
+        with pytest.raises(LLMError, match="SSE extension"):
+            _ = [
+                c
+                async for c in OpenAIClient.stream(
+                    client, {"model": "gpt-4o", "messages": []}
+                )
+            ]
+
+    @pytest.mark.asyncio
+    async def test_malformed_json_raises(self, client, make_sse_resp):
+        ev = MagicMock()
+        ev.data = "{bad json"
+        ev.json = MagicMock(side_effect=ValueError("parse error"))
+        client.session.post.return_value = make_sse_resp([ev])
+        with pytest.raises(LLMError, match="Stream parse error"):
+            _ = [
+                c
+                async for c in OpenAIClient.stream(
+                    client, {"model": "gpt-4o", "messages": []}
+                )
+            ]
 
 
 class TestBatchResultFromLine:

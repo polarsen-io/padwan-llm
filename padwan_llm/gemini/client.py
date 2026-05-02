@@ -1,24 +1,26 @@
+from __future__ import annotations
+
 import dataclasses
 import typing
 from dataclasses import field
 from functools import partial
-import json
 import math
 import os
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from http import HTTPStatus
 from typing import TYPE_CHECKING, ClassVar, Literal, cast, get_args
 
 import niquests
-from urllib3 import HTTPResponse
 from urllib3.util.retry import Retry
 
 from .batch import BatchJob, BatchRequest
 from .models import (
     BatchJobResponse,
     CompletionBody,
+    GenerationConfig,
     ListBatchesResponse,
     StreamBody,
+    ThinkingConfig,
 )
 from .tools import GeminiToolMixin
 from .._base import ChatStream, LLMClientBase, Provider
@@ -75,6 +77,28 @@ def _parse_retry_delay(delay_str: str) -> int:
     return math.ceil(float(delay_str.rstrip("s")))
 
 
+def _raise_error_from_resp(
+    data: typing.Any,
+    resp: niquests.Response,
+    e: niquests.exceptions.HTTPError,
+) -> typing.Never:
+    """Raise the appropriate error given parsed response data."""
+    error = cast("GoogleRpcStatusDict", data.get("error", {}))
+    if resp.status_code == HTTPStatus.TOO_MANY_REQUESTS:
+        retry_delay: int | None = None
+        for detail in error.get("details") or []:
+            if detail.get("@type") == "type.googleapis.com/google.rpc.QuotaFailure":
+                raise QuotaExceededError(body=data)
+            if detail.get("@type") == "type.googleapis.com/google.rpc.RetryInfo":
+                retry_delay = _parse_retry_delay(detail["retryDelay"])
+        if retry_delay is None:
+            raise e
+        raise TooManyRequestsError(retry_delay=retry_delay, response=resp)
+    raise LLMError(
+        "gemini", f"{resp.status_code} {error.get('message', '')}", body=data
+    ) from e
+
+
 def _check_resp_status(resp: niquests.Response) -> niquests.Response:
     """Check HTTP status and raise appropriate errors without consuming the body."""
     try:
@@ -84,20 +108,7 @@ def _check_resp_status(resp: niquests.Response) -> niquests.Response:
             data = resp.json()
         except Exception:
             raise e
-        error = cast("GoogleRpcStatusDict", data.get("error", {}))
-        if resp.status_code == HTTPStatus.TOO_MANY_REQUESTS:
-            retry_delay: int | None = None
-            for detail in error.get("details") or []:
-                if detail.get("@type") == "type.googleapis.com/google.rpc.QuotaFailure":
-                    raise QuotaExceededError(body=data)
-                if detail.get("@type") == "type.googleapis.com/google.rpc.RetryInfo":
-                    retry_delay = _parse_retry_delay(detail["retryDelay"])
-            if retry_delay is None:
-                raise e
-            raise TooManyRequestsError(retry_delay=retry_delay, response=resp)
-        raise LLMError(
-            "gemini", f"{resp.status_code} {error.get('message', '')}", body=data
-        ) from e
+        _raise_error_from_resp(data, resp, e)
 
 
 def _check_resp(resp: niquests.Response) -> typing.Any:
@@ -130,32 +141,36 @@ _BATCH_STATE_MAP: dict[str, str] = {
 }
 
 
-class GeminiRetry(Retry):
-    """Custom retry that extracts retry delay from Gemini response body."""
-
-    def get_retry_after(self, response: HTTPResponse) -> float | None:
-        """Extract retry delay from response body (google.rpc.RetryInfo)."""
-        try:
-            data = json.loads(response.data.decode("utf-8"))
-            for detail in data.get("error", {}).get("details", []):
-                if detail.get("@type") == "type.googleapis.com/google.rpc.RetryInfo":
-                    delay_str = detail.get("retryDelay", "")
-                    return math.ceil(float(delay_str.rstrip("s")))
-        except (json.JSONDecodeError, ValueError, KeyError):  # fmt: skip
-            pass
-        return None
+# TODO: restore body-based retry delay extraction once
+# https://github.com/jawah/urllib3.future/issues/346 lands.
+#
+# class GeminiRetry(Retry):
+#     async def async_get_retry_after(self, response):
+#         body = await response.data
+#         if not body:
+#             return None
+#         try:
+#             data = _json_loads(body.decode("utf-8"))
+#             for detail in data.get("error", {}).get("details", []):
+#                 if detail.get("@type") == "type.googleapis.com/google.rpc.RetryInfo":
+#                     delay_str = detail.get("retryDelay", "")
+#                     return math.ceil(float(delay_str.rstrip("s")))
+#         except (ValueError, KeyError):
+#             pass
+#         return None
 
 
 @dataclasses.dataclass
-class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
+class GeminiClient(LLMClientBase[Retry], GeminiToolMixin):
     """Gemini API client with structured output support."""
 
     provider: ClassVar[Provider] = "gemini"
     model: str | None = "gemini-2.5-flash"
     base_url: str = GEMINI_ENDPOINT
-    _retry: GeminiRetry = field(
+    thinking_config: ThinkingConfig | None = None
+    _retry: Retry = field(
         default_factory=partial(
-            GeminiRetry,
+            Retry,
             total=3,
             backoff_factor=0.5,
             status_forcelist=[500, 502, 503, 504],
@@ -336,6 +351,13 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
             stats=metadata.get("batchStats"),
         )
 
+    def _build_gen_config(self, temperature: float) -> GenerationConfig:
+        """Assemble `generationConfig`, merging `thinking_config` if set."""
+        gen_config: GenerationConfig = {"temperature": temperature}
+        if self.thinking_config:
+            gen_config["thinkingConfig"] = self.thinking_config
+        return gen_config
+
     async def stream(self, body: StreamBody) -> AsyncIterator[dict]:
         """Stream chat completions from Gemini, yielding response chunks as they arrive via SSE."""
         if not self.model:
@@ -344,7 +366,7 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
 
         payload: dict = {
             "contents": body["contents"],
-            "generationConfig": {"temperature": _temperature},
+            "generationConfig": self._build_gen_config(_temperature),
         }
         if system := body.get("systemInstruction"):
             payload["systemInstruction"] = system
@@ -352,23 +374,24 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
             payload["tools"] = gemini_tools
 
         resp = await self.session.post(
-            f"/models/{self.model}:streamGenerateContent",
+            self._sse_url(f"/models/{self.model}:streamGenerateContent"),
             params={"alt": "sse"},
             json=payload,
-            stream=True,
         )
         _check_resp_status(resp)
-        resp.encoding = "utf-8"
-
-        async for line in resp.iter_lines(decode_unicode=True):  # pyright: ignore[reportGeneralTypeIssues]
-            if not line:
+        ext = resp.extension
+        if ext is None:
+            raise LLMError(self.provider, "SSE extension not available on response")
+        while not ext.closed:
+            event = await ext.next_payload()
+            if event is None:
+                break
+            if not event.data:
                 continue
-            if line.startswith("data: "):
-                data_str = line[6:]  # Remove "data: " prefix
-                try:
-                    yield json.loads(data_str)
-                except json.JSONDecodeError as e:
-                    raise LLMError(self.provider, f"Stream parse error: {e}") from e
+            try:
+                yield event.json()
+            except ValueError as e:
+                raise LLMError(self.provider, f"Stream parse error: {e}") from e
 
     async def complete_chat(
         self,
@@ -379,7 +402,7 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
         stream_body = GeminiChatStream.build_body(messages, self.temperature, tools)
         body: CompletionBody = {
             "contents": stream_body["contents"],
-            "generationConfig": {"temperature": self.temperature},
+            "generationConfig": self._build_gen_config(self.temperature),
         }
         if system := stream_body.get("systemInstruction"):
             body["systemInstruction"] = system
@@ -394,9 +417,16 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
         raw_reason = candidates[0].get("finishReason", "STOP")
         tool_calls = self._extract_gemini_tool_calls(parts)
 
-        # Extract text from parts (may coexist with function calls)
+        # Extract text from parts (may coexist with function calls). Thought
+        # parts are forwarded to `on_thought` if set and skipped as regular
+        # text — otherwise the model's internal reasoning would leak into
+        # the final answer.
         text: str | None = None
         for part in parts:
+            if part.get("thought"):
+                if self.on_thought and (thought_text := part.get("text")):
+                    self.on_thought(thought_text)
+                continue
             if (t := part.get("text")) is not None:
                 text = t
                 break
@@ -420,13 +450,14 @@ class GeminiClient(LLMClientBase[GeminiRetry], GeminiToolMixin):
         self,
         messages: Sequence[ChatMessage],
         tools: Sequence[ToolDefinition] | None = None,
+        extra_params: dict[str, typing.Any] | None = None,
     ) -> GeminiChatStream:
         """Stream a chat conversation, yielding text chunks.
 
         Handles Gemini-specific body building and response extraction.
         Usage and tool_calls are available on the returned stream object after iteration.
         """
-        return GeminiChatStream(self, messages, tools)
+        return GeminiChatStream(self, messages, tools, on_thought=self.on_thought)
 
 
 class GeminiChatStream(ChatStream, GeminiToolMixin):
@@ -437,10 +468,12 @@ class GeminiChatStream(ChatStream, GeminiToolMixin):
         client: GeminiClient,
         messages: Sequence[ChatMessage],
         tools: Sequence[ToolDefinition] | None = None,
+        on_thought: Callable[[str], None] | None = None,
     ) -> None:
         self._client = client
         self._messages = messages
         self._tools = tools
+        self._on_thought = on_thought
         self.usage: UsageToken | None = None
         self.tool_calls: list[ToolCall] | None = None
 
@@ -517,10 +550,18 @@ class GeminiChatStream(ChatStream, GeminiToolMixin):
         return GeminiToolMixin._extract_gemini_tool_calls(parts, id_offset)
 
     def _extract_text(self, chunk: dict) -> str | None:
-        """Extract text content from a Gemini stream response chunk."""
+        """Extract text content from a Gemini stream response chunk.
+
+        Thought parts are forwarded to `on_thought` if set and skipped
+        as regular text; callers collect them via the callback.
+        """
         if candidates := chunk.get("candidates"):
             if content := candidates[0].get("content"):
                 for part in content.get("parts", []):
+                    if part.get("thought"):
+                        if self._on_thought and (thought_text := part.get("text")):
+                            self._on_thought(thought_text)
+                        continue
                     if (text := part.get("text")) is not None:
                         return text
         return None
