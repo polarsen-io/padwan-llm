@@ -11,10 +11,8 @@
 ### Refactor
 
 - replace manual SSE line parsing in OpenAI and Gemini streaming with niquests native SSE extension (`resp.extension`)
-- add `dumps` to `_json.py` (orjson-backed when available), replace all `json.dumps` / `json.JSONDecodeError` across the codebase
-- cache `AgentSession._build_round_dispatch()` via identity-based fingerprinting — skip rebuild when tool list is unchanged
-- `AgentSession.load()`: replace `**kwargs` with explicit typed parameters
-- **docs**: migrate from mkdocs-material to [zensical](https://github.com/polarsen-io/zensical); switch GitHub Pages deploy to official `actions/deploy-pages`
+- Use `orjson` when available
+- **docs**: migrate from mkdocs-material to [zensical](https://github.com/polarsen-io/zensical)
 
 ### Fix
 
@@ -34,13 +32,3 @@ The `AgentSession` API is functional but considered alpha — the interface may 
 - No mid-stream approval — `approve_tool` runs after all tool calls for a round are known, not as they arrive
 - Tool results are string-only — MCP image/resource content blocks are JSON-serialized
 - No per-call cancellation — you can cancel the whole `send()`/`stream()` task, but not an individual in-flight tool call
-
-### Known issue
-
-niquests' SSE extension drops events when multiple SSE messages arrive in a single HTTP/2 DATA frame (e.g. OpenAI streaming tool-call arguments). Fix submitted upstream: jawah/urllib3.future#344. Until merged and released, streaming tool calls may produce garbled arguments on affected providers.
-
-## 0.5.1 (2026-03-03)
-
-### Fix
-
-- update Grok model definitions to match current xAI API
