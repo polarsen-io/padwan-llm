@@ -4,8 +4,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from typing import TYPE_CHECKING
-
 from padwan_llm.errors import LLMError, QuotaExceededError, TooManyRequestsError
 from padwan_llm.openai.batch import BatchJob, BatchResult
 from padwan_llm.openai.client import (
@@ -15,9 +13,7 @@ from padwan_llm.openai.client import (
     _extract_text_payload,
     _extract_thought_payload,
 )
-
-if TYPE_CHECKING:
-    from padwan_llm.openai.types import CreateChatCompletionStreamResponse
+from padwan_llm.openai.types import CreateChatCompletionStreamResponse
 
 
 @pytest.mark.parametrize(
