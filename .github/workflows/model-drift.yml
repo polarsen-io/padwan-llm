@@ -1,0 +1,51 @@
+name: Model drift
+
+on:
+  schedule:
+    # Mondays 09:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: true
+          python-version: "3.14"
+
+      - name: Bump llms group, regenerate types, run pyright/ruff, write drift report
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          PYRIGHT_PYTHON_GLOBAL_NODE: "true"
+        run: ./bin/drift/refresh-llms.sh --out drift-report.md
+
+      - name: Detect file changes
+        id: changes
+        run: ./bin/drift/has-changes.sh
+
+      - name: Open or refresh weekly automation PR
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODEL_DRIFT_REVIEWER: "@copilot"
+        run: ./bin/drift/pr.sh open-or-refresh --body drift-report.md
+
+      - name: No changes — close stale automation PR
+        if: steps.changes.outputs.changed == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./bin/drift/pr.sh close-stale
