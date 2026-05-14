@@ -15,6 +15,7 @@
 #   --title TITLE       PR title
 #   --label LABEL       PR label (default: automation)
 #   --reviewer NAME     Optional reviewer, e.g. @copilot
+#   --assignee NAME     Optional assignee login
 #   --dry-run           Print commands instead of running them
 #
 # EXAMPLES:
@@ -78,6 +79,7 @@ body="drift-report.md"
 title="chore: weekly LLM SDK refresh"
 label="automation"
 reviewer="${MODEL_DRIFT_REVIEWER:-}"
+assignee="${MODEL_DRIFT_ASSIGNEE:-}"
 git_user_name="${MODEL_DRIFT_GIT_NAME:-github-actions[bot]}"
 git_user_email="${MODEL_DRIFT_GIT_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}"
 dry_run=false
@@ -90,6 +92,7 @@ while [[ $# -gt 0 ]]; do
     --title) title="$2"; shift 2 ;;
     --label) label="$2"; shift 2 ;;
     --reviewer) reviewer="$2"; shift 2 ;;
+    --assignee) assignee="$2"; shift 2 ;;
     --dry-run) dry_run=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -137,6 +140,7 @@ case "$cmd" in
         --base "$base"
         --head "$branch"
       )
+      [[ -n "$assignee" ]] && create_args+=(--assignee "${assignee#@}")
       if [[ "$dry_run" == "true" ]]; then
         run "${create_args[@]}"
         request_reviewer "<created-pr>"
@@ -146,7 +150,9 @@ case "$cmd" in
         request_reviewer "$created"
       fi
     else
-      run gh pr edit "$existing" --body-file "$body"
+      edit_args=(gh pr edit "$existing" --body-file "$body")
+      [[ -n "$assignee" ]] && edit_args+=(--add-assignee "${assignee#@}")
+      run "${edit_args[@]}"
       request_reviewer "$existing"
       ts="$(date -u +%Y-%m-%dT%H:%MZ)"
       run gh pr comment "$existing" \
