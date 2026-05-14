@@ -16,12 +16,18 @@ MistralModel = Literal[
     "mistral-large-latest",
     "pixtral-large-latest",
     "mistral-medium-latest",
+    "mistral-medium-3.5",
+    "mistral-medium-3",
+    "mistral-medium",
     "mistral-moderation-latest",
     "ministral-3b-latest",
     "ministral-8b-latest",
+    "ministral-14b-latest",
     "open-mistral-nemo",
     "mistral-small-latest",
+    "mistral-tiny-latest",
     "devstral-small-latest",
+    "devstral-medium-latest",
     "devstral-latest",
     "mistral-saba-latest",
     "codestral-latest",
@@ -30,8 +36,13 @@ MistralModel = Literal[
     "magistral-medium-latest",
 ]
 
-MistralEmbeddingModel = Literal["mistral-embed"]
-MistralAudioModel = Literal["voxtral-mini-latest"]
+MistralEmbeddingModel = Literal["mistral-embed", "codestral-embed"]
+MistralAudioModel = Literal[
+    "voxtral-mini-latest",
+    "voxtral-mini-realtime-latest",
+    "voxtral-mini-tts-latest",
+    "voxtral-small-latest",
+]
 
 __all__ = (
     "MistralClient",
