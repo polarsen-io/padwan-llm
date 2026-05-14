@@ -1,0 +1,69 @@
+name: Model drift
+
+on:
+  schedule:
+    # Mondays 09:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: true
+          python-version: "3.14"
+
+      - name: Install gh (act only — real runners have it pre-installed)
+        if: ${{ env.ACT }}
+        run: |
+          type -p curl >/dev/null || apt-get install -y curl
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            | tee /etc/apt/sources.list.d/github-cli.list
+          apt-get update && apt-get install -y gh
+
+      - name: Bump llms group, regenerate types, run pyright/ruff, write drift report
+        env:
+          GH_TOKEN: ${{ secrets.POLARSEN_BOT_PAT }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          PYRIGHT_PYTHON_GLOBAL_NODE: "true"
+        run: ./bin/drift/refresh-llms.sh --out drift-report.md
+
+      - name: Detect file changes
+        id: changes
+        run: |
+          if git diff --quiet --exit-code; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat
+          fi
+
+      - name: Open or refresh weekly automation PR
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.POLARSEN_BOT_PAT }}
+          MODEL_DRIFT_REVIEWER: "@copilot"
+          MODEL_DRIFT_GIT_NAME: "Polarsen-bot"
+          MODEL_DRIFT_GIT_EMAIL: "248777799+Polarsen-bot@users.noreply.github.com"
+        run: ./bin/drift/pr.sh open-or-refresh --body drift-report.md
+
+      - name: No changes — close stale automation PR
+        if: steps.changes.outputs.changed == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.POLARSEN_BOT_PAT }}
+        run: ./bin/drift/pr.sh close-stale

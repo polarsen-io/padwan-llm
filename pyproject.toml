@@ -26,9 +26,6 @@ module-name = "padwan_llm"
 
 [dependency-groups]
 dev = [
-    "google-genai>=1.0.0",
-    "mcp>=1.27.0",
-    "openai>=1.0.0",
     "prek>=0.2.30",
     "pyright>=1.1.400",
     "pytest>=8.0.0",
@@ -36,7 +33,12 @@ dev = [
     "pytest-cov>=6.0.0",
     "python-dotenv>=1.2.1",
     "ruff>=0.15.2",
-    "xai-sdk>=1.7.0",
+]
+llms = [
+    "google-genai>=2.1.0",
+    "mcp>=1.27.1",
+    "openai>=2.36.0",
+    "xai-sdk>=1.12.2",
 ]
 research = [
     "jupyter>=1.1.1",
@@ -52,6 +54,12 @@ bump = [
 
 [tool.ruff.lint]
 extend-select = ["G"]
+
+[tool.pyright]
+# Without include, pyright walks SDK source via imports and OOMs.
+include = ["padwan_llm", "tests"]
+# bin/ holds PEP 723 inline scripts with their own dep envs.
+exclude = ["bin"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
