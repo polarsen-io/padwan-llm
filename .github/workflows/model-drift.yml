@@ -35,7 +35,13 @@ jobs:
 
       - name: Detect file changes
         id: changes
-        run: ./bin/drift/has-changes.sh
+        run: |
+          if git diff --quiet --exit-code; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat
+          fi
 
       - name: Open or refresh weekly automation PR
         if: steps.changes.outputs.changed == 'true'
