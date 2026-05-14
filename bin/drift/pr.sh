@@ -78,6 +78,8 @@ body="drift-report.md"
 title="chore: weekly LLM SDK refresh"
 label="automation"
 reviewer="${MODEL_DRIFT_REVIEWER:-}"
+git_user_name="${MODEL_DRIFT_GIT_NAME:-github-actions[bot]}"
+git_user_email="${MODEL_DRIFT_GIT_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}"
 dry_run=false
 
 while [[ $# -gt 0 ]]; do
@@ -108,8 +110,8 @@ case "$cmd" in
       exit 1
     fi
 
-    run git config user.name "github-actions[bot]"
-    run git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+    run git config user.name "$git_user_name"
+    run git config user.email "$git_user_email"
     run git checkout -B "$branch"
     run git add -A
     if [[ "$dry_run" != "true" ]] && git diff --cached --quiet --exit-code; then

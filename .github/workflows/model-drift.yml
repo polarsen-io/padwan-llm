@@ -46,12 +46,14 @@ jobs:
       - name: Open or refresh weekly automation PR
         if: steps.changes.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.POLARSEN_BOT_PAT }}
           MODEL_DRIFT_REVIEWER: "@copilot"
+          MODEL_DRIFT_GIT_NAME: "Polarsen-bot"
+          MODEL_DRIFT_GIT_EMAIL: "248777799+Polarsen-bot@users.noreply.github.com"
         run: ./bin/drift/pr.sh open-or-refresh --body drift-report.md
 
       - name: No changes — close stale automation PR
         if: steps.changes.outputs.changed == 'false'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.POLARSEN_BOT_PAT }}
         run: ./bin/drift/pr.sh close-stale
