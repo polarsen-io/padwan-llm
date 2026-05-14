@@ -55,6 +55,9 @@ echo "==> Regenerating OpenAPI TypedDicts"
 ./bin/gen-openai-types.sh
 ./bin/gen-mistral-types.sh
 
+# Normalize generated files with the project's ruff (datamodel-codegen bundles its own)
+uv run ruff format padwan_llm/openai/types.py padwan_llm/mistral/types.py
+
 # Guard against the generators leaving the tree unformatted
 echo "==> Running ruff"
 uv run ruff check .
