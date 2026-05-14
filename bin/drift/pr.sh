@@ -50,7 +50,12 @@ request_reviewer() {
   if [[ -z "$reviewer" ]]; then
     return 0
   fi
-  run gh pr edit "$pr_ref" --add-reviewer "$reviewer" || true
+  # @copilot is a GitHub App, not a user — trigger via comment
+  if [[ "${reviewer#@}" == "copilot" ]]; then
+    run gh pr comment "$pr_ref" --body "@github-copilot review" || true
+  else
+    run gh pr edit "$pr_ref" --add-reviewer "${reviewer#@}" || true
+  fi
 }
 
 find_existing_pr() {
