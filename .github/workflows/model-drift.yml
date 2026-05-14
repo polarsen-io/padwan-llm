@@ -53,18 +53,6 @@ jobs:
             git diff --stat
           fi
 
-      - name: Apply model additions via Copilot CLI
-        if: steps.changes.outputs.changed == 'true'
-        env:
-          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
-        run: |
-          npm install -g @githubnext/github-copilot-cli
-          copilot -p "$(cat drift-report.md)
-
-          Based on the drift report above, add every model listed under 'Available but not tracked' to the corresponding Literal type in the codebase. Skip any unversioned *-latest aliases. Edit the source files directly." \
-            --allow-tool=write \
-            --no-ask-user
-
       - name: Open or refresh weekly automation PR
         if: steps.changes.outputs.changed == 'true'
         env:
