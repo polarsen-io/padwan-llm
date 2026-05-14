@@ -18,14 +18,22 @@ from ..openai.client import _OpenAIBase, _check_resp, _check_resp_status
 
 GrokModel = Literal[
     "grok-3",
+    "grok-3-fast",
     "grok-3-mini",
+    "grok-3-mini-fast",
     "grok-4",
     "grok-4-0709",
     "grok-4-fast",
     "grok-4-fast-reasoning",
     "grok-4-fast-non-reasoning",
+    "grok-4-1-fast",
     "grok-4-1-fast-reasoning",
     "grok-4-1-fast-non-reasoning",
+    "grok-4.3",
+    "grok-4.20",
+    "grok-4.20-reasoning",
+    "grok-4.20-non-reasoning",
+    "grok-code-fast",
     "grok-code-fast-1",
 ]
 
