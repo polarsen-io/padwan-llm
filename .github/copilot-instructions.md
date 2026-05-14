@@ -18,7 +18,6 @@ Each provider has a curated `Literal` type in its client file:
 **Add** a model ID when it appears under "Available but not tracked" AND:
 - It is a stable or preview alias (e.g. `gemini-2.5-flash`, `grok-4-fast`)
 - It is not a dated snapshot (no date suffix like `-0709`, `-20250514`)
-- It is not an unversioned `*-latest` alias
 
 **Remove** a model ID when it appears under "Tracked but absent" AND the drift report notes it is likely deprecated 
 (not just region/account-gated).
