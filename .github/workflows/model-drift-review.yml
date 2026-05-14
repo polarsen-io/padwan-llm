@@ -1,0 +1,23 @@
+name: Model drift — request human review
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  request-human-review:
+    if: |
+      github.event.pull_request.head.ref == 'automation/model-update' &&
+      github.event.review.user.login == 'copilot'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add human reviewer
+        env:
+          GH_TOKEN: ${{ secrets.POLARSEN_BOT_PAT }}
+        run: |
+          gh pr edit ${{ github.event.pull_request.number }} \
+            --add-reviewer andarius \
+            --repo ${{ github.repository }}
