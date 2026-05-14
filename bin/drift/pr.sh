@@ -50,7 +50,7 @@ request_reviewer() {
   if [[ -z "$reviewer" ]]; then
     return 0
   fi
-  run gh pr edit "$pr_ref" --add-reviewer "$reviewer" || true
+  run gh pr edit "$pr_ref" --add-reviewer "${reviewer#@}" || true
 }
 
 find_existing_pr() {
