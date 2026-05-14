@@ -26,7 +26,6 @@ GrokModel = Literal[
     "grok-3-mini-fast-latest",
     "grok-3-mini-latest",
     "grok-4",
-    "grok-4-0709",
     "grok-4-fast",
     "grok-4-fast-reasoning",
     "grok-4-fast-non-reasoning",
