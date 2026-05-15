@@ -1,3 +1,20 @@
+## 0.7.0 (2026-05-15)
+
+### Features
+
+- **Model drift workflow** — weekly Monday cron (`model-drift.yml`) that bumps the `llms` dependency group, regenerates OpenAI/Mistral OpenAPI TypedDicts, and opens or refreshes an `automation/model-update` PR with a drift report. Companion scripts in `bin/drift/`: `check_model_drift.py` (provider model diff), `refresh-llms.sh` (local end-to-end refresh), `pr.sh` (open-or-refresh/close-stale PR helpers).
+- **New model IDs** across all providers (first automated drift run):
+  - OpenAI: `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`
+  - Gemini: `gemini-3-pro-preview`, `gemini-3.1-flash-lite`, `gemini-3.1-flash-lite-preview`, `gemini-flash-latest`, `gemini-flash-lite-latest`, `gemini-pro-latest`
+  - Mistral: `devstral-medium-latest`, `ministral-14b-latest`, `mistral-medium`, `mistral-medium-3`, `mistral-medium-3.5`, `mistral-tiny-latest`, `codestral-embed`, `voxtral-mini-realtime-latest`, `voxtral-mini-tts-latest`, `voxtral-small-latest`
+  - Grok: `grok-3-fast`, `grok-3-mini-fast`, `grok-4-1-fast`, `grok-4.20`, `grok-4.20-non-reasoning`, `grok-4.20-reasoning`, `grok-4.3`, `grok-code-fast`, and `-latest` aliases for Grok 3/4 families
+
+### Chore
+
+- Bump SDK floors: `openai>=2.36.0`, `google-genai>=2.1.0`, `xai-sdk>=1.12.2`, `mcp>=1.27.1`
+- Move `google-genai`, `mcp`, `openai`, `xai-sdk` into a dedicated `[dependency-groups.llms]` (enumerable by the drift workflow)
+- Scope pyright to `padwan_llm` and `tests` to avoid OOM on transitive SDK sources
+
 ## 0.6.0 (2026-05-02)
 
 ### Feat
