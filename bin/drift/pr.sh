@@ -116,6 +116,7 @@ case "$cmd" in
     run git config user.name "$git_user_name"
     run git config user.email "$git_user_email"
     run git checkout -B "$branch"
+    run git fetch origin "$branch" || true
     run git add -A
     if [[ "$dry_run" != "true" ]] && git diff --cached --quiet --exit-code; then
       echo "No staged changes; skipping PR refresh."
