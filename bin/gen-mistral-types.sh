@@ -32,6 +32,7 @@ uvx --from 'datamodel-code-generator[ruff]' datamodel-codegen \
     --use-schema-description \
     --collapse-root-models \
     --strip-default-none \
+    --no-use-closed-typed-dict \
     --formatters ruff-format ruff-check \
     --openapi-scopes paths \
     --openapi-include-paths '/v1/chat/completions' '/v1/embeddings' '/v1/audio/transcriptions'
@@ -39,8 +40,5 @@ uvx --from 'datamodel-code-generator[ruff]' datamodel-codegen \
 # Fix TypedDict inheritance issue: child cannot redefine NotRequired as Required
 sed -i 's/class ChatCompletionResponse(ChatCompletionResponseBase):/class ChatCompletionResponse(TypedDict):/' "$OUTPUT_FILE"
 sed -i 's/class EmbeddingResponse(ResponseBase):/class EmbeddingResponse(TypedDict):/' "$OUTPUT_FILE"
-
-# Remove typing_extensions import (not needed on Python 3.14)
-sed -i '/from typing_extensions import/d' "$OUTPUT_FILE"
 
 echo "Done! Generated: $OUTPUT_FILE"
