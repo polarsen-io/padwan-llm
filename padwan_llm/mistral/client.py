@@ -16,7 +16,7 @@ MistralModel = Literal[
     "mistral-large-latest",
     "pixtral-large-latest",
     "mistral-medium-latest",
-    "mistral-medium-3.5",
+    "mistral-medium-3-5",
     "mistral-medium-3",
     "mistral-medium",
     "mistral-moderation-latest",
