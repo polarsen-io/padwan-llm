@@ -1,3 +1,21 @@
+## 0.7.1 (2026-06-01)
+
+Maintenance release: a Mistral model-ID correction, regenerated provider types, and a batch of improvements to the weekly model-drift automation.
+
+### Fixes
+
+- **Mistral**: correct the Mistral Medium 3.5 model ID from `mistral-medium-3.5` to `mistral-medium-3-5`, the form Mistral's docs and API use (#15).
+- Regenerate OpenAI and Mistral OpenAPI TypedDicts against the latest SDKs (#15).
+
+### Drift automation (tooling)
+
+- Surface **tracked-but-deprecated** models: the drift report now reads each provider's `deprecation` field and warns before a model's retirement date, instead of only reacting once it disappears from the API (#17).
+- Sign the weekly automation bot's commits with an SSH signing key so they show as **Verified** (#16).
+- Emit stdlib TypedDicts via `--no-use-closed-typed-dict` during type regeneration (#14).
+- Fetch the automation branch before pushing to avoid stale-ref push failures (#12).
+
+**Full Changelog**: https://github.com/polarsen-io/padwan-llm/compare/0.7.0...0.7.1
+
 ## 0.7.0 (2026-05-15)
 
 ### Features
