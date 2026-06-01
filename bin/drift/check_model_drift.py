@@ -24,7 +24,7 @@ and the generated report.
 import os
 import re
 import typing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import niquests
@@ -111,6 +111,8 @@ class RemoteModels:
     models: set[str]
     skipped: str | None = None
     error: str | None = None
+    # model id/alias -> retirement date, when the provider exposes one.
+    deprecations: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -123,6 +125,8 @@ class LiveCheck:
     skipped: str | None = None
     error: str | None = None
     notes: tuple[str, ...] = ()
+    # tracked model -> retirement date, for models still served but scheduled.
+    deprecations: dict[str, str] = field(default_factory=dict)
 
 
 class FetchError(Exception):
@@ -310,6 +314,7 @@ def _mistral_live_models() -> RemoteModels:
         return RemoteModels(set(), error=str(e))
 
     keep: set[str] = set()
+    deprecations: dict[str, str] = {}
     for item in _items(data, "data"):
         if not isinstance(item, dict):
             continue
@@ -318,11 +323,15 @@ def _mistral_live_models() -> RemoteModels:
         if item.get("TYPE") == "fine-tuned":
             continue
 
+        # Still-served models carry a retirement date here once announced.
+        deprecation = _string(item.get("deprecation"))
         candidates = [_string(item.get("id")), *_strings(item.get("aliases"))]
         for model_id in candidates:
             if model_id is not None and _is_public_mistral_model(model_id):
                 keep.add(model_id)
-    return RemoteModels(keep)
+                if deprecation is not None:
+                    deprecations[model_id] = deprecation
+    return RemoteModels(keep, deprecations=deprecations)
 
 
 def _grok_live_models() -> RemoteModels:
@@ -386,6 +395,7 @@ def _live_check(
         docs_url=docs_url,
         diff=_diff(remote.models, known),
         notes=notes,
+        deprecations={m: d for m, d in remote.deprecations.items() if m in known},
     )
 
 
@@ -464,7 +474,7 @@ def _render_live(lines: list[str], check: LiveCheck) -> None:
         lines.append("No live check result.")
         lines.append("")
         return
-    if not check.diff.has_drift:
+    if not check.diff.has_drift and not check.deprecations:
         lines.append("No live drift against the current curated literals.")
         lines.append("")
         return
@@ -481,6 +491,19 @@ def _render_live(lines: list[str], check: LiveCheck) -> None:
             "region/account-gated, or filtered by this script:"
         ),
     )
+
+    if check.deprecations:
+        lines.append(
+            "**Tracked but deprecated** - still served, but the provider has "
+            "scheduled removal; migrate before the retirement date:"
+        )
+        lines.extend(
+            f"- `{model}` - retires {date}"
+            for model, date in sorted(
+                check.deprecations.items(), key=lambda kv: (kv[1], kv[0])
+            )
+        )
+        lines.append("")
 
 
 def _render(
@@ -557,7 +580,11 @@ def check(
             "https://docs.mistral.ai/getting-started/models/models_overview/",
             _mistral_live_models(),
             mistral_known,
-            notes=("Fine-tuned, archived, and dated snapshot models are filtered.",),
+            notes=(
+                "Fine-tuned, archived, and dated snapshot models are filtered.",
+                "Deprecation dates come from the API's `deprecation` field; "
+                "models stay listed until their retirement date.",
+            ),
         ),
         _live_check(
             "Grok",
