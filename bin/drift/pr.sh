@@ -115,6 +115,14 @@ case "$cmd" in
 
     run git config user.name "$git_user_name"
     run git config user.email "$git_user_email"
+    if [[ -n "${MODEL_DRIFT_SSH_SIGNING_KEY:-}" ]]; then
+      key_file="$(mktemp)"
+      printf '%s\n' "$MODEL_DRIFT_SSH_SIGNING_KEY" > "$key_file"
+      chmod 600 "$key_file"
+      run git config gpg.format ssh
+      run git config user.signingkey "$key_file"
+      run git config commit.gpgsign true
+    fi
     run git checkout -B "$branch"
     run git fetch origin "$branch" || true
     run git add -A
