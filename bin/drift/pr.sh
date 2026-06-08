@@ -16,6 +16,7 @@
 #   --label LABEL       PR label (default: automation)
 #   --reviewer NAME     Optional reviewer, e.g. @copilot
 #   --assignee NAME     Optional assignee login
+#   --copilot           Ask Copilot to apply model additions from the drift report
 #   --dry-run           Print commands instead of running them
 #
 # EXAMPLES:
@@ -54,6 +55,31 @@ request_reviewer() {
   run gh pr edit "$pr_ref" --add-reviewer "${reviewer#@}" || true
 }
 
+request_copilot() {
+  local pr_ref="$1"
+  if [[ "$copilot" != "true" ]]; then
+    return 0
+  fi
+  if ! grep -Eq '^\*\*(Candidate additions|Available but not tracked)\*\*' "$body"; then
+    echo "No model addition candidates; skipping Copilot request."
+    return 0
+  fi
+
+  local prompt
+  prompt="@copilot Update the model Literals in this pull request from the drift report in the PR description.
+
+- Review additions under \"Candidate additions\" and \"Available but not tracked\".
+- Add only public model IDs that belong in this package's curated typing surface.
+- Do not add dated snapshots, internal IDs, or ambiguous capability variants.
+- Never remove models listed under \"Tracked but absent\"; live API results may be account or region gated.
+- Keep deprecations report-only.
+- Update runtime provider prefixes if a newly accepted model family requires it.
+- Run \`uv run pyright\`, \`uv run ruff check .\`, \`uv run ruff format --check .\`, and relevant tests.
+- Commit changes directly to this pull request branch. Do not open another pull request."
+
+  run gh pr comment "$pr_ref" --body "$prompt"
+}
+
 find_existing_pr() {
   if [[ "$dry_run" == "true" ]]; then
     quote_cmd gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty'
@@ -83,6 +109,7 @@ assignee="${MODEL_DRIFT_ASSIGNEE:-}"
 git_user_name="${MODEL_DRIFT_GIT_NAME:-github-actions[bot]}"
 git_user_email="${MODEL_DRIFT_GIT_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}"
 dry_run=false
+copilot=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -93,6 +120,7 @@ while [[ $# -gt 0 ]]; do
     --label) label="$2"; shift 2 ;;
     --reviewer) reviewer="$2"; shift 2 ;;
     --assignee) assignee="$2"; shift 2 ;;
+    --copilot) copilot=true; shift ;;
     --dry-run) dry_run=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -153,10 +181,12 @@ case "$cmd" in
       if [[ "$dry_run" == "true" ]]; then
         run "${create_args[@]}"
         request_reviewer "<created-pr>"
+        request_copilot "<created-pr>"
       else
         created="$("${create_args[@]}")"
         printf '%s\n' "$created"
         request_reviewer "$created"
+        request_copilot "$created"
       fi
     else
       edit_args=(gh pr edit "$existing" --body-file "$body")
@@ -166,6 +196,7 @@ case "$cmd" in
       ts="$(date -u +%Y-%m-%dT%H:%MZ)"
       run gh pr comment "$existing" \
         --body "Refreshed at ${ts} (run #${GITHUB_RUN_NUMBER:-local}). See PR body for the latest drift report."
+      request_copilot "$existing"
     fi
     ;;
   close-stale)
