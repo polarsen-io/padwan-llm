@@ -62,7 +62,7 @@ jobs:
           MODEL_DRIFT_GIT_NAME: "Polarsen-bot"
           MODEL_DRIFT_GIT_EMAIL: "248777799+Polarsen-bot@users.noreply.github.com"
           MODEL_DRIFT_SSH_SIGNING_KEY: ${{ secrets.BOT_SSH_SIGNING_KEY }}
-        run: ./bin/drift/pr.sh open-or-refresh --body drift-report.md
+        run: ./bin/drift/pr.sh open-or-refresh --body drift-report.md --copilot
 
       - name: No changes — close stale automation PR
         if: steps.changes.outputs.changed == 'false'
