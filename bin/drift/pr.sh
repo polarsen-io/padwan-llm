@@ -77,7 +77,19 @@ request_copilot() {
 - Run \`uv run pyright\`, \`uv run ruff check .\`, \`uv run ruff format --check .\`, and relevant tests.
 - Commit changes directly to this pull request branch. Do not open another pull request."
 
-  run gh pr comment "$pr_ref" --body "$prompt"
+  # Copilot acts only on a request from a seat-holding user, so assign the agent and
+  # post instructions as COPILOT_TRIGGER_PAT (a licensed user), not the seat-less bot.
+  if [[ "$dry_run" == "true" ]]; then
+    quote_cmd gh pr edit "$pr_ref" --add-assignee @copilot
+    quote_cmd gh pr comment "$pr_ref" --body "$prompt"
+    return 0
+  fi
+  if [[ -z "$copilot_token" ]]; then
+    echo "COPILOT_TRIGGER_PAT not set; cannot trigger the Copilot coding agent." >&2
+    return 0
+  fi
+  GH_TOKEN="$copilot_token" gh pr edit "$pr_ref" --add-assignee "@copilot"
+  GH_TOKEN="$copilot_token" gh pr comment "$pr_ref" --body "$prompt"
 }
 
 find_existing_pr() {
@@ -106,6 +118,7 @@ title="chore: weekly LLM SDK refresh"
 label="automation"
 reviewer="${MODEL_DRIFT_REVIEWER:-}"
 assignee="${MODEL_DRIFT_ASSIGNEE:-}"
+copilot_token="${COPILOT_TRIGGER_PAT:-}"
 git_user_name="${MODEL_DRIFT_GIT_NAME:-github-actions[bot]}"
 git_user_email="${MODEL_DRIFT_GIT_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}"
 dry_run=false
