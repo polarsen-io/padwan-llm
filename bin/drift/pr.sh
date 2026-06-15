@@ -77,7 +77,41 @@ request_copilot() {
 - Run \`uv run pyright\`, \`uv run ruff check .\`, \`uv run ruff format --check .\`, and relevant tests.
 - Commit changes directly to this pull request branch. Do not open another pull request."
 
-  run gh pr comment "$pr_ref" --body "$prompt"
+  # Copilot only acts on a request from a seat-holding user; this step runs as
+  # COPILOT_TRIGGER_PAT (a Copilot-licensed user), not the bot, and assigns the agent.
+  if [[ "$dry_run" == "true" ]]; then
+    quote_cmd gh repo view --json nameWithOwner --jq .nameWithOwner
+    quote_cmd gh pr view "$pr_ref" --json id --jq .id
+    quote_cmd gh api graphql -f query='<resolve copilot-swe-agent bot id>'
+    quote_cmd gh api graphql -f query='<replaceActorsForAssignable: assign copilot-swe-agent>'
+    quote_cmd gh pr comment "$pr_ref" --body "$prompt"
+    return 0
+  fi
+
+  if [[ -z "$copilot_token" ]]; then
+    echo "COPILOT_TRIGGER_PAT not set; cannot trigger the Copilot coding agent." >&2
+    return 0
+  fi
+
+  local nwo owner name pr_id bot_id
+  nwo="$(GH_TOKEN="$copilot_token" gh repo view --json nameWithOwner --jq .nameWithOwner)"
+  owner="${nwo%/*}"
+  name="${nwo#*/}"
+  pr_id="$(GH_TOKEN="$copilot_token" gh pr view "$pr_ref" --json id --jq .id)"
+  bot_id="$(GH_TOKEN="$copilot_token" gh api graphql \
+    -f query='query($owner:String!,$name:String!){repository(owner:$owner,name:$name){suggestedActors(capabilities:[CAN_BE_ASSIGNED],first:20){nodes{login ... on Bot{id}}}}}' \
+    -f owner="$owner" -f name="$name" \
+    --jq '.data.repository.suggestedActors.nodes[] | select(.login=="copilot-swe-agent") | .id')"
+
+  if [[ -z "$bot_id" ]]; then
+    echo "copilot-swe-agent is not assignable for the COPILOT_TRIGGER_PAT user; confirm they hold a Copilot seat." >&2
+    return 0
+  fi
+
+  GH_TOKEN="$copilot_token" gh api graphql \
+    -f query='mutation($assignable:ID!,$actor:ID!){replaceActorsForAssignable(input:{assignableId:$assignable,actorIds:[$actor]}){assignable{... on PullRequest{number}}}}' \
+    -f assignable="$pr_id" -f actor="$bot_id" >/dev/null
+  GH_TOKEN="$copilot_token" gh pr comment "$pr_ref" --body "$prompt"
 }
 
 find_existing_pr() {
@@ -106,6 +140,7 @@ title="chore: weekly LLM SDK refresh"
 label="automation"
 reviewer="${MODEL_DRIFT_REVIEWER:-}"
 assignee="${MODEL_DRIFT_ASSIGNEE:-}"
+copilot_token="${COPILOT_TRIGGER_PAT:-}"
 git_user_name="${MODEL_DRIFT_GIT_NAME:-github-actions[bot]}"
 git_user_email="${MODEL_DRIFT_GIT_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}"
 dry_run=false
