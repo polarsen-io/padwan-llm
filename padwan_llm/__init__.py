@@ -1,6 +1,7 @@
 from importlib.metadata import version as _pkg_version
 
 from ._base import ChatStream, LLMClientBase, OnThought
+from ._deprecation import ModelDeprecationWarning
 from .agent import AgentSession, ConversationStore, OnMcpConnect, ToolCallContext
 from .mcp import McpStreamable, McpStdio, McpTool, McpTransport, OnAuth, ProgressEvent
 from .client import LLMClient
@@ -53,6 +54,7 @@ __all__ = (
     "McpStdio",
     "McpTool",
     "McpTransport",
+    "ModelDeprecationWarning",
     "OnAuth",
     "OnMcpConnect",
     "OnThought",

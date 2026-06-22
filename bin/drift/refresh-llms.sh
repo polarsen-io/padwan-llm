@@ -63,10 +63,14 @@ echo "==> Running ruff"
 uv run ruff check .
 uv run ruff format --check .
 
-# Diff the SDK's ChatModel Literal against our OpenAIModel
+# Diff the SDK's ChatModel Literal against our OpenAIModel.
+# This step also regenerates padwan_llm/mistral/_deprecations.py from live data.
 echo "==> Running drift report"
 if [[ -n "$out" ]]; then
   ./bin/drift/check_model_drift.py --out "$out"
 else
   ./bin/drift/check_model_drift.py
 fi
+
+# Normalize the freshly regenerated deprecation map.
+uv run ruff format padwan_llm/mistral/_deprecations.py

@@ -3,11 +3,13 @@ from __future__ import annotations
 import dataclasses
 import mimetypes
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, get_args
 
 from .._base import LLMError, Provider
 from ..openai.client import _OpenAIBase, _check_resp
+from ._deprecations import DEPRECATED
 
 if TYPE_CHECKING:
     from .types import EmbeddingRequest, EmbeddingResponse, TranscriptionResponse
@@ -36,6 +38,8 @@ MistralModel = Literal[
     "devstral-latest",
     "mistral-saba-latest",
     "codestral-latest",
+    "mistral-ocr-3",
+    "mistral-ocr-3-0",
     "mistral-ocr-latest",
     "magistral-small-latest",
     "magistral-medium-latest",
@@ -89,6 +93,7 @@ class MistralClient(_OpenAIBase):
     """Mistral API client."""
 
     provider: ClassVar[Provider] = "mistral"
+    _deprecations: ClassVar[Mapping[str, str]] = DEPRECATED
     model: str | None = "mistral-large-latest"
     base_url: str = MISTRAL_ENDPOINT
 
