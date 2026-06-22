@@ -14,6 +14,7 @@ import niquests
 from urllib3.util.retry import Retry
 
 from .._base import ChatStream, LLMClientBase, Provider
+from ..content import ContentPart
 from ..conversation import AssistantToolMessage, ChatMessage, ToolResultMessage
 from ..errors import LLMError, QuotaExceededError, TooManyRequestsError
 from ..models import (
@@ -47,6 +48,27 @@ _GEMINI_FINISH_REASON_MAP: dict[str, FinishReason] = {
     "SPII": "content_filter",
     "OTHER": "other",
 }
+
+
+def _content_to_gemini_parts(content: str | list[ContentPart]) -> list[dict]:
+    """Convert message content into Gemini `parts`.
+
+    Plain text becomes a single text part; multimodal content maps each part,
+    translating `image_url` data URLs into Gemini's `inlineData` shape.
+    """
+    if isinstance(content, str):
+        return [{"text": content}]
+    parts: list[dict] = []
+    for part in content:
+        if part["type"] == "text":
+            parts.append({"text": part["text"]})
+        elif part["type"] == "image_url":
+            url = part["image_url"]["url"]
+            header, _, data = url.partition(";base64,")
+            mime = header.removeprefix("data:") or "image/png"
+            parts.append({"inlineData": {"mimeType": mime, "data": data}})
+    return parts
+
 
 if TYPE_CHECKING:
     from google.genai.types import (
@@ -525,7 +547,7 @@ class GeminiChatStream(ChatStream, GeminiToolMixin):
         for msg in messages:
             role = msg["role"]
             if role == "system":
-                system_parts.append(msg["content"])  # type: ignore[typeddict-item]
+                system_parts.append(cast(str, msg["content"]))
                 continue
             if role == "tool":
                 contents.append(
@@ -539,9 +561,12 @@ class GeminiChatStream(ChatStream, GeminiToolMixin):
                     )
                 )
                 continue
-            # Regular text message (user or assistant)
+            # Regular text message (user or assistant); content is never None here.
             gemini_role = "model" if role == "assistant" else "user"
-            contents.append({"role": gemini_role, "parts": [{"text": msg["content"]}]})  # type: ignore[typeddict-item]
+            parts = _content_to_gemini_parts(
+                cast("str | list[ContentPart]", msg["content"])
+            )
+            contents.append({"role": gemini_role, "parts": parts})
         body: StreamBody = {"contents": contents, "temperature": temperature}
         if system_parts:
             body["systemInstruction"] = {

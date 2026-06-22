@@ -7,6 +7,15 @@ from .client import (
     OpenAIModel,
     is_openai_model,
 )
+from .realtime import (
+    DEFAULT_REALTIME_MODEL,
+    REALTIME_ENDPOINT,
+    REALTIME_SAMPLE_RATE,
+    RealtimeClient,
+    RealtimeConnection,
+    RealtimeServerEvent,
+    RealtimeVoice,
+)
 
 __all__ = (
     "BatchJob",
@@ -18,4 +27,11 @@ __all__ = (
     "OPENAI_CHAT_MODELS",
     "OPENAI_ENDPOINT",
     "is_openai_model",
+    "RealtimeClient",
+    "RealtimeConnection",
+    "RealtimeServerEvent",
+    "RealtimeVoice",
+    "REALTIME_ENDPOINT",
+    "REALTIME_SAMPLE_RATE",
+    "DEFAULT_REALTIME_MODEL",
 )

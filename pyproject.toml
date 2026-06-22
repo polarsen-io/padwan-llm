@@ -12,6 +12,10 @@ dependencies = [
     "urllib3-future>=2.19.908",
 ]
 
+[project.optional-dependencies]
+# Speech-to-speech Realtime client; niquests[ws] pulls wsproto to enable websockets.
+realtime = ["niquests[ws]>=3.18.5"]
+
 [project.scripts]
 padwan-llm = "padwan_llm.__main__:main"
 

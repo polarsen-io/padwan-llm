@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Literal, Self, TypedDict, cast
 
+from .content import ContentPart
 from .models import ChatResponse, ToolCall, UsageToken
 
 __all__ = (
@@ -14,10 +15,14 @@ __all__ = (
 
 
 class Message(TypedDict):
-    """A single message in a conversation."""
+    """A single message in a conversation.
+
+    User messages may carry a list of multimodal content parts (text + images);
+    system and assistant messages always use a plain string.
+    """
 
     role: Literal["system", "user", "assistant"]
-    content: str
+    content: str | list[ContentPart]
 
 
 class AssistantToolMessage(TypedDict):
@@ -77,8 +82,11 @@ class ConversationState:
         if self.system:
             self.messages.insert(0, Message(role="system", content=self.system))
 
-    def add_user_message(self, content: str) -> Message:
-        """Add a user message to the conversation history."""
+    def add_user_message(self, content: str | list[ContentPart]) -> Message:
+        """Add a user message to the conversation history.
+
+        Accepts either plain text or a list of multimodal content parts.
+        """
         msg = Message(role="user", content=content)
         self.messages.append(msg)
         return msg
