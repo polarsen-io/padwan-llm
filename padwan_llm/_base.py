@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import abc
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 import niquests
 from urllib3.util.retry import Retry
 
+from ._deprecation import warn_if_deprecated
 from .conversation import ChatMessage
 from .errors import LLMError, Provider
 from .models import ChatResponse, ToolCall, ToolDefinition, UsageToken
@@ -53,6 +54,8 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
     """
 
     provider: ClassVar[Provider]
+    _deprecations: ClassVar[Mapping[str, str]] = {}
+    """Model id -> retirement date for provider-deprecated models. Set per provider."""
     _retry: RetryT
 
     model: str | None = None
@@ -83,6 +86,7 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
         return int(total)
 
     def __post_init__(self) -> None:
+        warn_if_deprecated(self.provider, self.model, self._deprecations)
         self._api_key = self.api_key or self._get_default_api_key()
 
     @abc.abstractmethod
