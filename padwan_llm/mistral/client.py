@@ -45,6 +45,8 @@ MistralModel = Literal[
     "mistral-ocr-latest",
     "magistral-small-latest",
     "magistral-medium-latest",
+    "labs-leanstral-1-5",
+    "labs-leanstral-1-5-1",
 ]
 
 MistralEmbeddingModel = Literal["mistral-embed", "codestral-embed"]
@@ -75,6 +77,7 @@ _MISTRAL_PREFIXES = (
     "codestral-",
     "magistral-",
     "voxtral-",
+    "labs-",
 )
 
 
