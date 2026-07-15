@@ -9,6 +9,7 @@ from .client import (
 )
 from .realtime import (
     DEFAULT_REALTIME_MODEL,
+    NO_TURN_DETECTION,
     REALTIME_ENDPOINT,
     REALTIME_SAMPLE_RATE,
     RealtimeClient,
@@ -33,5 +34,6 @@ __all__ = (
     "RealtimeVoice",
     "REALTIME_ENDPOINT",
     "REALTIME_SAMPLE_RATE",
+    "NO_TURN_DETECTION",
     "DEFAULT_REALTIME_MODEL",
 )

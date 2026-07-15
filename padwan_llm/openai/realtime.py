@@ -18,6 +18,7 @@ __all__ = (
     "REALTIME_ENDPOINT",
     "DEFAULT_REALTIME_MODEL",
     "REALTIME_SAMPLE_RATE",
+    "NO_TURN_DETECTION",
     "RealtimeVoice",
     "RealtimeServerEvent",
     "RealtimeClient",
@@ -29,6 +30,10 @@ DEFAULT_REALTIME_MODEL = "gpt-realtime"
 
 # gpt-realtime exchanges mono little-endian PCM16 at 24 kHz.
 REALTIME_SAMPLE_RATE = 24_000
+
+# Pass as ``turn_detection`` to disable server VAD (manual / push-to-talk mode);
+# you then drive each turn yourself with commit_audio() + create_response().
+NO_TURN_DETECTION = "none"
 
 # https://platform.openai.com/docs/guides/realtime — "marin" and "cedar" are the
 # voices introduced with gpt-realtime; the rest carry over from the preview models.
@@ -93,7 +98,7 @@ class RealtimeClient:
         *,
         instructions: str | None = None,
         voice: RealtimeVoice = "marin",
-        turn_detection: Mapping[str, Any] | None = None,
+        turn_detection: Mapping[str, Any] | str | None = None,
         transcription_model: str | None = "whisper-1",
         output_modalities: Sequence[str] = ("audio",),
         sample_rate: int = REALTIME_SAMPLE_RATE,
@@ -103,10 +108,12 @@ class RealtimeClient:
         *instructions* is the system prompt steering the voice agent and *voice*
         selects the spoken voice. *turn_detection* defaults to server-side VAD so
         the model decides when you have stopped talking; pass an explicit mapping
-        (e.g. ``{"type": "semantic_vad"}``) to override, or ``{}`` is treated the
-        same as the default. *transcription_model* enables transcription of your
-        own speech (set to ``None`` to disable). The session is configured before
-        control returns and closed automatically on exit.
+        (e.g. ``{"type": "semantic_vad"}``) to override, or :data:`NO_TURN_DETECTION`
+        to disable VAD and drive each turn manually (push-to-talk) with
+        :meth:`RealtimeConnection.commit_audio` + :meth:`RealtimeConnection.create_response`.
+        *transcription_model* enables transcription of your own speech (set to
+        ``None`` to disable). The session is configured before control returns and
+        closed automatically on exit.
         """
         url = f"{self.base_url}?model={self.model}"
         headers = {"Authorization": f"Bearer {self._api_key}"}
@@ -125,7 +132,7 @@ class RealtimeClient:
             await conn.configure(
                 instructions=instructions,
                 voice=voice,
-                turn_detection=dict(turn_detection) if turn_detection else None,
+                turn_detection=turn_detection,
                 transcription_model=transcription_model,
                 output_modalities=list(output_modalities),
             )
@@ -153,21 +160,27 @@ class RealtimeConnection:
         *,
         instructions: str | None,
         voice: RealtimeVoice,
-        turn_detection: Mapping[str, Any] | None,
+        turn_detection: Mapping[str, Any] | str | None,
         transcription_model: str | None,
         output_modalities: Sequence[str],
     ) -> dict[str, Any]:
         """Build the ``session.update`` event for the GA Realtime schema.
 
         Split out from :meth:`configure` so the payload can be inspected and
-        unit-tested without a live connection.
+        unit-tested without a live connection. *turn_detection* of
+        :data:`NO_TURN_DETECTION` emits a JSON ``null`` to disable server VAD; a
+        falsy value uses the ``server_vad`` default; a mapping is sent verbatim.
         """
         audio_format = {"type": "audio/pcm", "rate": self.sample_rate}
+        if isinstance(turn_detection, str):
+            detection: dict[str, Any] | None = None  # NO_TURN_DETECTION -> JSON null
+        elif turn_detection:
+            detection = dict(turn_detection)
+        else:
+            detection = {"type": "server_vad"}
         audio_input: dict[str, Any] = {
             "format": audio_format,
-            "turn_detection": dict(turn_detection)
-            if turn_detection
-            else {"type": "server_vad"},
+            "turn_detection": detection,
         }
         if transcription_model:
             audio_input["transcription"] = {"model": transcription_model}
@@ -188,7 +201,7 @@ class RealtimeConnection:
         *,
         instructions: str | None = None,
         voice: RealtimeVoice = "marin",
-        turn_detection: Mapping[str, Any] | None = None,
+        turn_detection: Mapping[str, Any] | str | None = None,
         transcription_model: str | None = "whisper-1",
         output_modalities: Sequence[str] = ("audio",),
     ) -> None:

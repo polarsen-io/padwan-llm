@@ -5,6 +5,7 @@ import pytest
 from padwan_llm._json import loads as _json_loads
 from padwan_llm.errors import LLMError
 from padwan_llm.openai.realtime import (
+    NO_TURN_DETECTION,
     RealtimeClient,
     RealtimeConnection,
     RealtimeServerEvent,
@@ -60,6 +61,13 @@ def test_missing_api_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
             True,
             None,
             id="empty-mapping-falls-back",
+        ),
+        pytest.param(
+            {"turn_detection": NO_TURN_DETECTION},
+            None,
+            True,
+            None,
+            id="disabled-emits-null",
         ),
         pytest.param(
             {"transcription_model": None, "instructions": "Parla italiano."},
