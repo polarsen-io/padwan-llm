@@ -1,6 +1,7 @@
 from typing import NotRequired, TypedDict, overload
 
 from ._base import LLMClientBase, OnThought
+from .anthropic import AnthropicClient, AnthropicModel, is_anthropic_model
 from .gemini import GeminiClient, GeminiModel, is_gemini_model
 from .grok import GrokClient, GrokModel, is_grok_model
 from .mistral import MistralClient, MistralModel, is_mistral_model
@@ -60,6 +61,16 @@ def LLMClient(
 ) -> GrokClient: ...
 @overload
 def LLMClient(
+    model: AnthropicModel,
+    *,
+    temperature: float = 0.2,
+    timeout: float = 60,
+    api_key: str | None = None,
+    on_thought: OnThought | None = None,
+    base_url: str | None = None,
+) -> AnthropicClient: ...
+@overload
+def LLMClient(
     model: str,
     *,
     temperature: float = 0.2,
@@ -108,6 +119,8 @@ def LLMClient(
         return MistralClient(**kwargs)
     if is_grok_model(model):
         return GrokClient(**kwargs)
+    if is_anthropic_model(model):
+        return AnthropicClient(**kwargs)
     if kwargs["api_key"] is None:
         kwargs["api_key"] = "no-key-required"
     return OpenAIClient(**kwargs)
