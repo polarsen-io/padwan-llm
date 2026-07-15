@@ -1,14 +1,36 @@
 import json
 from contextlib import nullcontext
+from typing import get_type_hints
 from unittest.mock import AsyncMock
 
 import pytest
+
+from anthropic.types import (
+    ImageBlockParam,
+    Message as SdkMessage,
+    MessageParam,
+    TextBlockParam,
+    ThinkingBlockParam,
+    ToolParam,
+    ToolResultBlockParam,
+    ToolUseBlockParam,
+    Usage,
+)
+from anthropic.types.message_create_params import MessageCreateParamsStreaming
 
 from padwan_llm.anthropic.client import (
     AnthropicClient,
     _check_resp,
     _usage_from_anthropic,
     is_anthropic_model,
+)
+from padwan_llm.anthropic.models import (
+    AnthropicContentBlock,
+    AnthropicMessage,
+    AnthropicTool,
+    AnthropicUsage,
+    MessagesBody,
+    MessagesResponse,
 )
 from padwan_llm.client import LLMClient
 from padwan_llm.errors import LLMError, TooManyRequestsError
@@ -232,8 +254,9 @@ class TestCompleteChat:
     )
     async def test_complete_chat(self, data, expected, ctx, make_resp):
         client = AnthropicClient(api_key="test")
-        client._session = AsyncMock()
-        client.session.post.return_value = make_resp(200, data)
+        session = AsyncMock()
+        client._session = session
+        session.post.return_value = make_resp(200, data)
         with ctx:
             response, usage = await client.complete_chat(
                 [{"role": "user", "content": "hi"}]
@@ -244,8 +267,9 @@ class TestCompleteChat:
     async def test_thinking_forwarded_and_skipped(self, make_resp):
         thoughts: list[str] = []
         client = AnthropicClient(api_key="test", on_thought=thoughts.append)
-        client._session = AsyncMock()
-        client.session.post.return_value = make_resp(
+        session = AsyncMock()
+        client._session = session
+        session.post.return_value = make_resp(
             200,
             {
                 "content": [
@@ -267,8 +291,9 @@ class TestStreamChat:
 
     async def test_text_tools_and_usage(self, make_sse_event, make_sse_resp):
         client = AnthropicClient(api_key="test")
-        client._session = AsyncMock()
-        client.session.post.return_value = make_sse_resp(
+        session = AsyncMock()
+        client._session = session
+        session.post.return_value = make_sse_resp(
             self._events(
                 make_sse_event,
                 [
@@ -345,8 +370,9 @@ class TestStreamChat:
     async def test_thinking_delta_forwarded(self, make_sse_event, make_sse_resp):
         thoughts: list[str] = []
         client = AnthropicClient(api_key="test", on_thought=thoughts.append)
-        client._session = AsyncMock()
-        client.session.post.return_value = make_sse_resp(
+        session = AsyncMock()
+        client._session = session
+        session.post.return_value = make_sse_resp(
             self._events(
                 make_sse_event,
                 [
@@ -375,8 +401,9 @@ class TestStreamChat:
 
     async def test_error_event_raises(self, make_sse_event, make_sse_resp):
         client = AnthropicClient(api_key="test")
-        client._session = AsyncMock()
-        client.session.post.return_value = make_sse_resp(
+        session = AsyncMock()
+        client._session = session
+        session.post.return_value = make_sse_resp(
             self._events(
                 make_sse_event,
                 [
@@ -390,3 +417,39 @@ class TestStreamChat:
         stream = client.stream_chat([{"role": "user", "content": "hi"}])
         with pytest.raises(LLMError, match="overloaded"):
             _ = [c async for c in stream]
+
+
+_SDK_BLOCK_TYPES = (
+    TextBlockParam,
+    ToolUseBlockParam,
+    ToolResultBlockParam,
+    ImageBlockParam,
+    ThinkingBlockParam,
+)
+
+
+@pytest.mark.parametrize(
+    "local_type, sdk_keys",
+    [
+        pytest.param(AnthropicTool, set(get_type_hints(ToolParam)), id="Tool"),
+        pytest.param(AnthropicMessage, set(get_type_hints(MessageParam)), id="Message"),
+        pytest.param(AnthropicUsage, set(Usage.model_fields), id="Usage"),
+        pytest.param(
+            MessagesResponse, set(SdkMessage.model_fields), id="MessagesResponse"
+        ),
+        pytest.param(
+            MessagesBody,
+            set(get_type_hints(MessageCreateParamsStreaming)),
+            id="MessagesBody",
+        ),
+        pytest.param(
+            AnthropicContentBlock,
+            set().union(*(get_type_hints(t) for t in _SDK_BLOCK_TYPES)),
+            id="ContentBlock",
+        ),
+    ],
+)
+def test_sdk_compat(local_type: type, sdk_keys: set[str]):
+    """Verify every field in our local models maps to a field in the anthropic SDK type."""
+    for key in get_type_hints(local_type):
+        assert key in sdk_keys, f"{local_type.__name__}.{key} not in SDK type"
