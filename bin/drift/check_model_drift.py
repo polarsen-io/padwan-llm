@@ -13,9 +13,9 @@
 """Detect drift between provider model lists and the project's model Literals.
 
 OpenAI uses ``openai.types.ChatModel`` from the installed SDK as the deterministic
-source of truth, because it ships a static Literal. Gemini, Mistral, and xAI do
-not expose equivalent SDK Literals, so this script optionally calls their live
-model-list endpoints when API keys are present in the environment.
+source of truth, because it ships a static Literal. Gemini, Mistral, xAI, and
+Anthropic do not expose equivalent SDK Literals, so this script optionally calls
+their live model-list endpoints when API keys are present in the environment.
 
 Always exits 0. The workflow decides whether to open a PR based on ``git status``
 and the generated report.
@@ -33,6 +33,7 @@ import niquests
 from openai.types import ChatModel
 from piou import Cli, MaybePath, Option
 
+from padwan_llm.anthropic.client import ANTHROPIC_MODELS, ANTHROPIC_VERSION
 from padwan_llm.gemini.client import GEMINI_MODELS
 from padwan_llm.grok.client import GROK_MODELS
 from padwan_llm.mistral.client import (
@@ -96,6 +97,11 @@ _GROK_BLACKLIST = (
     "-gv2",
     "multi-agent",
 )
+
+# Anthropic snapshot ids carry an 8-digit date (claude-haiku-4-5-20251001);
+# the project tracks the undated aliases.
+_ANTHROPIC_DATE_SUFFIX = re.compile(r"-\d{8}$")
+_ANTHROPIC_OLD_PREFIXES = ("claude-2", "claude-3-", "claude-instant")
 
 
 @dataclass
@@ -228,6 +234,12 @@ def _is_grok_public_model(model_id: str) -> bool:
     return not any(b in model_id for b in _GROK_BLACKLIST)
 
 
+def _is_anthropic_public_model(model_id: str) -> bool:
+    if not model_id.startswith("claude-"):
+        return False
+    return not model_id.startswith(_ANTHROPIC_OLD_PREFIXES)
+
+
 def _openai_sdk_aliases() -> set[str]:
     """Return stable aliases from the SDK's ChatModel after capability filtering."""
     keep: set[str] = set()
@@ -356,6 +368,41 @@ def _grok_live_models() -> RemoteModels:
         for model_id in candidates:
             if model_id is not None and _is_grok_public_model(model_id):
                 keep.add(model_id)
+    return RemoteModels(keep)
+
+
+def _anthropic_live_models() -> RemoteModels:
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return RemoteModels(set(), skipped="ANTHROPIC_API_KEY is not configured")
+
+    keep: set[str] = set()
+    after_id: str | None = None
+    try:
+        while True:
+            params = {"limit": "100"}
+            if after_id:
+                params["after_id"] = after_id
+            data = _json_get(
+                "https://api.anthropic.com/v1/models",
+                headers={"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION},
+                params=params,
+            )
+            for item in _items(data, "data"):
+                if not isinstance(item, dict):
+                    continue
+                model_id = _string(item.get("id"))
+                if model_id is None:
+                    continue
+                alias = _ANTHROPIC_DATE_SUFFIX.sub("", model_id)
+                if _is_anthropic_public_model(alias):
+                    keep.add(alias)
+            has_more = bool(data.get("has_more")) if isinstance(data, dict) else False
+            after_id = _string(data.get("last_id")) if isinstance(data, dict) else None
+            if not has_more or after_id is None:
+                break
+    except FetchError as e:
+        return RemoteModels(set(), error=str(e))
     return RemoteModels(keep)
 
 
@@ -629,6 +676,20 @@ def check(
             notes=(
                 "Beta, experimental, multi-agent, and dated/versioned language "
                 "model names are filtered.",
+            ),
+        ),
+        _live_check(
+            "Anthropic",
+            "GET https://api.anthropic.com/v1/models",
+            "padwan_llm/anthropic/client.py::AnthropicModel",
+            "https://platform.claude.com/docs/en/about-claude/models/overview",
+            _anthropic_live_models(),
+            ANTHROPIC_MODELS,
+            notes=(
+                "Dated snapshot ids are normalized to their alias "
+                "(-YYYYMMDD stripped); claude-2/claude-3-era families are "
+                "filtered. Gated models (e.g. claude-mythos-5) only appear "
+                "for enrolled accounts.",
             ),
         ),
     ]

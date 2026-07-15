@@ -14,6 +14,12 @@ from .conversation import (
     ToolResultMessage,
 )
 from .errors import LLMError, Provider
+from .anthropic import (
+    ANTHROPIC_MODELS,
+    AnthropicClient,
+    AnthropicModel,
+    is_anthropic_model,
+)
 from .gemini import GEMINI_MODELS, GeminiClient, GeminiModel, is_gemini_model
 from .grok import GROK_MODELS, GrokClient, GrokModel, is_grok_model
 from .mistral import MISTRAL_MODELS, MistralClient, MistralModel, is_mistral_model
@@ -35,6 +41,8 @@ from .openai import (
 
 __all__ = (
     "AgentSession",
+    "AnthropicClient",
+    "AnthropicModel",
     "AssistantToolMessage",
     "ChatMessage",
     "ChatResponse",
@@ -71,11 +79,13 @@ __all__ = (
     "ToolDefinition",
     "ToolResultMessage",
     "UsageToken",
+    "ANTHROPIC_MODELS",
     "GEMINI_MODELS",
     "GROK_MODELS",
     "MISTRAL_MODELS",
     "OPENAI_MODELS",
     "OPENAI_CHAT_MODELS",
+    "is_anthropic_model",
     "is_gemini_model",
     "is_grok_model",
     "is_mistral_model",
