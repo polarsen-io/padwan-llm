@@ -19,6 +19,7 @@ nav = [
     { "Gemini" = "clients/gemini.md" },
     { "Mistral" = "clients/mistral.md" },
     { "Grok" = "clients/grok.md" },
+    { "Anthropic" = "clients/anthropic.md" },
   ] },
   { "MCP" = "mcp.md" },
   { "Agents" = "agents.md" },

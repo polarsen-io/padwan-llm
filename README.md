@@ -4,7 +4,7 @@
 
 <h1 align="center">Padwan LLM</h1>
 
-Lightweight, unified async client for OpenAI, Gemini, Mistral, Grok, and any OpenAI-compatible API.
+Lightweight, unified async client for OpenAI, Gemini, Mistral, Grok, Anthropic, and any OpenAI-compatible API.
 Single runtime dependency ([niquests](https://github.com/jawah/niquests)), automatic HTTP/2 and HTTP/3 negotiation.
 
 For the full interactive CLI/TUI, use the separate [`padwan-cli`](https://github.com/polarsen-io/padwan-cli) package.
@@ -131,7 +131,7 @@ uvx padwan-llm "Hello!" -m gpt-4o-mini
 
 ## Supported Models
 
-Auto-detected providers: **OpenAI**, **Gemini**, **Mistral**, **Grok**.
+Auto-detected providers: **OpenAI**, **Gemini**, **Mistral**, **Grok**, **Anthropic** (`claude-*`).
 
 Any OpenAI-compatible API (Groq, Together AI, Ollama, vLLM, ...) is supported via `OpenAIClient` with a custom `base_url`.
 
@@ -159,4 +159,5 @@ OPENAI_API_KEY=...
 GEMINI_API_KEY=...
 MISTRAL_API_KEY=...
 GROK_API_KEY=...
+ANTHROPIC_API_KEY=...
 ```

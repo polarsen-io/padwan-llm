@@ -39,7 +39,7 @@ async with client:
 
 ### Supported Models
 
-The provider is auto-detected from the model name: **OpenAI**, **Gemini**, **Mistral**, **Grok**.
+The provider is auto-detected from the model name: **OpenAI**, **Gemini**, **Mistral**, **Grok**, **Anthropic** (`claude-*`).
 
 For other providers, use `OpenAIClient` directly:
 
@@ -66,6 +66,7 @@ Each provider looks for its API key in environment variables:
 | Gemini   | `GEMINI_API_KEY`    |
 | Mistral  | `MISTRAL_API_KEY`   |
 | Grok     | `GROK_API_KEY`      |
+| Anthropic | `ANTHROPIC_API_KEY` |
 
 ```python
 # No need to pass api_key if environment variable is set
