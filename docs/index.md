@@ -1,6 +1,6 @@
 # Padwan LLM
 
-Unified client for OpenAI, Gemini, Mistral, and Grok APIs. Supports also OpenAI-compatible endpoints.
+Unified client for OpenAI, Gemini, Mistral, Grok, and Anthropic APIs. Supports also OpenAI-compatible endpoints.
 
 ## Why
 
@@ -8,7 +8,7 @@ Most LLM client libraries pull in heavy dependencies (pydantic, httpx) and lock 
 
 - **Single runtime dependency** — only [niquests](https://github.com/jawah/niquests), no pydantic, no httpx. Zero overhead beyond the HTTP layer.
 - **TypedDict-only** — all request/response types are plain `TypedDict`s, no validation framework required. No runtime cost, full editor support.
-- **Multi-provider, extensible** — supports the major providers (OpenAI, Gemini, Mistral, Grok) with a shared base class that makes adding new ones straightforward.
+- **Multi-provider, extensible** — supports the major providers (OpenAI, Gemini, Mistral, Grok, Anthropic) with a shared base class that makes adding new ones straightforward.
 
 ## Features
 
@@ -20,7 +20,7 @@ Most LLM client libraries pull in heavy dependencies (pydantic, httpx) and lock 
 - **Conversation management** - Built-in conversation history handling
 - **Agentic loop** - `AgentSession` drives multi-turn conversations with tool dispatch, parallel execution, approval hooks, and snapshot persistence
 - **MCP support** - Streamable HTTP and stdio transports for [Model Context Protocol](https://modelcontextprotocol.io/) tool servers
-- **Gemini thinking** - Stream thought tokens separately via an `on_thought` callback
+- **Thinking models** - Stream Gemini and Claude thought tokens separately via an `on_thought` callback
 
 ## Supported Providers
 
@@ -30,6 +30,7 @@ Most LLM client libraries pull in heavy dependencies (pydantic, httpx) and lock 
 | Gemini   | ✅   | ✅        | ✅    | ❌            | ❌         |
 | Mistral  | ✅   | ✅        | ❌    | ✅            | ✅         |
 | Grok     | ✅   | ✅        | ✅    | ❌            | ❌         |
+| Anthropic | ✅  | ✅        | ❌    | ❌            | ❌         |
 | [OpenAI-Compatible](clients/openai-compatible.md) | ✅ | ✅ | ➕ | ➕ | ➕ |
 
 ## Quick Example
