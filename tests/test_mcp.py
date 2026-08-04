@@ -6,7 +6,7 @@ from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from padwan_llm.mcp import (
     McpStreamable,
@@ -19,8 +19,8 @@ from padwan_llm.mcp import (
 )
 
 
-def _make_server() -> FastMCP:
-    server = FastMCP("test")
+def _make_server() -> MCPServer:
+    server = MCPServer("test")
 
     @server.tool()
     def get_weather(city: str) -> str:
@@ -42,7 +42,7 @@ def _make_server() -> FastMCP:
 
 @pytest.fixture
 def mcp_wire_tools() -> list[dict]:
-    """Wire-format tool dicts as returned by a real mcp FastMCP server."""
+    """Wire-format tool dicts as returned by a real mcp MCPServer server."""
     server = _make_server()
     tools = asyncio.run(server.list_tools())
     return [t.model_dump(by_alias=True, exclude_none=True) for t in tools]
@@ -949,9 +949,9 @@ class TestMcpStreamable:
 
 _STDIO_SERVER_SCRIPT = """\
 import asyncio
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
-server = FastMCP("test-stdio")
+server = MCPServer("test-stdio")
 
 @server.tool()
 def greet(name: str) -> str:
@@ -979,14 +979,14 @@ if __name__ == "__main__":
 # more than ~64KB to stderr before responding would block forever.
 _STDIO_NOISY_SERVER_SCRIPT = """\
 import sys
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 # Write enough bytes to overflow the default 64KB stderr pipe buffer
 # before the MCP initialization handshake runs.
 sys.stderr.write("x" * 200_000 + "\\n")
 sys.stderr.flush()
 
-server = FastMCP("noisy-stdio")
+server = MCPServer("noisy-stdio")
 
 @server.tool()
 def ping() -> str:
