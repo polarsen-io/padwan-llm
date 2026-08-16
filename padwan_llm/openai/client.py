@@ -5,7 +5,7 @@ import typing
 from dataclasses import field
 from functools import partial
 import os
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from http import HTTPStatus
 from typing import TYPE_CHECKING, ClassVar, Literal, cast, get_args
 
@@ -165,8 +165,16 @@ def _check_resp_status(resp: niquests.Response) -> niquests.Response:
         raise LLMError("openai", f"{resp.status_code} {msg}", body=data) from e
 
 
-def _check_resp(resp: niquests.Response) -> typing.Any:
-    """Check OpenAI-compatible HTTP response and return the parsed JSON body."""
+def _check_resp[T](
+    resp: niquests.Response, *, decoder: Callable[[bytes], T] | None = None
+) -> T:
+    """Check OpenAI-compatible HTTP response and return the parsed JSON body,
+    deserialized through `decoder` when provided (e.g. msgspec for typed validation)."""
+    if decoder is not None:
+        body = (_check_resp_status(resp)).content
+        if not body:
+            raise LLMError("openai", "Empty response body")
+        return decoder(body)
     return (_check_resp_status(resp)).json()
 
 

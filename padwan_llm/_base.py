@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 import niquests
+from niquests.typing import JSONEncoderType
 from urllib3.util.retry import Retry
 
 from ._deprecation import warn_if_deprecated
@@ -70,6 +71,9 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
     """Callback invoked with each chunk of model "thinking" / reasoning text.
     Clients that don't support thinking yet simply never
     invoke it."""
+    json_encoder: JSONEncoderType | None = field(default=None, repr=False)
+    """Serializer applied to ``json=`` request payloads (e.g. a msgspec/pydantic
+    encoder returning str or bytes). None keeps niquests' default encoding."""
 
     _api_key: str = field(init=False, repr=False)
     base_url: str = field(init=False, default="", repr=False)
@@ -125,7 +129,10 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
                 "using the same client in nested `async with` blocks is not supported"
             )
         self._session = niquests.AsyncSession(
-            timeout=self.timeout, retries=self._retry, base_url=self.base_url
+            timeout=self.timeout,
+            retries=self._retry,
+            base_url=self.base_url,
+            json_encoder=self.json_encoder,
         )
         self._set_auth_headers(self._session)
         return self

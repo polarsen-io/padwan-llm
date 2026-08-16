@@ -119,8 +119,16 @@ def _check_resp_status(resp: niquests.Response) -> niquests.Response:
         _raise_error_from_resp(data, resp, e)
 
 
-def _check_resp(resp: niquests.Response) -> typing.Any:
-    """Check Gemini HTTP response and return the parsed JSON body."""
+def _check_resp[T](
+    resp: niquests.Response, *, decoder: Callable[[bytes], T] | None = None
+) -> T:
+    """Check Gemini HTTP response and return the parsed JSON body,
+    deserialized through `decoder` when provided (e.g. msgspec for typed validation)."""
+    if decoder is not None:
+        body = (_check_resp_status(resp)).content
+        if not body:
+            raise LLMError("gemini", "Empty response body")
+        return decoder(body)
     return (_check_resp_status(resp)).json()
 
 
