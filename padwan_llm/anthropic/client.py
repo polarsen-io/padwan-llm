@@ -11,13 +11,6 @@ from typing import ClassVar, Literal, cast, get_args
 import niquests
 from urllib3.util.retry import Retry
 
-from .models import (
-    AnthropicMessage,
-    MessagesBody,
-    MessagesResponse,
-    StopReason,
-)
-from .tools import AnthropicToolMixin
 from .._base import ChatStream, LLMClientBase
 from ..conversation import AssistantToolMessage, ChatMessage, ToolResultMessage
 from ..errors import LLMError, Provider, TooManyRequestsError
@@ -29,6 +22,13 @@ from ..models import (
     ToolDefinition,
     UsageToken,
 )
+from .models import (
+    AnthropicMessage,
+    MessagesBody,
+    MessagesResponse,
+    StopReason,
+)
+from .tools import AnthropicToolMixin
 
 __all__ = (
     "ANTHROPIC_ENDPOINT",

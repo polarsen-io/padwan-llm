@@ -1,22 +1,20 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import typing
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import field
 from functools import partial
-import os
-from collections.abc import AsyncIterator, Callable, Sequence
 from http import HTTPStatus
 from typing import TYPE_CHECKING, ClassVar, Literal, cast, get_args
 
 import niquests
 from urllib3.util.retry import Retry
 
-from .batch import BatchJob, BatchRequest, BatchResult
-from .tools import OpenAIToolMixin
-from .types import Batch, ListBatchesResponse, OpenAIFile
 from .._base import ChatStream, LLMClientBase, LLMError, Provider
-from .._json import dumps as _json_dumps, loads as _json_loads
+from .._json import dumps as _json_dumps
+from .._json import loads as _json_loads
 from ..conversation import ChatMessage
 from ..errors import QuotaExceededError, TooManyRequestsError
 from ..models import (
@@ -27,6 +25,9 @@ from ..models import (
     ToolDefinition,
     UsageToken,
 )
+from .batch import BatchJob, BatchRequest, BatchResult
+from .tools import OpenAIToolMixin
+from .types import Batch, ListBatchesResponse, OpenAIFile
 
 # Normalize provider-specific finish reasons to our FinishReason values.
 # https://platform.openai.com/docs/api-reference/chat/object#chat/object-choices

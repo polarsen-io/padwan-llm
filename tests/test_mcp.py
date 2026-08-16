@@ -9,8 +9,8 @@ import pytest
 from mcp.server.fastmcp import FastMCP
 
 from padwan_llm.mcp import (
-    McpStreamable,
     McpStdio,
+    McpStreamable,
     McpTool,
     _build_tools,
     _normalize_call_result,

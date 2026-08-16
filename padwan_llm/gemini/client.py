@@ -1,18 +1,28 @@
 from __future__ import annotations
 
 import dataclasses
-import typing
-from dataclasses import field
-from functools import partial
 import math
 import os
+import typing
 from collections.abc import AsyncIterator, Callable, Sequence
+from dataclasses import field
+from functools import partial
 from http import HTTPStatus
 from typing import TYPE_CHECKING, ClassVar, Literal, cast, get_args
 
 import niquests
 from urllib3.util.retry import Retry
 
+from .._base import ChatStream, LLMClientBase, Provider
+from ..conversation import AssistantToolMessage, ChatMessage, ToolResultMessage
+from ..errors import LLMError, QuotaExceededError, TooManyRequestsError
+from ..models import (
+    ChatResponse,
+    FinishReason,
+    ToolCall,
+    ToolDefinition,
+    UsageToken,
+)
 from .batch import BatchJob, BatchRequest
 from .models import (
     BatchJobResponse,
@@ -23,16 +33,6 @@ from .models import (
     ThinkingConfig,
 )
 from .tools import GeminiToolMixin
-from .._base import ChatStream, LLMClientBase, Provider
-from ..conversation import AssistantToolMessage, ChatMessage, ToolResultMessage
-from ..errors import QuotaExceededError, TooManyRequestsError, LLMError
-from ..models import (
-    ChatResponse,
-    FinishReason,
-    ToolCall,
-    ToolDefinition,
-    UsageToken,
-)
 
 # Gemini uses SCREAMING_CASE finish reasons; map to our normalized values.
 # https://ai.google.dev/api/generate-content#FinishReason

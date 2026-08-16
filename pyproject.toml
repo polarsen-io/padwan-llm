@@ -54,7 +54,7 @@ bump = [
 ]
 
 [tool.ruff.lint]
-extend-select = ["G"]
+extend-select = ["G", "I"]
 
 [tool.pyright]
 # Without include, pyright walks SDK source via imports and OOMs.

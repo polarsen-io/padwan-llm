@@ -16,7 +16,6 @@ from padwan_llm.models import (
 from padwan_llm.openai.client import OpenAIChatStream, OpenAIClient
 from padwan_llm.openai.tools import OpenAIToolMixin
 
-
 SAMPLE_TOOL: ToolDefinition = {
     "name": "get_weather",
     "description": "Get the weather for a city",

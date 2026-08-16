@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, Self
 
 from ._base import LLMClientBase
-from ._json import dumps as _json_dumps, loads as _json_loads
+from ._json import dumps as _json_dumps
+from ._json import loads as _json_loads
 from .client import LLMClient
 from .conversation import (
     AssistantToolMessage,

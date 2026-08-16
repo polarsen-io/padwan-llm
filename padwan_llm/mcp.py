@@ -5,9 +5,10 @@ import inspect
 import os.path
 import re
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from collections.abc import Awaitable
+from http import HTTPStatus
+from importlib.metadata import version as _pkg_version
 from typing import (
     Any,
     Literal,
@@ -18,15 +19,13 @@ from typing import (
     cast,
     runtime_checkable,
 )
-from http import HTTPStatus
 from urllib.parse import urlparse
-
-from importlib.metadata import version as _pkg_version
 
 import niquests
 
 from ._base import to_sse_url as _to_sse_url
-from ._json import dumps as _json_dumps, loads as _json_loads
+from ._json import dumps as _json_dumps
+from ._json import loads as _json_loads
 from .logs import log
 from .models import ToolDefinition
 

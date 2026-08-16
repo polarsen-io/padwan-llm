@@ -1,13 +1,19 @@
-import pytest
 from typing import cast, get_type_hints
 
+import pytest
 from google.protobuf.descriptor import Descriptor
 from xai_sdk.proto.v6.batch_pb2 import (
     Batch,
     CreateBatchRequest,
-    ListBatchesResponse as SdkListBatchesResponse,
-    ListBatchResultsResponse as SdkListBatchResultsResponse,
+)
+from xai_sdk.proto.v6.batch_pb2 import (
     BatchState as SdkBatchState,
+)
+from xai_sdk.proto.v6.batch_pb2 import (
+    ListBatchesResponse as SdkListBatchesResponse,
+)
+from xai_sdk.proto.v6.batch_pb2 import (
+    ListBatchResultsResponse as SdkListBatchResultsResponse,
 )
 from xai_sdk.proto.v6.chat_pb2 import GetCompletionsRequest
 

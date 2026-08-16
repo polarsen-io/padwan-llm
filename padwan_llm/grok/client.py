@@ -2,6 +2,8 @@ import dataclasses
 import os
 from typing import ClassVar, Literal, get_args
 
+from .._base import LLMError, Provider
+from ..openai.client import _check_resp, _check_resp_status, _OpenAIBase
 from .batch import GrokBatchJob, GrokBatchRequest, GrokBatchResult
 from .types import (
     AddBatchRequestsBody,
@@ -10,11 +12,9 @@ from .types import (
     BatchResponse,
     ChatGetCompletion,
     CreateBatchBody,
-    ListBatchResultsResponse,
     ListBatchesResponse,
+    ListBatchResultsResponse,
 )
-from .._base import LLMError, Provider
-from ..openai.client import _OpenAIBase, _check_resp, _check_resp_status
 
 GrokModel = Literal[
     "grok-3",
