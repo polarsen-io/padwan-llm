@@ -37,7 +37,7 @@ dev = [
 ]
 llms = [
     "google-genai>=2.1.0",
-    "mcp>=1.27.1",
+    "mcp>=2.0.0",
     "openai>=2.36.0",
     "xai-sdk>=1.12.2",
 ]
