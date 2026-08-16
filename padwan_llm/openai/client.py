@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import typing
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import field
 from functools import partial
-import os
-from collections.abc import AsyncIterator, Sequence
 from http import HTTPStatus
 from typing import TYPE_CHECKING, ClassVar, Literal, cast, get_args
 
 import niquests
 from urllib3.util.retry import Retry
 
-from .batch import BatchJob, BatchRequest, BatchResult
-from .tools import OpenAIToolMixin
-from .types import Batch, ListBatchesResponse, OpenAIFile
 from .._base import ChatStream, LLMClientBase, LLMError, Provider
 from .._json import dumps as _json_dumps, loads as _json_loads
 from ..conversation import ChatMessage
@@ -27,6 +24,9 @@ from ..models import (
     ToolDefinition,
     UsageToken,
 )
+from .batch import BatchJob, BatchRequest, BatchResult
+from .tools import OpenAIToolMixin
+from .types import Batch, ListBatchesResponse, OpenAIFile
 
 # Normalize provider-specific finish reasons to our FinishReason values.
 # https://platform.openai.com/docs/api-reference/chat/object#chat/object-choices
@@ -165,9 +165,17 @@ def _check_resp_status(resp: niquests.Response) -> niquests.Response:
         raise LLMError("openai", f"{resp.status_code} {msg}", body=data) from e
 
 
-def _check_resp(resp: niquests.Response) -> typing.Any:
-    """Check OpenAI-compatible HTTP response and return the parsed JSON body."""
-    return (_check_resp_status(resp)).json()
+def _check_resp[T](
+    resp: niquests.Response, *, decoder: Callable[[bytes], T] | None = None
+) -> T:
+    """Check OpenAI-compatible HTTP response and return the parsed JSON body,
+    deserialized through `decoder` when provided (e.g. msgspec for typed validation)."""
+    checked = _check_resp_status(resp)
+    if decoder is None:
+        return checked.json()
+    if not (body := checked.content):
+        raise LLMError("openai", "Empty response body")
+    return decoder(body)
 
 
 _OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-", "codex-")

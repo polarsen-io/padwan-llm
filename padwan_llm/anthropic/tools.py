@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from .models import AnthropicContentBlock, AnthropicMessage, AnthropicTool
 from .._json import dumps as _json_dumps, loads as _json_loads
 from ..conversation import AssistantToolMessage, ToolResultMessage
 from ..models import ToolCall, ToolCallFunction, ToolDefinition
+from .models import AnthropicContentBlock, AnthropicMessage, AnthropicTool
 
 __all__ = ("AnthropicToolMixin",)
 

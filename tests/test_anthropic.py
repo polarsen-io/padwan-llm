@@ -4,7 +4,6 @@ from typing import get_type_hints
 from unittest.mock import AsyncMock
 
 import pytest
-
 from anthropic.types import (
     ImageBlockParam,
     Message as SdkMessage,

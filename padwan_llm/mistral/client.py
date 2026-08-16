@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, get_args
 
 from .._base import LLMError, Provider
-from ..openai.client import _OpenAIBase, _check_resp
+from ..openai.client import _check_resp, _OpenAIBase
 from ._deprecations import DEPRECATED
 
 if TYPE_CHECKING:

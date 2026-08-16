@@ -15,6 +15,12 @@ from google.genai.types import (
 from padwan_llm.conversation import Message
 from padwan_llm.errors import LLMError, QuotaExceededError, TooManyRequestsError
 from padwan_llm.gemini.batch import BatchJob, BatchResult
+from padwan_llm.gemini.client import (
+    GeminiChatStream,
+    GeminiClient,
+    _check_resp,
+    _parse_retry_delay,
+)
 from padwan_llm.gemini.models import (
     BatchState,
     Content,
@@ -22,12 +28,6 @@ from padwan_llm.gemini.models import (
     InlinedResponse,
     Part,
     ThinkingConfig,
-)
-from padwan_llm.gemini.client import (
-    GeminiClient,
-    GeminiChatStream,
-    _check_resp,
-    _parse_retry_delay,
 )
 
 

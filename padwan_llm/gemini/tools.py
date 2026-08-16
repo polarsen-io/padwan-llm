@@ -1,6 +1,9 @@
 from collections.abc import Sequence
 from typing import Any
 
+from .._json import dumps as _json_dumps, loads as _json_loads
+from ..conversation import AssistantToolMessage, ToolResultMessage
+from ..models import ToolCall, ToolCallFunction, ToolDefinition
 from .models import (
     Content,
     FunctionCallPart,
@@ -9,9 +12,6 @@ from .models import (
     GeminiTool,
     Part,
 )
-from .._json import dumps as _json_dumps, loads as _json_loads
-from ..conversation import AssistantToolMessage, ToolResultMessage
-from ..models import ToolCall, ToolCallFunction, ToolDefinition
 
 __all__ = ("GeminiToolMixin",)
 

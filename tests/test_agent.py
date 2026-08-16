@@ -22,7 +22,6 @@ from padwan_llm import (
 )
 from padwan_llm.agent import ToolErrorHandler, _extract_text
 
-
 # Fakes
 
 

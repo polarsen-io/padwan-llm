@@ -41,7 +41,7 @@ from padwan_llm.mistral.client import (
     MistralAudioModel,
     MistralEmbeddingModel,
 )
-from padwan_llm.openai.client import OPENAI_MODELS, _OPENAI_PREFIXES
+from padwan_llm.openai.client import _OPENAI_PREFIXES, OPENAI_MODELS
 
 # Trailing date or dated-preview stamps used by upstream to expose pinned model
 # versions. The project prefers stable aliases such as "*-latest" where possible.

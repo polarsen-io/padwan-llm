@@ -7,8 +7,8 @@ import pytest
 from padwan_llm.errors import LLMError, QuotaExceededError, TooManyRequestsError
 from padwan_llm.openai.batch import BatchJob, BatchResult
 from padwan_llm.openai.client import (
-    OpenAIClient,
     OpenAIChatStream,
+    OpenAIClient,
     _check_resp,
     _extract_text_payload,
     _extract_thought_payload,

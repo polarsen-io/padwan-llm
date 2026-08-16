@@ -11,13 +11,6 @@ from typing import ClassVar, Literal, cast, get_args
 import niquests
 from urllib3.util.retry import Retry
 
-from .models import (
-    AnthropicMessage,
-    MessagesBody,
-    MessagesResponse,
-    StopReason,
-)
-from .tools import AnthropicToolMixin
 from .._base import ChatStream, LLMClientBase
 from ..conversation import AssistantToolMessage, ChatMessage, ToolResultMessage
 from ..errors import LLMError, Provider, TooManyRequestsError
@@ -29,6 +22,13 @@ from ..models import (
     ToolDefinition,
     UsageToken,
 )
+from .models import (
+    AnthropicMessage,
+    MessagesBody,
+    MessagesResponse,
+    StopReason,
+)
+from .tools import AnthropicToolMixin
 
 __all__ = (
     "ANTHROPIC_ENDPOINT",
@@ -92,9 +92,17 @@ def _check_resp_status(resp: niquests.Response) -> niquests.Response:
         raise LLMError("anthropic", f"{resp.status_code} {message}", body=data) from e
 
 
-def _check_resp(resp: niquests.Response) -> typing.Any:
-    """Check Anthropic HTTP response and return the parsed JSON body."""
-    return (_check_resp_status(resp)).json()
+def _check_resp[T](
+    resp: niquests.Response, *, decoder: Callable[[bytes], T] | None = None
+) -> T:
+    """Check Anthropic HTTP response and return the parsed JSON body,
+    deserialized through `decoder` when provided (e.g. msgspec for typed validation)."""
+    checked = _check_resp_status(resp)
+    if decoder is None:
+        return checked.json()
+    if not (body := checked.content):
+        raise LLMError("anthropic", "Empty response body")
+    return decoder(body)
 
 
 def _usage_from_anthropic(usage: dict[str, typing.Any] | None) -> UsageToken:

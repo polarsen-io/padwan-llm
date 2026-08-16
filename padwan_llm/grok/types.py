@@ -1,6 +1,5 @@
 from typing import Any, NotRequired, TypedDict
 
-
 # POST /v1/batches
 
 

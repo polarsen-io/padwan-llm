@@ -1,18 +1,28 @@
 from __future__ import annotations
 
 import dataclasses
-import typing
-from dataclasses import field
-from functools import partial
 import math
 import os
+import typing
 from collections.abc import AsyncIterator, Callable, Sequence
+from dataclasses import field
+from functools import partial
 from http import HTTPStatus
 from typing import TYPE_CHECKING, ClassVar, Literal, cast, get_args
 
 import niquests
 from urllib3.util.retry import Retry
 
+from .._base import ChatStream, LLMClientBase, Provider
+from ..conversation import AssistantToolMessage, ChatMessage, ToolResultMessage
+from ..errors import LLMError, QuotaExceededError, TooManyRequestsError
+from ..models import (
+    ChatResponse,
+    FinishReason,
+    ToolCall,
+    ToolDefinition,
+    UsageToken,
+)
 from .batch import BatchJob, BatchRequest
 from .models import (
     BatchJobResponse,
@@ -23,16 +33,6 @@ from .models import (
     ThinkingConfig,
 )
 from .tools import GeminiToolMixin
-from .._base import ChatStream, LLMClientBase, Provider
-from ..conversation import AssistantToolMessage, ChatMessage, ToolResultMessage
-from ..errors import QuotaExceededError, TooManyRequestsError, LLMError
-from ..models import (
-    ChatResponse,
-    FinishReason,
-    ToolCall,
-    ToolDefinition,
-    UsageToken,
-)
 
 # Gemini uses SCREAMING_CASE finish reasons; map to our normalized values.
 # https://ai.google.dev/api/generate-content#FinishReason
@@ -119,9 +119,17 @@ def _check_resp_status(resp: niquests.Response) -> niquests.Response:
         _raise_error_from_resp(data, resp, e)
 
 
-def _check_resp(resp: niquests.Response) -> typing.Any:
-    """Check Gemini HTTP response and return the parsed JSON body."""
-    return (_check_resp_status(resp)).json()
+def _check_resp[T](
+    resp: niquests.Response, *, decoder: Callable[[bytes], T] | None = None
+) -> T:
+    """Check Gemini HTTP response and return the parsed JSON body,
+    deserialized through `decoder` when provided (e.g. msgspec for typed validation)."""
+    checked = _check_resp_status(resp)
+    if decoder is None:
+        return checked.json()
+    if not (body := checked.content):
+        raise LLMError("gemini", "Empty response body")
+    return decoder(body)
 
 
 def is_gemini_model(model_name: str | None) -> bool:
