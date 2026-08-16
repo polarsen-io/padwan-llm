@@ -13,8 +13,7 @@ import niquests
 from urllib3.util.retry import Retry
 
 from .._base import ChatStream, LLMClientBase, LLMError, Provider
-from .._json import dumps as _json_dumps
-from .._json import loads as _json_loads
+from .._json import dumps as _json_dumps, loads as _json_loads
 from ..conversation import ChatMessage
 from ..errors import QuotaExceededError, TooManyRequestsError
 from ..models import (

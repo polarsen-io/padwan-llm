@@ -56,6 +56,9 @@ bump = [
 [tool.ruff.lint]
 extend-select = ["G", "I"]
 
+[tool.ruff.lint.isort]
+combine-as-imports = true
+
 [tool.pyright]
 # Without include, pyright walks SDK source via imports and OOMs.
 include = ["padwan_llm", "tests"]

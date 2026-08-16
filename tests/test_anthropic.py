@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from anthropic.types import (
     ImageBlockParam,
+    Message as SdkMessage,
     MessageParam,
     TextBlockParam,
     ThinkingBlockParam,
@@ -13,9 +14,6 @@ from anthropic.types import (
     ToolResultBlockParam,
     ToolUseBlockParam,
     Usage,
-)
-from anthropic.types import (
-    Message as SdkMessage,
 )
 from anthropic.types.message_create_params import MessageCreateParamsStreaming
 

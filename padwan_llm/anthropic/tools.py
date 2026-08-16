@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from .._json import dumps as _json_dumps
-from .._json import loads as _json_loads
+from .._json import dumps as _json_dumps, loads as _json_loads
 from ..conversation import AssistantToolMessage, ToolResultMessage
 from ..models import ToolCall, ToolCallFunction, ToolDefinition
 from .models import AnthropicContentBlock, AnthropicMessage, AnthropicTool

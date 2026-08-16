@@ -24,8 +24,7 @@ from urllib.parse import urlparse
 import niquests
 
 from ._base import to_sse_url as _to_sse_url
-from ._json import dumps as _json_dumps
-from ._json import loads as _json_loads
+from ._json import dumps as _json_dumps, loads as _json_loads
 from .logs import log
 from .models import ToolDefinition
 
