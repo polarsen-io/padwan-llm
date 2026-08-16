@@ -124,12 +124,12 @@ def _check_resp[T](
 ) -> T:
     """Check Gemini HTTP response and return the parsed JSON body,
     deserialized through `decoder` when provided (e.g. msgspec for typed validation)."""
-    if decoder is not None:
-        body = (_check_resp_status(resp)).content
-        if not body:
-            raise LLMError("gemini", "Empty response body")
-        return decoder(body)
-    return (_check_resp_status(resp)).json()
+    checked = _check_resp_status(resp)
+    if decoder is None:
+        return checked.json()
+    if not (body := checked.content):
+        raise LLMError("gemini", "Empty response body")
+    return decoder(body)
 
 
 def is_gemini_model(model_name: str | None) -> bool:

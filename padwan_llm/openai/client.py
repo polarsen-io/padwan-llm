@@ -170,12 +170,12 @@ def _check_resp[T](
 ) -> T:
     """Check OpenAI-compatible HTTP response and return the parsed JSON body,
     deserialized through `decoder` when provided (e.g. msgspec for typed validation)."""
-    if decoder is not None:
-        body = (_check_resp_status(resp)).content
-        if not body:
-            raise LLMError("openai", "Empty response body")
-        return decoder(body)
-    return (_check_resp_status(resp)).json()
+    checked = _check_resp_status(resp)
+    if decoder is None:
+        return checked.json()
+    if not (body := checked.content):
+        raise LLMError("openai", "Empty response body")
+    return decoder(body)
 
 
 _OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-", "codex-")
