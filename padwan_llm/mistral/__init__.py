@@ -7,6 +7,7 @@ from .client import (
     MistralModel,
     is_mistral_model,
 )
+from .vision import supports_vision
 
 __all__ = (
     "MistralClient",
@@ -16,4 +17,5 @@ __all__ = (
     "MISTRAL_MODELS",
     "MISTRAL_ENDPOINT",
     "is_mistral_model",
+    "supports_vision",
 )

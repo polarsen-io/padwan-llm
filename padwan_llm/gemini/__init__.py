@@ -6,6 +6,7 @@ from .client import (
     GeminiModel,
     is_gemini_model,
 )
+from .vision import supports_vision
 
 __all__ = (
     "GeminiClient",
@@ -17,4 +18,5 @@ __all__ = (
     "BatchJob",
     "BatchRequest",
     "BatchResult",
+    "supports_vision",
 )

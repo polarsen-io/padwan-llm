@@ -17,6 +17,7 @@ from .realtime import (
     RealtimeServerEvent,
     RealtimeVoice,
 )
+from .vision import supports_vision
 
 __all__ = (
     "BatchJob",
@@ -36,4 +37,5 @@ __all__ = (
     "REALTIME_SAMPLE_RATE",
     "NO_TURN_DETECTION",
     "DEFAULT_REALTIME_MODEL",
+    "supports_vision",
 )
