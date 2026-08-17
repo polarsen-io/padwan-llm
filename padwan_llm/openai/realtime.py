@@ -4,7 +4,7 @@ import base64
 import enum
 import os
 from collections.abc import AsyncIterator, Mapping, Sequence
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Literal, get_args
 
@@ -105,6 +105,8 @@ class RealtimeClient:
         transcription_model: str | None = "whisper-1",
         output_modalities: Sequence[str] = ("audio",),
         sample_rate: int = REALTIME_SAMPLE_RATE,
+        session: niquests.AsyncSession | None = None,
+        session_kwargs: Mapping[str, Any] | None = None,
     ) -> AsyncIterator[RealtimeConnection]:
         """Open a configured realtime session and yield a :class:`RealtimeConnection`.
 
@@ -116,10 +118,19 @@ class RealtimeClient:
         :meth:`RealtimeConnection.commit_audio` + :meth:`RealtimeConnection.create_response`.
         *transcription_model* enables transcription of your own speech (set to
         ``None`` to disable). The session is configured before control returns and
-        closed automatically on exit.
+        closed automatically on exit. Pass *session* to reuse a caller-owned
+        ``AsyncSession`` (left open on exit), or *session_kwargs* to forward
+        constructor arguments (e.g. proxies) to the internally managed session;
+        the two are mutually exclusive.
         """
+        if session is not None and session_kwargs is not None:
+            raise ValueError("pass either session or session_kwargs, not both")
         headers = {"Authorization": f"Bearer {self._api_key}"}
-        async with niquests.AsyncSession() as session:
+        async with AsyncExitStack() as stack:
+            if session is None:
+                session = await stack.enter_async_context(
+                    niquests.AsyncSession(**(session_kwargs or {}))
+                )
             # timeout bounds only the upgrade handshake; the ws extension reads frames
             # with recv_extended(None), so idle gaps between turns never abort next_payload.
             resp = await session.get(

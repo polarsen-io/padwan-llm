@@ -1,5 +1,8 @@
 import base64
+from types import SimpleNamespace
+from typing import cast
 
+import niquests
 import pytest
 
 from padwan_llm._json import loads as _json_loads
@@ -28,6 +31,65 @@ class FakeExt:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class FakeSession:
+    """Stand-in for niquests.AsyncSession capturing the handshake request."""
+
+    def __init__(self, ext: FakeExt | None = None):
+        self._ext = ext
+        self.closed = False
+        self.get_kwargs: dict | None = None
+
+    async def get(self, url, **kwargs):
+        self.get_kwargs = {"url": url, **kwargs}
+        return SimpleNamespace(extension=self._ext, status_code=101)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        self.closed = True
+
+
+async def test_connect_with_caller_session_leaves_it_open() -> None:
+    ext = FakeExt()
+    fake = FakeSession(ext)
+    client = RealtimeClient(api_key="sk-test")
+    async with client.connect(session=cast("niquests.AsyncSession", fake)):
+        pass
+    assert ext.closed is True
+    assert fake.closed is False
+    assert fake.get_kwargs is not None
+    assert fake.get_kwargs["params"] == {"model": "gpt-realtime"}
+
+
+async def test_connect_forwards_session_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ext = FakeExt()
+    fake = FakeSession(ext)
+    captured: dict = {}
+
+    def factory(**kwargs):
+        captured.update(kwargs)
+        return fake
+
+    monkeypatch.setattr(niquests, "AsyncSession", factory)
+    client = RealtimeClient(api_key="sk-test")
+    async with client.connect(session_kwargs={"happy_eyeballs": True}):
+        pass
+    assert captured == {"happy_eyeballs": True}
+    assert fake.closed is True  # internally created sessions are closed on exit
+
+
+async def test_connect_rejects_session_and_session_kwargs() -> None:
+    client = RealtimeClient(api_key="sk-test")
+    with pytest.raises(ValueError, match="not both"):
+        async with client.connect(
+            session=cast("niquests.AsyncSession", FakeSession()), session_kwargs={}
+        ):
+            pass
 
 
 def test_missing_api_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
