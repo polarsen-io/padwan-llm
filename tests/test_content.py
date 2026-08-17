@@ -2,7 +2,13 @@ import base64
 
 import pytest
 
-from padwan_llm.content import image_part, text_file_part, text_part
+from padwan_llm.content import (
+    ContentImagePart,
+    content_parts,
+    image_part,
+    text_file_part,
+    text_part,
+)
 from padwan_llm.conversation import ConversationState
 from padwan_llm.gemini.client import _content_to_gemini_parts
 from padwan_llm.vision import supports_vision
@@ -42,6 +48,25 @@ def test_text_file_part(tmp_path):
         "type": "text",
         "text": "--- notes.md ---\n# Title\nbody",
     }
+
+
+def test_content_parts_inference(tmp_path):
+    img = tmp_path / "shot.png"
+    img.write_bytes(b"\x89PNG fake")
+    notes = tmp_path / "notes.md"
+    notes.write_text("body")
+    ready: ContentImagePart = {
+        "type": "image_url",
+        "image_url": {"url": "data:image/png;base64,AAAA"},
+    }
+
+    parts = content_parts("mentions shot.png", img, notes, ready)
+
+    assert parts[0] == {"type": "text", "text": "mentions shot.png"}
+    assert parts[1]["type"] == "image_url"
+    assert parts[1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert parts[2] == {"type": "text", "text": "--- notes.md ---\nbody"}
+    assert parts[3] is ready
 
 
 def test_add_user_message_accepts_content_parts():

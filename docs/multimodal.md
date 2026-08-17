@@ -4,6 +4,24 @@ User messages can carry a list of content parts (text and images) instead of a p
 
 ## Building parts
 
+`content_parts` infers the part type per item:
+
+```python
+from pathlib import Path
+
+from padwan_llm import content_parts
+
+parts = content_parts(
+    "What is in this screenshot?",  # str -> text part
+    Path("shot.png"),               # image extension -> base64 data: URL image part
+    Path("notes.md"),               # any other file -> inlined text file part
+)
+```
+
+Strings are always text — never treated as paths — so message text that mentions a filename is safe; wrap files in `Path` to have them read. Files are classified by extension: an image MIME type yields an image part, anything else is inlined as text.
+
+The explicit builders remain for full control:
+
 ```python
 from padwan_llm import image_part, text_file_part, text_part
 

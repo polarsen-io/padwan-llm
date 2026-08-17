@@ -8,6 +8,7 @@ __all__ = (
     "ContentPart",
     "ContentTextPart",
     "ImageUrl",
+    "content_parts",
     "image_part",
     "text_file_part",
     "text_part",
@@ -58,3 +59,26 @@ def text_file_part(path: str | Path, *, encoding: str = "utf-8") -> ContentTextP
     """Read a text file and wrap its contents in a labelled text content part."""
     path = Path(path)
     return {"type": "text", "text": f"--- {path.name} ---\n{path.read_text(encoding)}"}
+
+
+def content_parts(*items: str | Path | ContentPart) -> list[ContentPart]:
+    """Build content parts with type inference.
+
+    Plain strings become text parts — never treated as paths, so message text
+    that mentions a filename is safe. ``Path`` items are read from disk: an
+    image MIME type (by extension) yields an image part, anything else is
+    inlined as a labelled text file part. Ready-made part dicts pass through.
+    """
+    parts: list[ContentPart] = []
+    for item in items:
+        if isinstance(item, Path):
+            mime = mimetypes.guess_type(item.name)[0]
+            if mime and mime.startswith("image/"):
+                parts.append(image_part(item, mime=mime))
+            else:
+                parts.append(text_file_part(item))
+        elif isinstance(item, str):
+            parts.append(text_part(item))
+        else:
+            parts.append(item)
+    return parts
