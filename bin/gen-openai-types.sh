@@ -3,22 +3,15 @@
 #
 # Usage: ./bin/gen-openai-types.sh
 #
-# Requires: uv, gh
+# Requires: uv
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 OUTPUT_FILE="padwan_llm/openai/types.py"
-STATS_URL="https://github.com/openai/openai-python/blob/main/.stats.yml"
+SPEC_URL="https://raw.githubusercontent.com/openai/openai-openapi/main/openapi.yaml"
 
-# Fetch .stats.yml from GitHub
-echo "Fetching OpenAPI spec URL from: $STATS_URL"
-STATS_CONTENT=$(gh api repos/openai/openai-python/contents/.stats.yml --jq '.content' | base64 -d)
-SPEC_URL=$(echo "$STATS_CONTENT" | grep 'openapi_spec_url:' | cut -d' ' -f2-)
-
-# URL decode (replace %2F with /)
-SPEC_URL=$(echo "$SPEC_URL" | sed 's/%2F/\//g')
 echo "Spec URL: $SPEC_URL"
 
 # Download spec to temp file
@@ -51,25 +44,7 @@ uvx --from 'datamodel-code-generator[ruff]' datamodel-codegen \
 # Fix TypedDict inheritance issue: child cannot narrow type (int | None -> int)
 sed -i 's/top_logprobs: NotRequired\[int\]$/top_logprobs: NotRequired[int | None]/' "$OUTPUT_FILE"
 
-# Append Error/ErrorResponse types (not included by --openapi-scopes paths)
-ERRORS_SPEC=$(uvx yq -y '{
-  openapi: .openapi, info: .info, paths: {},
-  components: {schemas: {
-    Error: .components.schemas.Error,
-    ErrorResponse: .components.schemas.ErrorResponse
-  }}
-}' "$TEMP_SPEC")
-
-echo "$ERRORS_SPEC" | uvx --from 'datamodel-code-generator[ruff]' datamodel-codegen \
-    --input-file-type openapi \
-    --output-model-type typing.TypedDict \
-    --target-python-version 3.14 \
-    --use-standard-collections \
-    --use-union-operator \
-    --collapse-root-models \
-    --strip-default-none \
-    --no-use-closed-typed-dict \
-    --formatters ruff-format ruff-check \
-  | grep -v '^#\|^from typing' >> "$OUTPUT_FILE"
+# Absolutize the spec's site-relative doc links
+sed -i 's|](/docs/|](https://platform.openai.com/docs/|g' "$OUTPUT_FILE"
 
 echo "Done! Generated: $OUTPUT_FILE"
