@@ -118,12 +118,16 @@ class RealtimeClient:
         ``None`` to disable). The session is configured before control returns and
         closed automatically on exit.
         """
-        url = f"{self.base_url}?model={self.model}"
         headers = {"Authorization": f"Bearer {self._api_key}"}
         async with niquests.AsyncSession() as session:
-            # Bounds only the upgrade handshake; the ws extension reads frames with
-            # recv_extended(None), so idle gaps between turns never abort next_payload.
-            resp = await session.get(url, headers=headers, timeout=self.timeout)
+            # timeout bounds only the upgrade handshake; the ws extension reads frames
+            # with recv_extended(None), so idle gaps between turns never abort next_payload.
+            resp = await session.get(
+                self.base_url,
+                headers=headers,
+                params={"model": self.model},
+                timeout=self.timeout,
+            )
             ext = resp.extension
             if ext is None:
                 raise LLMError(
