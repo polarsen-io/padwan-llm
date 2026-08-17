@@ -77,8 +77,9 @@ class RealtimeServerEvent(enum.StrEnum):
 class RealtimeClient:
     """Speech-to-speech client for the OpenAI Realtime API over a WebSocket.
 
-    Talks to the GA ``gpt-realtime`` model. The transport is niquests' native
-    WebSocket support (requires the ``ws`` extra, i.e. ``padwan-llm[realtime]``).
+    Talks to the GA ``gpt-realtime`` model; wire shapes follow
+    https://platform.openai.com/docs/guides/realtime. The transport is niquests'
+    native WebSocket support (requires the ``ws`` extra, i.e. ``padwan-llm[realtime]``).
     Pass *api_key* explicitly or leave it unset to read ``OPENAI_API_KEY`` from the
     environment. *timeout* bounds the opening handshake; reads on the open socket
     are left unbounded so the model can stay silent between turns without the
