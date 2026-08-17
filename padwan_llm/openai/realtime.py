@@ -38,8 +38,9 @@ NO_TURN_DETECTION = "none"
 # The transport locks the socket per task, so a parked read starves senders.
 # A socket read timeout makes the read release the lock periodically; the
 # transport treats it as clean ("ws algorithms based on timeouts") and the
-# connection iterator swallows the tick. Bounds send latency on a quiet socket.
-_READ_POLL_INTERVAL = 0.25
+# connection iterator swallows the tick. Bounds send latency on a quiet socket;
+# roughly one queued send gets through per tick, so senders should batch.
+_READ_POLL_INTERVAL = 0.1
 
 
 def _enable_read_polling(ext: Any, interval: float) -> None:
