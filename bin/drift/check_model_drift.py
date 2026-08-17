@@ -42,6 +42,7 @@ from padwan_llm.mistral.client import (
     MistralEmbeddingModel,
 )
 from padwan_llm.openai.client import _OPENAI_PREFIXES, OPENAI_MODELS
+from padwan_llm.openai.realtime import _VOICES, DEFAULT_REALTIME_MODEL
 
 # Trailing date or dated-preview stamps used by upstream to expose pinned model
 # versions. The project prefers stable aliases such as "*-latest" where possible.
@@ -238,6 +239,38 @@ def _is_anthropic_public_model(model_id: str) -> bool:
     if not model_id.startswith("claude-"):
         return False
     return not model_id.startswith(_ANTHROPIC_OLD_PREFIXES)
+
+
+def _literal_strings(annotation: Any) -> set[str]:
+    """Collect string members of every Literal nested inside *annotation*."""
+    if typing.get_origin(annotation) is typing.Literal:
+        return {a for a in typing.get_args(annotation) if isinstance(a, str)}
+    out: set[str] = set()
+    for arg in typing.get_args(annotation):
+        out |= _literal_strings(arg)
+    return out
+
+
+def _openai_realtime_sdk() -> tuple[set[str], set[str]]:
+    """Return (model ids, voices) from the SDK's realtime session types.
+
+    Field annotations are walked instead of importing named aliases because the
+    SDK moved the Literals between modules across major versions.
+    """
+    from openai.types.realtime.realtime_audio_config_output import (
+        RealtimeAudioConfigOutput,
+    )
+    from openai.types.realtime.realtime_session_create_request import (
+        RealtimeSessionCreateRequest,
+    )
+
+    models = _literal_strings(
+        RealtimeSessionCreateRequest.model_fields["model"].annotation
+    )
+    voices = _literal_strings(
+        RealtimeAudioConfigOutput.model_fields["voice"].annotation
+    )
+    return models, voices
 
 
 def _openai_sdk_aliases() -> set[str]:
@@ -555,9 +588,53 @@ def _render_live(lines: list[str], check: LiveCheck) -> None:
         lines.append("")
 
 
+def _render_openai_realtime(
+    lines: list[str], sdk_models: set[str], voice_diff: Diff
+) -> None:
+    lines.append("## OpenAI Realtime")
+    lines.append("")
+    lines.append(
+        "Source: `model`/`voice` Literals in the installed SDK's "
+        "`openai.types.realtime` session types."
+    )
+    lines.append(
+        "Target: `padwan_llm/openai/realtime.py::DEFAULT_REALTIME_MODEL, _VOICES`."
+    )
+    lines.append("")
+    if DEFAULT_REALTIME_MODEL in sdk_models:
+        lines.append(
+            f"`DEFAULT_REALTIME_MODEL` (`{DEFAULT_REALTIME_MODEL}`) is a valid SDK model id."
+        )
+    else:
+        lines.append(
+            f"**`DEFAULT_REALTIME_MODEL` (`{DEFAULT_REALTIME_MODEL}`) is missing "
+            "from the SDK's realtime model Literal** - pick a current alias:"
+        )
+        lines.extend(f"- `{model}`" for model in sorted(sdk_models))
+    lines.append("")
+    if voice_diff.has_drift:
+        _render_diff(
+            lines,
+            voice_diff,
+            add_label=(
+                "**Candidate voice additions** - in the SDK's voice Literal, "
+                "missing from `_VOICES`:"
+            ),
+            remove_label=(
+                "**Review voice removals** - in `_VOICES`, no longer in the "
+                "SDK's voice Literal:"
+            ),
+        )
+    else:
+        lines.append("No voice drift. `_VOICES` matches the SDK's voice Literal.")
+        lines.append("")
+
+
 def _render(
     openai_sdk_diff: Diff,
     openai_live: RemoteModels,
+    realtime_models: set[str],
+    realtime_voice_diff: Diff,
     live_checks: list[LiveCheck],
 ) -> str:
     lines: list[str] = [
@@ -568,6 +645,7 @@ def _render(
         "",
     ]
     _render_openai(lines, openai_sdk_diff, openai_live)
+    _render_openai_realtime(lines, realtime_models, realtime_voice_diff)
     for check in live_checks:
         _render_live(lines, check)
 
@@ -629,6 +707,8 @@ def check(
     openai_sdk = _openai_sdk_aliases()
     openai_sdk_diff = _diff(openai_sdk, OPENAI_MODELS)
     openai_live = _openai_live_aliases()
+    realtime_models, realtime_voices = _openai_realtime_sdk()
+    realtime_voice_diff = _diff(realtime_voices, set(_VOICES))
 
     mistral_known = (
         MISTRAL_MODELS
@@ -701,7 +781,9 @@ def check(
             _MISTRAL_DEPRECATIONS, "Mistral", mistral_check.deprecations
         )
 
-    report = _render(openai_sdk_diff, openai_live, live_checks)
+    report = _render(
+        openai_sdk_diff, openai_live, realtime_models, realtime_voice_diff, live_checks
+    )
     print(report)
     if out:
         out.write_text(report, encoding="utf-8")

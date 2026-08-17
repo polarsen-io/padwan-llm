@@ -6,7 +6,7 @@ import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, get_args
 
 import niquests
 
@@ -35,10 +35,9 @@ REALTIME_SAMPLE_RATE = 24_000
 # you then drive each turn yourself with commit_audio() + create_response().
 NO_TURN_DETECTION = "none"
 
-# https://platform.openai.com/docs/guides/realtime — "marin" and "cedar" are the
-# voices introduced with gpt-realtime; the rest carry over from the preview models.
-type RealtimeVoice = str
-_VOICES = (
+# "marin" and "cedar" are the voices introduced with gpt-realtime; the rest carry
+# over from the preview models. Checked against the SDK by bin/drift.
+_KnownVoice = Literal[
     "marin",
     "cedar",
     "alloy",
@@ -49,7 +48,11 @@ _VOICES = (
     "sage",
     "shimmer",
     "verse",
-)
+]
+# `| str` keeps arbitrary voices valid (the SDK types voice the same way) while
+# the Literal member drives IDE completion.
+type RealtimeVoice = _KnownVoice | str
+_VOICES: tuple[str, ...] = get_args(_KnownVoice)
 
 
 class RealtimeServerEvent(enum.StrEnum):
