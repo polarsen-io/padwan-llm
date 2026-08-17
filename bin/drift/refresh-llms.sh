@@ -12,7 +12,7 @@
 #   ./bin/drift/refresh-llms.sh                       # report to stdout
 #   ./bin/drift/refresh-llms.sh --out drift-report.md # also write Markdown to PATH
 #
-# Requires: uv, gh (the latter only for ./bin/gen-openai-types.sh)
+# Requires: uv
 
 set -euo pipefail
 
