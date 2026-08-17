@@ -13,7 +13,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Speech-to-speech Realtime client; niquests[ws] pulls wsproto to enable websockets.
 realtime = ["niquests[ws]>=3.18.5"]
 
 [project.scripts]

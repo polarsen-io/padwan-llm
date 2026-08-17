@@ -28,6 +28,7 @@ from .batch import BatchJob, BatchRequest
 from .models import (
     BatchJobResponse,
     CompletionBody,
+    GeminiPart,
     GenerationConfig,
     ListBatchesResponse,
     StreamBody,
@@ -50,7 +51,7 @@ _GEMINI_FINISH_REASON_MAP: dict[str, FinishReason] = {
 }
 
 
-def _content_to_gemini_parts(content: str | list[ContentPart]) -> list[dict]:
+def _content_to_gemini_parts(content: str | list[ContentPart]) -> list[GeminiPart]:
     """Convert message content into Gemini `parts`.
 
     Plain text becomes a single text part; multimodal content maps each part,
@@ -58,7 +59,7 @@ def _content_to_gemini_parts(content: str | list[ContentPart]) -> list[dict]:
     """
     if isinstance(content, str):
         return [{"text": content}]
-    parts: list[dict] = []
+    parts: list[GeminiPart] = []
     for part in content:
         if part["type"] == "text":
             parts.append({"text": part["text"]})
@@ -561,7 +562,7 @@ class GeminiChatStream(ChatStream, GeminiToolMixin):
                     )
                 )
                 continue
-            # Regular text message (user or assistant); content is never None here.
+            # Regular text message (user or assistant)
             gemini_role = "model" if role == "assistant" else "user"
             parts = _content_to_gemini_parts(
                 cast("str | list[ContentPart]", msg["content"])
