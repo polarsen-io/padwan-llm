@@ -16,7 +16,6 @@ nav = [
   { "Clients" = [
     { "OpenAI-Compatible" = "clients/openai-compatible.md" },
     { "OpenAI" = "clients/openai.md" },
-    { "OpenAI Realtime" = "clients/openai-realtime.md" },
     { "Gemini" = "clients/gemini.md" },
     { "Mistral" = "clients/mistral.md" },
     { "Grok" = "clients/grok.md" },
