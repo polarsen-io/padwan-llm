@@ -242,7 +242,10 @@ def _is_anthropic_public_model(model_id: str) -> bool:
 
 
 def _literal_strings(annotation: Any) -> set[str]:
-    """Collect string members of every Literal nested inside *annotation*."""
+    """Collect string members of every Literal nested inside *annotation*.
+
+    E.g. ``Optional[Union[str, Literal["marin", "cedar"]]]`` -> {"marin", "cedar"}.
+    """
     if typing.get_origin(annotation) is typing.Literal:
         return {a for a in typing.get_args(annotation) if isinstance(a, str)}
     out: set[str] = set()
