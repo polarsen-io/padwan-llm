@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-realtime = ["niquests[ws]>=3.18.5"]
+realtime = ["niquests[ws]>=3.21.0"]
 
 [project.scripts]
 padwan-llm = "padwan_llm.__main__:main"

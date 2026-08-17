@@ -1875,7 +1875,7 @@ research = [
 [package.metadata]
 requires-dist = [
     { name = "niquests", specifier = ">=3.21.0" },
-    { name = "niquests", extras = ["ws"], marker = "extra == 'realtime'", specifier = ">=3.18.5" },
+    { name = "niquests", extras = ["ws"], marker = "extra == 'realtime'", specifier = ">=3.21.0" },
     { name = "qh3", specifier = ">=1.7.1" },
     { name = "typing-extensions", marker = "python_full_version < '3.14'", specifier = ">=4.10" },
     { name = "urllib3-future", specifier = ">=2.19.908" },
