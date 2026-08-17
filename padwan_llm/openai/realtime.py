@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import enum
 import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal, get_args
 
 import niquests
@@ -35,6 +34,28 @@ REALTIME_SAMPLE_RATE = 24_000
 # Pass as ``turn_detection`` to disable server VAD (manual / push-to-talk mode);
 # you then drive each turn yourself with commit_audio() + create_response().
 NO_TURN_DETECTION = "none"
+
+# The transport locks the socket per task, so a parked read starves senders.
+# A socket read timeout makes the read release the lock periodically; the
+# transport treats it as clean ("ws algorithms based on timeouts") and the
+# connection iterator swallows the tick. Bounds send latency on a quiet socket.
+_READ_POLL_INTERVAL = 0.25
+
+
+def _enable_read_polling(ext: Any, interval: float) -> None:
+    """Arm the ws socket read timeout that drives send/receive interleaving.
+
+    Reaches through transport internals (the connection behind the extension's
+    stream reader) because no public knob exists; best effort — without it,
+    sends block until the server happens to emit an event.
+    """
+    try:
+        conn = ext._dsa._read.__self__
+        conn.timeout = interval
+        conn.sock.settimeout(interval)
+    except AttributeError:
+        log.debug("could not arm ws read polling", exc_info=True)
+
 
 # "marin" and "cedar" are the voices introduced with gpt-realtime; the rest carry
 # over from the preview models. Checked against the SDK by bin/drift.
@@ -82,9 +103,9 @@ class RealtimeClient:
     https://platform.openai.com/docs/guides/realtime. The transport is niquests'
     native WebSocket support (requires the ``ws`` extra, i.e. ``padwan-llm[realtime]``).
     Pass *api_key* explicitly or leave it unset to read ``OPENAI_API_KEY`` from the
-    environment. *timeout* bounds the opening handshake; reads on the open socket
-    are left unbounded so the model can stay silent between turns without the
-    connection being torn down.
+    environment. *timeout* bounds the opening handshake; on the open socket the
+    connection polls reads internally, so the model can stay silent between turns
+    without the connection being torn down.
     """
 
     model: str = DEFAULT_REALTIME_MODEL
@@ -133,8 +154,8 @@ class RealtimeClient:
                 session = await stack.enter_async_context(
                     niquests.AsyncSession(**(session_kwargs or {}))
                 )
-            # timeout bounds only the upgrade handshake; the ws extension reads frames
-            # with recv_extended(None), so idle gaps between turns never abort next_payload.
+            # timeout bounds only the upgrade handshake; afterwards the read
+            # timeout is re-armed as the poll interval (see _enable_read_polling).
             resp = await session.get(
                 self.base_url,
                 headers=headers,
@@ -148,6 +169,7 @@ class RealtimeClient:
                     f"realtime handshake did not upgrade to a websocket "
                     f"(status {resp.status_code})",
                 )
+            _enable_read_polling(ext, _READ_POLL_INTERVAL)
             conn = RealtimeConnection(ext, sample_rate=sample_rate)
             await conn.configure(
                 instructions=instructions,
@@ -170,17 +192,16 @@ class RealtimeConnection:
     async-iterating the connection. Audio is mono little-endian PCM16 at
     *sample_rate* Hz in both directions.
 
-    The transport allows only one task on the socket at a time, so a pending
-    read would block every send until the server happens to emit an event.
-    Senders therefore interrupt the in-flight read (safe: the ws protocol
-    buffers partially-read events) and the reader retries transparently.
+    The transport allows only one task on the socket at a time, so a read parked
+    in ``next_payload`` would block every send until the server happens to emit
+    an event. ``connect()`` therefore arms a short socket read timeout: the
+    iterator silently swallows the periodic timeout ticks, and each tick
+    releases the socket so queued sends go out within ``_READ_POLL_INTERVAL``.
     """
 
     ext: Any
     sample_rate: int = REALTIME_SAMPLE_RATE
     _closed: bool = False
-    _send_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
-    _read_task: asyncio.Task[Any] | None = field(default=None, init=False, repr=False)
 
     def session_payload(
         self,
@@ -246,16 +267,10 @@ class RealtimeConnection:
     async def send_event(self, event: Mapping[str, Any]) -> None:
         """Send a raw client event as a JSON text frame.
 
-        Safe to call while another task awaits server events: the pending read
-        is briefly interrupted so the frame goes out immediately, then resumed.
+        Safe to call while another task awaits server events: the frame goes out
+        at the next read-poll tick, within ``_READ_POLL_INTERVAL`` seconds.
         """
-        payload = _json_dumps(event)
-        async with self._send_lock:
-            read = self._read_task
-            if read is not None and not read.done():
-                read.cancel()
-                await asyncio.wait([read])
-            await self.ext.send_payload(payload)
+        await self.ext.send_payload(_json_dumps(event))
 
     async def append_audio(self, pcm16: bytes) -> None:
         """Append a chunk of mono PCM16 audio to the input buffer."""
@@ -280,24 +295,10 @@ class RealtimeConnection:
 
     async def __aiter__(self) -> AsyncIterator[dict[str, Any]]:
         while not self._closed:
-            if self._send_lock.locked():
-                # a sender is using (or waiting for) the socket; let it finish
-                # before re-entering a blocking read that would starve it.
-                async with self._send_lock:
-                    pass
-            task = self._read_task
-            if task is None:
-                task = asyncio.create_task(self.ext.next_payload())
-                self._read_task = task
             try:
-                payload = await asyncio.shield(task)
-            except asyncio.CancelledError:
-                if task.cancelled():
-                    # a sender interrupted the read to use the socket; retry
-                    self._read_task = None
-                    continue
-                raise  # the consumer itself was cancelled; close() reaps the read
-            self._read_task = None
+                payload = await self.ext.next_payload()
+            except niquests.exceptions.ReadTimeout:
+                continue  # read-poll tick: lets queued sends borrow the socket
             if payload is None:
                 break
             if isinstance(payload, (bytes, bytearray)):
@@ -309,10 +310,6 @@ class RealtimeConnection:
         if self._closed:
             return
         self._closed = True
-        if (task := self._read_task) is not None and not task.done():
-            task.cancel()
-            await asyncio.wait([task])
-        self._read_task = None
         try:
             await self.ext.close()
         except Exception:  # best effort — the socket may already be gone

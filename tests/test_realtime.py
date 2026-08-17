@@ -34,19 +34,33 @@ class FakeExt:
         self.closed = True
 
 
-class BlockingExt(FakeExt):
-    """FakeExt whose next_payload parks on a queue like a real socket read."""
+class LockedExt(FakeExt):
+    """FakeExt mimicking the transport: one lock on the socket, timed-out reads.
+
+    ``next_payload`` holds the lock while parked (like the real traffic police)
+    and raises ``ReadTimeout`` after the poll interval, releasing the lock so a
+    queued ``send_payload`` can borrow the socket.
+    """
 
     def __init__(self):
         super().__init__()
+        self.lock = asyncio.Lock()
         self.queue: asyncio.Queue[str | None] = asyncio.Queue()
 
     async def next_payload(self) -> str | bytes | None:
-        return await self.queue.get()
+        async with self.lock:
+            try:
+                return await asyncio.wait_for(self.queue.get(), 0.05)
+            except TimeoutError:
+                raise niquests.exceptions.ReadTimeout("poll tick")
+
+    async def send_payload(self, buf: str | bytes) -> None:
+        async with self.lock:
+            await super().send_payload(buf)
 
 
-async def test_send_event_interrupts_pending_read() -> None:
-    ext = BlockingExt()
+async def test_send_progresses_while_read_is_parked() -> None:
+    ext = LockedExt()
     conn = RealtimeConnection(ext)
     received: list[dict] = []
 
@@ -56,15 +70,15 @@ async def test_send_event_interrupts_pending_read() -> None:
 
     consumer = asyncio.create_task(consume())
     try:
-        await asyncio.sleep(0.01)  # reader is now parked in next_payload
+        await asyncio.sleep(0.01)  # reader is parked, holding the socket lock
 
-        # Must not hang waiting for a server event to release the socket.
+        # Must go out at the next poll tick, not wait for a server event.
         await asyncio.wait_for(conn.send_event({"type": "input_audio_buffer.clear"}), 1)
         assert [_json_loads(s) for s in ext.sent] == [
             {"type": "input_audio_buffer.clear"}
         ]
 
-        # The interrupted read is retried: later events still come through.
+        # Poll ticks are swallowed: later events still come through.
         await ext.queue.put('{"type":"session.created"}')
         await ext.queue.put(None)
         await asyncio.wait_for(consumer, 1)
