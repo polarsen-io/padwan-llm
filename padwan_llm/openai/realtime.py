@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import enum
 import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, get_args
 
 import niquests
@@ -168,11 +169,18 @@ class RealtimeConnection:
     Stream microphone audio with :meth:`append_audio` and consume server events by
     async-iterating the connection. Audio is mono little-endian PCM16 at
     *sample_rate* Hz in both directions.
+
+    The transport allows only one task on the socket at a time, so a pending
+    read would block every send until the server happens to emit an event.
+    Senders therefore interrupt the in-flight read (safe: the ws protocol
+    buffers partially-read events) and the reader retries transparently.
     """
 
     ext: Any
     sample_rate: int = REALTIME_SAMPLE_RATE
     _closed: bool = False
+    _send_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    _read_task: asyncio.Task[Any] | None = field(default=None, init=False, repr=False)
 
     def session_payload(
         self,
@@ -236,8 +244,18 @@ class RealtimeConnection:
         )
 
     async def send_event(self, event: Mapping[str, Any]) -> None:
-        """Send a raw client event as a JSON text frame."""
-        await self.ext.send_payload(_json_dumps(event))
+        """Send a raw client event as a JSON text frame.
+
+        Safe to call while another task awaits server events: the pending read
+        is briefly interrupted so the frame goes out immediately, then resumed.
+        """
+        payload = _json_dumps(event)
+        async with self._send_lock:
+            read = self._read_task
+            if read is not None and not read.done():
+                read.cancel()
+                await asyncio.wait([read])
+            await self.ext.send_payload(payload)
 
     async def append_audio(self, pcm16: bytes) -> None:
         """Append a chunk of mono PCM16 audio to the input buffer."""
@@ -262,7 +280,24 @@ class RealtimeConnection:
 
     async def __aiter__(self) -> AsyncIterator[dict[str, Any]]:
         while not self._closed:
-            payload = await self.ext.next_payload()
+            if self._send_lock.locked():
+                # a sender is using (or waiting for) the socket; let it finish
+                # before re-entering a blocking read that would starve it.
+                async with self._send_lock:
+                    pass
+            task = self._read_task
+            if task is None:
+                task = asyncio.create_task(self.ext.next_payload())
+                self._read_task = task
+            try:
+                payload = await asyncio.shield(task)
+            except asyncio.CancelledError:
+                if task.cancelled():
+                    # a sender interrupted the read to use the socket; retry
+                    self._read_task = None
+                    continue
+                raise  # the consumer itself was cancelled; close() reaps the read
+            self._read_task = None
             if payload is None:
                 break
             if isinstance(payload, (bytes, bytearray)):
@@ -274,6 +309,10 @@ class RealtimeConnection:
         if self._closed:
             return
         self._closed = True
+        if (task := self._read_task) is not None and not task.done():
+            task.cancel()
+            await asyncio.wait([task])
+        self._read_task = None
         try:
             await self.ext.close()
         except Exception:  # best effort — the socket may already be gone

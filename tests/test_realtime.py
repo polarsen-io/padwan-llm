@@ -1,3 +1,4 @@
+import asyncio
 import base64
 from types import SimpleNamespace
 from typing import cast
@@ -31,6 +32,46 @@ class FakeExt:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class BlockingExt(FakeExt):
+    """FakeExt whose next_payload parks on a queue like a real socket read."""
+
+    def __init__(self):
+        super().__init__()
+        self.queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def next_payload(self) -> str | bytes | None:
+        return await self.queue.get()
+
+
+async def test_send_event_interrupts_pending_read() -> None:
+    ext = BlockingExt()
+    conn = RealtimeConnection(ext)
+    received: list[dict] = []
+
+    async def consume() -> None:
+        async for event in conn:
+            received.append(event)
+
+    consumer = asyncio.create_task(consume())
+    try:
+        await asyncio.sleep(0.01)  # reader is now parked in next_payload
+
+        # Must not hang waiting for a server event to release the socket.
+        await asyncio.wait_for(conn.send_event({"type": "input_audio_buffer.clear"}), 1)
+        assert [_json_loads(s) for s in ext.sent] == [
+            {"type": "input_audio_buffer.clear"}
+        ]
+
+        # The interrupted read is retried: later events still come through.
+        await ext.queue.put('{"type":"session.created"}')
+        await ext.queue.put(None)
+        await asyncio.wait_for(consumer, 1)
+        assert received == [{"type": "session.created"}]
+    finally:
+        await conn.close()
+        consumer.cancel()
 
 
 class FakeSession:
