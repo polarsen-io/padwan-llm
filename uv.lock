@@ -959,8 +959,8 @@ name = "httpcore2"
 version = "2.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11", marker = "sys_platform != 'emscripten'" },
-    { name = "truststore", marker = "sys_platform != 'emscripten'" },
+    { name = "h11" },
+    { name = "truststore" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/be/ad/f4f0e57345f1870f3e8cb624e058d7eca6e5a27d33bcc3311d9b618734cd/httpcore2-2.12.0.tar.gz", hash = "sha256:9293522bba0aa7c4c8e9e3f040c16575bd8868e155a77fa30c7a9085a5eae648", size = 67548, upload-time = "2026-08-18T13:22:08.211Z" }
 wheels = [
@@ -1979,6 +1979,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+otel = [
+    { name = "opentelemetry-api" },
+]
 realtime = [
     { name = "niquests", extra = ["ws"] },
 ]
@@ -1988,6 +1991,7 @@ bump = [
     { name = "commitizen" },
 ]
 dev = [
+    { name = "opentelemetry-sdk" },
     { name = "prek" },
     { name = "pyright" },
     { name = "pytest" },
@@ -2016,15 +2020,17 @@ research = [
 requires-dist = [
     { name = "niquests", specifier = ">=3.21.0" },
     { name = "niquests", extras = ["ws"], marker = "extra == 'realtime'", specifier = ">=3.21.0" },
+    { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.36" },
     { name = "qh3", specifier = ">=1.7.1" },
     { name = "typing-extensions", marker = "python_full_version < '3.14'", specifier = ">=4.10" },
     { name = "urllib3-future", specifier = ">=2.19.908" },
 ]
-provides-extras = ["realtime"]
+provides-extras = ["otel", "realtime"]
 
 [package.metadata.requires-dev]
 bump = [{ name = "commitizen", specifier = ">=4.0.0" }]
 dev = [
+    { name = "opentelemetry-sdk", specifier = ">=1.36" },
     { name = "prek", specifier = ">=0.2.30" },
     { name = "pyright", specifier = ">=1.1.400" },
     { name = "pytest", specifier = ">=8.0.0" },
@@ -2107,7 +2113,7 @@ name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ptyprocess", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "ptyprocess" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/92/cc564bf6381ff43ce1f4d06852fc19a2f11d180f23dc32d9588bee2f149d/pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f", size = 166450, upload-time = "2023-11-25T09:07:26.339Z" }
 wheels = [
@@ -3166,8 +3172,8 @@ name = "uvicorn"
 version = "0.52.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "click", marker = "sys_platform != 'emscripten'" },
-    { name = "h11", marker = "sys_platform != 'emscripten'" },
+    { name = "click" },
+    { name = "h11" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/2e/28/64ca011edf31c715b4fad359c587ea52391aaffa125065695590241ff617/uvicorn-0.52.3.tar.gz", hash = "sha256:18857b9e6579300be55c91c0a1cfd37d9a2cf0cabea33b88275f199eb73b8b58", size = 100621, upload-time = "2026-08-13T16:50:02.899Z" }
 wheels = [
