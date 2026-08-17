@@ -258,6 +258,34 @@ def test_gateway_explicit_base_url_restores_native_routing(gateway_env):
     assert client.base_url == "https://gem.proxy/v1beta/"
 
 
+@pytest.mark.parametrize(
+    "model, cls",
+    [
+        pytest.param("gpt-oss-120b", OpenAIClient, id="openai-family"),
+        pytest.param("gemini-2.5-flash", GeminiClient, id="gemini-native"),
+    ],
+)
+def test_explicit_base_url_uses_padwan_token_when_no_key(
+    model, cls, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("PADWAN_API_KEY", "gw-secret")
+    monkeypatch.setenv("OPENAI_API_KEY", "real-openai-key")  # must not leak
+    monkeypatch.setenv("GEMINI_API_KEY", "real-gemini-key")  # must not leak
+    client = LLMClient(model, base_url="https://oss.example.com/v1")
+    assert isinstance(client, cls)
+    assert client._api_key == "gw-secret"
+
+
+def test_explicit_base_url_explicit_key_beats_padwan_token(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("PADWAN_API_KEY", "gw-secret")
+    client = LLMClient(
+        "gpt-oss-120b", base_url="https://oss.example.com/v1", api_key="explicit"
+    )
+    assert client._api_key == "explicit"
+
+
 def test_gateway_without_token_uses_no_key_not_openai_env(
     monkeypatch: pytest.MonkeyPatch,
 ):

@@ -111,7 +111,9 @@ def LLMClient(
     families behind one URL works without per-provider env vars or per-call
     overrides. In gateway mode all models route through ``OpenAIClient``
     regardless of name prefix; an explicit ``base_url`` argument disables it
-    and restores native per-provider routing.
+    and restores native per-provider routing. An explicit ``base_url`` still
+    authenticates with ``PADWAN_API_KEY`` when it is set and no ``api_key``
+    is given, so provider keys are never sent to a custom endpoint.
 
     The ``on_thought`` callback, when provided, receives reasoning/thinking
     chunks from providers that support them (Gemini, Grok, Mistral).
@@ -134,6 +136,10 @@ def LLMClient(
         return OpenAIClient(**kwargs)
     if base_url is not None:
         kwargs["base_url"] = base_url
+        # Explicit custom endpoint: prefer the gateway token over provider env
+        # keys so a provider secret is never sent to a third-party endpoint.
+        if api_key is None and (padwan_key := os.environ.get(PADWAN_API_KEY_ENV)):
+            kwargs["api_key"] = padwan_key
     if is_openai_model(model):
         return OpenAIClient(**kwargs)
     if is_gemini_model(model):
