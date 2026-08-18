@@ -211,13 +211,13 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
 
 
 @dataclass
-class RealtimeClientBase(abc.ABC):
+class RealtimeClientBase[ConnT](abc.ABC):
     """Abstract base for realtime speech-to-speech clients over a WebSocket.
 
     Use provider-specific clients (OpenAIRealtimeClient, ...) or the
-    :func:`padwan_llm.RealtimeClient` factory instead. Open the client with
-    ``async with`` (owns the underlying ``AsyncSession``), then call
-    :meth:`connect` for each realtime connection.
+    :func:`padwan_llm.RealtimeClient` factory instead. ``async with client as
+    conn:`` opens the managed ``AsyncSession``, performs the provider
+    handshake, and yields the live connection.
     """
 
     provider: ClassVar[Provider]
@@ -231,6 +231,9 @@ class RealtimeClientBase(abc.ABC):
 
     _api_key: str = field(init=False, repr=False)
     _session: niquests.AsyncSession | None = field(init=False, default=None, repr=False)
+    _conn_cm: AbstractAsyncContextManager[Any] | None = field(
+        init=False, default=None, repr=False
+    )
 
     def __post_init__(self) -> None:
         self._api_key = self.api_key or self._get_default_api_key()
@@ -244,7 +247,7 @@ class RealtimeClientBase(abc.ABC):
             )
         return self._session
 
-    async def __aenter__(self) -> Self:
+    async def __aenter__(self) -> ConnT:
         if self._session is not None:
             raise RuntimeError(
                 f"{type(self).__name__} is already open; "
@@ -252,7 +255,12 @@ class RealtimeClientBase(abc.ABC):
             )
         self._session = niquests.AsyncSession(**(self.session_kwargs or {}))
         self._set_auth_headers(self._session)
-        return self
+        try:
+            self._conn_cm = self._connect()
+            return await self._conn_cm.__aenter__()
+        except BaseException:
+            await self.__aexit__(None, None, None)
+            raise
 
     async def __aexit__(
         self,
@@ -260,11 +268,16 @@ class RealtimeClientBase(abc.ABC):
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        if self._session:
-            try:
-                await self._session.close()
-            finally:
-                self._session = None
+        try:
+            if self._conn_cm is not None:
+                await self._conn_cm.__aexit__(exc_type, exc_val, exc_tb)
+        finally:
+            self._conn_cm = None
+            if self._session:
+                try:
+                    await self._session.close()
+                finally:
+                    self._session = None
 
     @abc.abstractmethod
     def _get_default_api_key(self) -> str:
@@ -277,6 +290,6 @@ class RealtimeClientBase(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def connect(self) -> AbstractAsyncContextManager[Any]:
-        """Open a configured realtime connection over the client's session."""
+    def _connect(self) -> AbstractAsyncContextManager[ConnT]:
+        """Open the provider handshake over the client's session."""
         ...

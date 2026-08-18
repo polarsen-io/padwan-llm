@@ -1,5 +1,6 @@
 import os
-from typing import NotRequired, TypedDict, overload
+from collections.abc import Mapping, Sequence
+from typing import Any, NotRequired, TypedDict, overload
 
 from ._base import LLMClientBase, OnThought
 from .anthropic import AnthropicClient, AnthropicModel, is_anthropic_model
@@ -8,9 +9,11 @@ from .grok import GrokClient, GrokModel, is_grok_model
 from .mistral import MistralClient, MistralModel, is_mistral_model
 from .openai import (
     DEFAULT_REALTIME_MODEL,
+    REALTIME_SAMPLE_RATE,
     OpenAIClient,
     OpenAIModel,
     OpenAIRealtimeClient,
+    RealtimeVoice,
     is_openai_model,
 )
 
@@ -164,21 +167,37 @@ def LLMClient(
 def RealtimeClient(
     model: str = DEFAULT_REALTIME_MODEL,
     *,
+    instructions: str | None = None,
+    voice: RealtimeVoice = "marin",
+    turn_detection: Mapping[str, Any] | str | None = None,
+    transcription_model: str | None = "whisper-1",
+    output_modalities: Sequence[str] = ("audio",),
+    sample_rate: int = REALTIME_SAMPLE_RATE,
     timeout: float = 30.0,
     api_key: str | None = None,
     base_url: str | None = None,
 ) -> OpenAIRealtimeClient:
     """Create a realtime speech-to-speech client based on model name.
 
+    ``async with RealtimeClient(...) as conn:`` yields the live connection.
     Only OpenAI realtime models exist today, so every model routes to
     :class:`OpenAIRealtimeClient`. When no *api_key* is given, an explicit
     *base_url* prefers ``PADWAN_API_KEY`` over the provider env key (which
     remains the fallback).
     """
-    if base_url is None:
-        return OpenAIRealtimeClient(model=model, api_key=api_key, timeout=timeout)
-    if api_key is None and (padwan_key := os.environ.get(PADWAN_API_KEY_ENV)):
-        api_key = padwan_key
-    return OpenAIRealtimeClient(
-        model=model, api_key=api_key, base_url=base_url, timeout=timeout
+    if base_url is not None and api_key is None:
+        api_key = os.environ.get(PADWAN_API_KEY_ENV)
+    client = OpenAIRealtimeClient(
+        model=model,
+        instructions=instructions,
+        voice=voice,
+        turn_detection=turn_detection,
+        transcription_model=transcription_model,
+        output_modalities=output_modalities,
+        sample_rate=sample_rate,
+        api_key=api_key,
+        timeout=timeout,
     )
+    if base_url is not None:
+        client.base_url = base_url
+    return client

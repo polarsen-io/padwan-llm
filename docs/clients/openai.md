@@ -140,7 +140,7 @@ client = RealtimeClient(
 
 `timeout` bounds only the WebSocket upgrade handshake. Reads on the open socket are unbounded, so the model can stay silent between turns without the connection being torn down.
 
-Open the client with `async with` (it owns the underlying `niquests.AsyncSession`), then call `connect()` for each realtime connection.
+`async with client as conn:` opens the underlying `niquests.AsyncSession`, performs the handshake, and yields the live `RealtimeConnection`; everything is closed on exit.
 
 ### Conversation with server VAD (default)
 
@@ -150,14 +150,13 @@ By default the server decides when you have stopped talking. Stream microphone a
 from padwan_llm import RealtimeClient
 from padwan_llm.openai import RealtimeServerEvent
 
-async with RealtimeClient() as client:
-    async with client.connect(instructions="Answer briefly.", voice="marin") as conn:
-        await conn.append_audio(pcm16_chunk)  # mono PCM16 @ 24 kHz
-        async for event in conn:
-            if audio := conn.audio_delta_bytes(event):
-                playback.write(audio)  # PCM16 bytes
-            elif event["type"] == RealtimeServerEvent.RESPONSE_DONE:
-                break
+async with RealtimeClient(instructions="Answer briefly.", voice="marin") as conn:
+    await conn.append_audio(pcm16_chunk)  # mono PCM16 @ 24 kHz
+    async for event in conn:
+        if audio := conn.audio_delta_bytes(event):
+            playback.write(audio)  # PCM16 bytes
+        elif event["type"] == RealtimeServerEvent.RESPONSE_DONE:
+            break
 ```
 
 ### Push-to-talk (manual turns)
@@ -168,38 +167,30 @@ Pass `NO_TURN_DETECTION` to disable server VAD, then drive each turn yourself:
 from padwan_llm import RealtimeClient
 from padwan_llm.openai import NO_TURN_DETECTION
 
-async with RealtimeClient() as client:
-    async with client.connect(turn_detection=NO_TURN_DETECTION) as conn:
-        await conn.append_audio(recorded_pcm16)
-        await conn.commit_audio()
-        await conn.create_response()
-        async for event in conn:
-            ...
-```
-
-### Session configuration
-
-The client creates its `AsyncSession` in `__aenter__` and closes it in `__aexit__`; every `connect()` reuses it. Pass `session_kwargs=` to the client to forward constructor arguments (e.g. proxies) to that session:
-
-```python
-async with OpenAIRealtimeClient(session_kwargs={"proxies": {...}}) as client:
-    async with client.connect() as conn:
+async with RealtimeClient(turn_detection=NO_TURN_DETECTION) as conn:
+    await conn.append_audio(recorded_pcm16)
+    await conn.commit_audio()
+    await conn.create_response()
+    async for event in conn:
         ...
-    # client is still open here for the next connect()
 ```
 
-### `connect()` parameters
+### Client parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `model` | `"gpt-realtime"` | Realtime model id |
 | `instructions` | `None` | System prompt steering the voice agent |
 | `voice` | `"marin"` | Spoken voice (`RealtimeVoice`) |
 | `turn_detection` | `None` | `None`/falsy uses `server_vad`; a mapping (e.g. `{"type": "semantic_vad"}`) is sent verbatim; `NO_TURN_DETECTION` disables VAD |
 | `transcription_model` | `"whisper-1"` | Transcribes your own speech; `None` disables |
 | `output_modalities` | `("audio",)` | Response modalities; `("audio", "text")` also emits text |
 | `sample_rate` | `24_000` | PCM16 sample rate in both directions |
-| `session` | `None` | Caller-owned `AsyncSession`; left open on exit |
-| `session_kwargs` | `None` | Constructor arguments for the internally managed session |
+| `timeout` | `30.0` | Bounds the upgrade handshake |
+| `api_key` | `None` | Falls back to `OPENAI_API_KEY` |
+| `base_url` | realtime endpoint | Custom `wss://` endpoint |
+
+Constructing `OpenAIRealtimeClient` directly additionally accepts `session_kwargs=` to forward constructor arguments (e.g. proxies) to the managed `AsyncSession`. To reconfigure a live session, call `conn.configure(...)`.
 
 ### Server events
 

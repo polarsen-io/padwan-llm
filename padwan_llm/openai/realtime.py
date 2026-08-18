@@ -98,12 +98,17 @@ class RealtimeServerEvent(enum.StrEnum):
 
 
 @dataclass
-class OpenAIRealtimeClient(RealtimeClientBase):
+class OpenAIRealtimeClient(RealtimeClientBase["RealtimeConnection"]):
     """Speech-to-speech client for the OpenAI Realtime API (``gpt-realtime``) over a WebSocket.
 
+    ``async with client as conn:`` yields a configured :class:`RealtimeConnection`.
     Requires the ``realtime`` extra. *api_key* falls back to ``OPENAI_API_KEY``;
     *timeout* bounds only the opening handshake — the open socket tolerates a
-    silent model between turns. Wire shapes:
+    silent model between turns. *turn_detection* defaults to server-side VAD;
+    pass a mapping to override, or :data:`NO_TURN_DETECTION` to drive turns
+    manually (push-to-talk) with :meth:`RealtimeConnection.commit_audio` +
+    :meth:`RealtimeConnection.create_response`. *transcription_model* ``None``
+    disables transcription of your own speech. Wire shapes:
     https://platform.openai.com/docs/guides/realtime
     """
 
@@ -111,6 +116,12 @@ class OpenAIRealtimeClient(RealtimeClientBase):
 
     model: str = DEFAULT_REALTIME_MODEL
     base_url: str = REALTIME_ENDPOINT
+    instructions: str | None = None
+    voice: RealtimeVoice = "marin"
+    turn_detection: Mapping[str, Any] | str | None = None
+    transcription_model: str | None = "whisper-1"
+    output_modalities: Sequence[str] = ("audio",)
+    sample_rate: int = REALTIME_SAMPLE_RATE
 
     def _get_default_api_key(self) -> str:
         return env_api_key(self.provider, "OPENAI_API_KEY")
@@ -119,25 +130,7 @@ class OpenAIRealtimeClient(RealtimeClientBase):
         session.headers["Authorization"] = f"Bearer {self._api_key}"
 
     @asynccontextmanager
-    async def connect(
-        self,
-        *,
-        instructions: str | None = None,
-        voice: RealtimeVoice = "marin",
-        turn_detection: Mapping[str, Any] | str | None = None,
-        transcription_model: str | None = "whisper-1",
-        output_modalities: Sequence[str] = ("audio",),
-        sample_rate: int = REALTIME_SAMPLE_RATE,
-    ) -> AsyncIterator[RealtimeConnection]:
-        """Open a configured realtime session and yield a :class:`RealtimeConnection`.
-
-        The client must be open (``async with client:``); each call opens an
-        independent connection over the client's session.
-        *turn_detection* defaults to server-side VAD; pass a mapping to override,
-        or :data:`NO_TURN_DETECTION` to drive turns manually (push-to-talk) with
-        :meth:`RealtimeConnection.commit_audio` + :meth:`RealtimeConnection.create_response`.
-        *transcription_model* ``None`` disables transcription of your own speech.
-        """
+    async def _connect(self) -> AsyncIterator[RealtimeConnection]:
         # timeout bounds only the upgrade handshake; afterwards the read
         # timeout is re-armed as the poll interval (see _enable_read_polling).
         resp = await self.session.get(
@@ -153,13 +146,13 @@ class OpenAIRealtimeClient(RealtimeClientBase):
                 f"(status {resp.status_code})",
             )
         _enable_read_polling(ext, _READ_POLL_INTERVAL)
-        conn = RealtimeConnection(ext, sample_rate=sample_rate)
+        conn = RealtimeConnection(ext, sample_rate=self.sample_rate)
         await conn.configure(
-            instructions=instructions,
-            voice=voice,
-            turn_detection=turn_detection,
-            transcription_model=transcription_model,
-            output_modalities=list(output_modalities),
+            instructions=self.instructions,
+            voice=self.voice,
+            turn_detection=self.turn_detection,
+            transcription_model=self.transcription_model,
+            output_modalities=list(self.output_modalities),
         )
         try:
             yield conn
