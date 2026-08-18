@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import abc
+import os
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Self
@@ -37,6 +38,14 @@ class ChatStream(abc.ABC):
     def __aiter__(self) -> AsyncIterator[str]:
         """Iterate over text chunks from the stream."""
         ...
+
+
+def env_api_key(provider: Provider, var: str) -> str:
+    """Read an API key from environment variable *var*, raising :class:`LLMError` if unset."""
+    api_key = os.environ.get(var)
+    if not api_key:
+        raise LLMError(provider, f"{var} not set")
+    return api_key
 
 
 def to_sse_url(url: str) -> str:
