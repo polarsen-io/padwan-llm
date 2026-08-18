@@ -9,9 +9,8 @@ from typing import Any, ClassVar, Literal, get_args
 
 import niquests
 
-from .._base import LLMError, env_api_key
+from .._base import LLMError, RealtimeClientBase, env_api_key
 from .._json import dumps as _json_dumps, loads as _json_loads
-from .._realtime import RealtimeClientBase
 from ..errors import Provider
 from ..logs import log
 

@@ -1,8 +1,7 @@
 from importlib.metadata import version as _pkg_version
 
-from ._base import ChatStream, LLMClientBase, OnThought
+from ._base import ChatStream, LLMClientBase, OnThought, RealtimeClientBase
 from ._deprecation import ModelDeprecationWarning
-from ._realtime import RealtimeClientBase
 from .agent import AgentSession, ConversationStore, OnMcpConnect, ToolCallContext
 from .anthropic import (
     ANTHROPIC_MODELS,
