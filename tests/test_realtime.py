@@ -156,6 +156,65 @@ def test_missing_api_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize(
+    "api_key, padwan_key, base_url, expected_key, expected_url",
+    [
+        pytest.param(
+            "sk-explicit",
+            "pk-gateway",
+            "wss://example.com/rt",
+            "sk-explicit",
+            "wss://example.com/rt",
+            id="explicit_key_wins_over_gateway",
+        ),
+        pytest.param(
+            None,
+            "pk-gateway",
+            "wss://example.com/rt",
+            "pk-gateway",
+            "wss://example.com/rt",
+            id="custom_url_prefers_padwan_key",
+        ),
+        pytest.param(
+            None,
+            "pk-gateway",
+            None,
+            "sk-env",
+            "wss://api.openai.com/v1/realtime",
+            id="default_url_ignores_padwan_key",
+        ),
+        pytest.param(
+            None,
+            None,
+            "wss://example.com/rt",
+            "sk-env",
+            "wss://example.com/rt",
+            id="custom_url_falls_back_to_provider_env",
+        ),
+    ],
+)
+def test_factory_key_and_url_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+    api_key: str | None,
+    padwan_key: str | None,
+    base_url: str | None,
+    expected_key: str,
+    expected_url: str,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
+    if padwan_key is None:
+        monkeypatch.delenv("PADWAN_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("PADWAN_API_KEY", padwan_key)
+    client = (
+        RealtimeClient(api_key=api_key, base_url=base_url)
+        if base_url
+        else RealtimeClient(api_key=api_key)
+    )
+    assert client._api_key == expected_key
+    assert client.base_url == expected_url
+
+
+@pytest.mark.parametrize(
     "kwargs, expected_turn, has_transcription, instructions",
     [
         pytest.param(

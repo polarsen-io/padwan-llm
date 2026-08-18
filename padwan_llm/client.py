@@ -171,9 +171,9 @@ def RealtimeClient(
     """Create a realtime speech-to-speech client based on model name.
 
     Only OpenAI realtime models exist today, so every model routes to
-    :class:`OpenAIRealtimeClient`. An explicit *base_url* authenticates with
-    ``PADWAN_API_KEY`` when it is set and no *api_key* is given, so provider
-    keys are never sent to a custom endpoint.
+    :class:`OpenAIRealtimeClient`. When no *api_key* is given, an explicit
+    *base_url* prefers ``PADWAN_API_KEY`` over the provider env key (which
+    remains the fallback).
     """
     if base_url is None:
         return OpenAIRealtimeClient(model=model, api_key=api_key, timeout=timeout)

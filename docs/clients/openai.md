@@ -129,7 +129,7 @@ uv add "padwan-llm[realtime]"
 Audio in both directions is mono little-endian PCM16 at 24 kHz (`REALTIME_SAMPLE_RATE`), the `gpt-realtime` native rate.
 
 ```python
-from padwan_llm.openai import RealtimeClient
+from padwan_llm import RealtimeClient
 
 client = RealtimeClient(
     api_key="sk-...",      # or set OPENAI_API_KEY
@@ -145,7 +145,8 @@ client = RealtimeClient(
 By default the server decides when you have stopped talking. Stream microphone audio in with `append_audio` and consume events by async-iterating the connection:
 
 ```python
-from padwan_llm.openai import RealtimeClient, RealtimeServerEvent
+from padwan_llm import RealtimeClient
+from padwan_llm.openai import RealtimeServerEvent
 
 client = RealtimeClient()
 async with client.connect(instructions="Answer briefly.", voice="marin") as conn:
@@ -162,7 +163,8 @@ async with client.connect(instructions="Answer briefly.", voice="marin") as conn
 Pass `NO_TURN_DETECTION` to disable server VAD, then drive each turn yourself:
 
 ```python
-from padwan_llm.openai import NO_TURN_DETECTION, RealtimeClient
+from padwan_llm import RealtimeClient
+from padwan_llm.openai import NO_TURN_DETECTION
 
 client = RealtimeClient()
 async with client.connect(turn_detection=NO_TURN_DETECTION) as conn:
