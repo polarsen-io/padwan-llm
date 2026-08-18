@@ -2,6 +2,7 @@ from importlib.metadata import version as _pkg_version
 
 from ._base import ChatStream, LLMClientBase, OnThought
 from ._deprecation import ModelDeprecationWarning
+from ._realtime import RealtimeClientBase
 from .agent import AgentSession, ConversationStore, OnMcpConnect, ToolCallContext
 from .anthropic import (
     ANTHROPIC_MODELS,
@@ -9,7 +10,7 @@ from .anthropic import (
     AnthropicModel,
     is_anthropic_model,
 )
-from .client import LLMClient
+from .client import LLMClient, RealtimeClient
 from .content import (
     ContentImagePart,
     ContentPart,
@@ -45,7 +46,7 @@ from .openai import (
     OPENAI_MODELS,
     OpenAIClient,
     OpenAIModel,
-    RealtimeClient,
+    OpenAIRealtimeClient,
     RealtimeConnection,
     RealtimeServerEvent,
     is_openai_model,
@@ -93,7 +94,9 @@ __all__ = (
     "MistralModel",
     "OpenAIClient",
     "OpenAIModel",
+    "OpenAIRealtimeClient",
     "RealtimeClient",
+    "RealtimeClientBase",
     "RealtimeConnection",
     "RealtimeServerEvent",
     "Provider",

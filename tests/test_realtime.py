@@ -6,11 +6,11 @@ from typing import cast
 import niquests
 import pytest
 
+from padwan_llm import RealtimeClient
 from padwan_llm._json import loads as _json_loads
 from padwan_llm.errors import LLMError
 from padwan_llm.openai.realtime import (
     NO_TURN_DETECTION,
-    RealtimeClient,
     RealtimeConnection,
     RealtimeServerEvent,
 )

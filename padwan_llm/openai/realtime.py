@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import base64
 import enum
-import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, Literal, get_args
+from typing import Any, ClassVar, Literal, get_args
 
 import niquests
 
-from .._base import LLMError
+from .._base import LLMError, env_api_key
 from .._json import dumps as _json_dumps, loads as _json_loads
+from .._realtime import RealtimeClientBase
+from ..errors import Provider
 from ..logs import log
 
 __all__ = (
@@ -21,7 +22,7 @@ __all__ = (
     "NO_TURN_DETECTION",
     "RealtimeVoice",
     "RealtimeServerEvent",
-    "RealtimeClient",
+    "OpenAIRealtimeClient",
     "RealtimeConnection",
 )
 
@@ -98,27 +99,22 @@ class RealtimeServerEvent(enum.StrEnum):
 
 
 @dataclass
-class RealtimeClient:
-    """Speech-to-speech client for the OpenAI Realtime API over a WebSocket.
+class OpenAIRealtimeClient(RealtimeClientBase):
+    """Speech-to-speech client for the OpenAI Realtime API (``gpt-realtime``) over a WebSocket.
 
-    Talks to the GA ``gpt-realtime`` model; wire shapes follow
-    https://platform.openai.com/docs/guides/realtime. The transport is niquests'
-    native WebSocket support (requires the ``ws`` extra, i.e. ``padwan-llm[realtime]``).
-    Pass *api_key* explicitly or leave it unset to read ``OPENAI_API_KEY`` from the
-    environment. *timeout* bounds the opening handshake; on the open socket the
-    connection polls reads internally, so the model can stay silent between turns
-    without the connection being torn down.
+    Requires the ``realtime`` extra. *api_key* falls back to ``OPENAI_API_KEY``;
+    *timeout* bounds only the opening handshake — the open socket tolerates a
+    silent model between turns. Wire shapes:
+    https://platform.openai.com/docs/guides/realtime
     """
 
-    model: str = DEFAULT_REALTIME_MODEL
-    api_key: str | None = None
-    base_url: str = REALTIME_ENDPOINT
-    timeout: float = 30.0
+    provider: ClassVar[Provider] = "openai"
 
-    def __post_init__(self) -> None:
-        self._api_key = self.api_key or os.environ.get("OPENAI_API_KEY")
-        if not self._api_key:
-            raise LLMError("openai", "OPENAI_API_KEY not set")
+    model: str = DEFAULT_REALTIME_MODEL
+    base_url: str = REALTIME_ENDPOINT
+
+    def _get_default_api_key(self) -> str:
+        return env_api_key(self.provider, "OPENAI_API_KEY")
 
     @asynccontextmanager
     async def connect(
@@ -135,18 +131,12 @@ class RealtimeClient:
     ) -> AsyncIterator[RealtimeConnection]:
         """Open a configured realtime session and yield a :class:`RealtimeConnection`.
 
-        *instructions* is the system prompt steering the voice agent and *voice*
-        selects the spoken voice. *turn_detection* defaults to server-side VAD so
-        the model decides when you have stopped talking; pass an explicit mapping
-        (e.g. ``{"type": "semantic_vad"}``) to override, or :data:`NO_TURN_DETECTION`
-        to disable VAD and drive each turn manually (push-to-talk) with
+        *turn_detection* defaults to server-side VAD; pass a mapping to override,
+        or :data:`NO_TURN_DETECTION` to drive turns manually (push-to-talk) with
         :meth:`RealtimeConnection.commit_audio` + :meth:`RealtimeConnection.create_response`.
-        *transcription_model* enables transcription of your own speech (set to
-        ``None`` to disable). The session is configured before control returns and
-        closed automatically on exit. Pass *session* to reuse a caller-owned
-        ``AsyncSession`` (left open on exit), or *session_kwargs* to forward
-        constructor arguments (e.g. proxies) to the internally managed session;
-        the two are mutually exclusive.
+        *transcription_model* ``None`` disables transcription of your own speech.
+        Pass *session* to reuse a caller-owned ``AsyncSession`` (left open on
+        exit), or *session_kwargs* for the internally managed one — not both.
         """
         if session is not None and session_kwargs is not None:
             raise ValueError("pass either session or session_kwargs, not both")

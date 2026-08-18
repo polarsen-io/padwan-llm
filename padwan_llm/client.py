@@ -6,9 +6,15 @@ from .anthropic import AnthropicClient, AnthropicModel, is_anthropic_model
 from .gemini import GeminiClient, GeminiModel, is_gemini_model
 from .grok import GrokClient, GrokModel, is_grok_model
 from .mistral import MistralClient, MistralModel, is_mistral_model
-from .openai import OpenAIClient, OpenAIModel, is_openai_model
+from .openai import (
+    DEFAULT_REALTIME_MODEL,
+    OpenAIClient,
+    OpenAIModel,
+    OpenAIRealtimeClient,
+    is_openai_model,
+)
 
-__all__ = ("LLMClient",)
+__all__ = ("LLMClient", "RealtimeClient")
 
 # Unified gateway: a single OpenAI-compatible endpoint + token serving every
 # model family. Set these to route all models through one endpoint/token
@@ -153,3 +159,26 @@ def LLMClient(
     if kwargs["api_key"] is None:
         kwargs["api_key"] = "no-key-required"
     return OpenAIClient(**kwargs)
+
+
+def RealtimeClient(
+    model: str = DEFAULT_REALTIME_MODEL,
+    *,
+    timeout: float = 30.0,
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> OpenAIRealtimeClient:
+    """Create a realtime speech-to-speech client based on model name.
+
+    Only OpenAI realtime models exist today, so every model routes to
+    :class:`OpenAIRealtimeClient`. An explicit *base_url* authenticates with
+    ``PADWAN_API_KEY`` when it is set and no *api_key* is given, so provider
+    keys are never sent to a custom endpoint.
+    """
+    if base_url is None:
+        return OpenAIRealtimeClient(model=model, api_key=api_key, timeout=timeout)
+    if api_key is None and (padwan_key := os.environ.get(PADWAN_API_KEY_ENV)):
+        api_key = padwan_key
+    return OpenAIRealtimeClient(
+        model=model, api_key=api_key, base_url=base_url, timeout=timeout
+    )
