@@ -215,7 +215,9 @@ class RealtimeClientBase(abc.ABC):
     """Abstract base for realtime speech-to-speech clients over a WebSocket.
 
     Use provider-specific clients (OpenAIRealtimeClient, ...) or the
-    :func:`padwan_llm.RealtimeClient` factory instead.
+    :func:`padwan_llm.RealtimeClient` factory instead. Open the client with
+    ``async with`` (owns the underlying ``AsyncSession``), then call
+    :meth:`connect` for each realtime connection.
     """
 
     provider: ClassVar[Provider]
@@ -224,11 +226,45 @@ class RealtimeClientBase(abc.ABC):
     api_key: str | None = field(default=None, repr=False)
     base_url: str = ""
     timeout: float = 30.0
+    session_kwargs: Mapping[str, Any] | None = field(default=None, repr=False)
+    """Constructor arguments (e.g. proxies) for the managed ``AsyncSession``."""
 
     _api_key: str = field(init=False, repr=False)
+    _session: niquests.AsyncSession | None = field(init=False, default=None, repr=False)
 
     def __post_init__(self) -> None:
         self._api_key = self.api_key or self._get_default_api_key()
+
+    @property
+    def session(self) -> niquests.AsyncSession:
+        """Get active session, raising if not initialized."""
+        if self._session is None:
+            raise LLMError(
+                self.provider, "Client not initialized. Use async context manager."
+            )
+        return self._session
+
+    async def __aenter__(self) -> Self:
+        if self._session is not None:
+            raise RuntimeError(
+                f"{type(self).__name__} is already open; "
+                "using the same client in nested `async with` blocks is not supported"
+            )
+        self._session = niquests.AsyncSession(**(self.session_kwargs or {}))
+        self._set_auth_headers(self._session)
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        if self._session:
+            try:
+                await self._session.close()
+            finally:
+                self._session = None
 
     @abc.abstractmethod
     def _get_default_api_key(self) -> str:
@@ -236,6 +272,11 @@ class RealtimeClientBase(abc.ABC):
         ...
 
     @abc.abstractmethod
+    def _set_auth_headers(self, session: niquests.AsyncSession) -> None:
+        """Set provider-specific authentication headers."""
+        ...
+
+    @abc.abstractmethod
     def connect(self) -> AbstractAsyncContextManager[Any]:
-        """Open a configured realtime session and yield a live connection."""
+        """Open a configured realtime connection over the client's session."""
         ...

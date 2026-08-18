@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import enum
 from collections.abc import AsyncIterator, Mapping, Sequence
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, ClassVar, Literal, get_args
 
@@ -115,6 +115,9 @@ class OpenAIRealtimeClient(RealtimeClientBase):
     def _get_default_api_key(self) -> str:
         return env_api_key(self.provider, "OPENAI_API_KEY")
 
+    def _set_auth_headers(self, session: niquests.AsyncSession) -> None:
+        session.headers["Authorization"] = f"Bearer {self._api_key}"
+
     @asynccontextmanager
     async def connect(
         self,
@@ -125,54 +128,43 @@ class OpenAIRealtimeClient(RealtimeClientBase):
         transcription_model: str | None = "whisper-1",
         output_modalities: Sequence[str] = ("audio",),
         sample_rate: int = REALTIME_SAMPLE_RATE,
-        session: niquests.AsyncSession | None = None,
-        session_kwargs: Mapping[str, Any] | None = None,
     ) -> AsyncIterator[RealtimeConnection]:
         """Open a configured realtime session and yield a :class:`RealtimeConnection`.
 
+        The client must be open (``async with client:``); each call opens an
+        independent connection over the client's session.
         *turn_detection* defaults to server-side VAD; pass a mapping to override,
         or :data:`NO_TURN_DETECTION` to drive turns manually (push-to-talk) with
         :meth:`RealtimeConnection.commit_audio` + :meth:`RealtimeConnection.create_response`.
         *transcription_model* ``None`` disables transcription of your own speech.
-        Pass *session* to reuse a caller-owned ``AsyncSession`` (left open on
-        exit), or *session_kwargs* for the internally managed one — not both.
         """
-        if session is not None and session_kwargs is not None:
-            raise ValueError("pass either session or session_kwargs, not both")
-        headers = {"Authorization": f"Bearer {self._api_key}"}
-        async with AsyncExitStack() as stack:
-            if session is None:
-                session = await stack.enter_async_context(
-                    niquests.AsyncSession(**(session_kwargs or {}))
-                )
-            # timeout bounds only the upgrade handshake; afterwards the read
-            # timeout is re-armed as the poll interval (see _enable_read_polling).
-            resp = await session.get(
-                self.base_url,
-                headers=headers,
-                params={"model": self.model},
-                timeout=self.timeout,
+        # timeout bounds only the upgrade handshake; afterwards the read
+        # timeout is re-armed as the poll interval (see _enable_read_polling).
+        resp = await self.session.get(
+            self.base_url,
+            params={"model": self.model},
+            timeout=self.timeout,
+        )
+        ext = resp.extension
+        if ext is None:
+            raise LLMError(
+                "openai",
+                f"realtime handshake did not upgrade to a websocket "
+                f"(status {resp.status_code})",
             )
-            ext = resp.extension
-            if ext is None:
-                raise LLMError(
-                    "openai",
-                    f"realtime handshake did not upgrade to a websocket "
-                    f"(status {resp.status_code})",
-                )
-            _enable_read_polling(ext, _READ_POLL_INTERVAL)
-            conn = RealtimeConnection(ext, sample_rate=sample_rate)
-            await conn.configure(
-                instructions=instructions,
-                voice=voice,
-                turn_detection=turn_detection,
-                transcription_model=transcription_model,
-                output_modalities=list(output_modalities),
-            )
-            try:
-                yield conn
-            finally:
-                await conn.close()
+        _enable_read_polling(ext, _READ_POLL_INTERVAL)
+        conn = RealtimeConnection(ext, sample_rate=sample_rate)
+        await conn.configure(
+            instructions=instructions,
+            voice=voice,
+            turn_detection=turn_detection,
+            transcription_model=transcription_model,
+            output_modalities=list(output_modalities),
+        )
+        try:
+            yield conn
+        finally:
+            await conn.close()
 
 
 @dataclass

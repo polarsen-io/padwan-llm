@@ -140,6 +140,8 @@ client = RealtimeClient(
 
 `timeout` bounds only the WebSocket upgrade handshake. Reads on the open socket are unbounded, so the model can stay silent between turns without the connection being torn down.
 
+Open the client with `async with` (it owns the underlying `niquests.AsyncSession`), then call `connect()` for each realtime connection.
+
 ### Conversation with server VAD (default)
 
 By default the server decides when you have stopped talking. Stream microphone audio in with `append_audio` and consume events by async-iterating the connection:
@@ -148,14 +150,14 @@ By default the server decides when you have stopped talking. Stream microphone a
 from padwan_llm import RealtimeClient
 from padwan_llm.openai import RealtimeServerEvent
 
-client = RealtimeClient()
-async with client.connect(instructions="Answer briefly.", voice="marin") as conn:
-    await conn.append_audio(pcm16_chunk)  # mono PCM16 @ 24 kHz
-    async for event in conn:
-        if audio := conn.audio_delta_bytes(event):
-            playback.write(audio)  # PCM16 bytes
-        elif event["type"] == RealtimeServerEvent.RESPONSE_DONE:
-            break
+async with RealtimeClient() as client:
+    async with client.connect(instructions="Answer briefly.", voice="marin") as conn:
+        await conn.append_audio(pcm16_chunk)  # mono PCM16 @ 24 kHz
+        async for event in conn:
+            if audio := conn.audio_delta_bytes(event):
+                playback.write(audio)  # PCM16 bytes
+            elif event["type"] == RealtimeServerEvent.RESPONSE_DONE:
+                break
 ```
 
 ### Push-to-talk (manual turns)
@@ -166,26 +168,24 @@ Pass `NO_TURN_DETECTION` to disable server VAD, then drive each turn yourself:
 from padwan_llm import RealtimeClient
 from padwan_llm.openai import NO_TURN_DETECTION
 
-client = RealtimeClient()
-async with client.connect(turn_detection=NO_TURN_DETECTION) as conn:
-    await conn.append_audio(recorded_pcm16)
-    await conn.commit_audio()
-    await conn.create_response()
-    async for event in conn:
-        ...
+async with RealtimeClient() as client:
+    async with client.connect(turn_detection=NO_TURN_DETECTION) as conn:
+        await conn.append_audio(recorded_pcm16)
+        await conn.commit_audio()
+        await conn.create_response()
+        async for event in conn:
+            ...
 ```
 
-### Reusing an HTTP session
+### Session configuration
 
-`connect()` creates and closes its own `niquests.AsyncSession` per connection. Pass `session=` to reuse a caller-owned session (left open on exit), or `session_kwargs=` to forward constructor arguments to the internally managed one; the two are mutually exclusive.
+The client creates its `AsyncSession` in `__aenter__` and closes it in `__aexit__`; every `connect()` reuses it. Pass `session_kwargs=` to the client to forward constructor arguments (e.g. proxies) to that session:
 
 ```python
-import niquests
-
-async with niquests.AsyncSession() as session:
-    async with client.connect(session=session) as conn:
+async with OpenAIRealtimeClient(session_kwargs={"proxies": {...}}) as client:
+    async with client.connect() as conn:
         ...
-    # session is still open here for the next connect()
+    # client is still open here for the next connect()
 ```
 
 ### `connect()` parameters
