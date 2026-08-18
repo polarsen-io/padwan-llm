@@ -47,8 +47,9 @@ def _enable_read_polling(ext: Any, interval: float) -> None:
     """Arm the ws socket read timeout that drives send/receive interleaving.
 
     Reaches through transport internals (the connection behind the extension's
-    stream reader) because no public knob exists; best effort — without it,
-    sends block until the server happens to emit an event.
+    stream reader) because no public knob exists (see
+    https://github.com/jawah/urllib3.future/issues/400); best effort — without
+    it, sends block until the server happens to emit an event.
     """
     try:
         conn = ext._dsa._read.__self__
