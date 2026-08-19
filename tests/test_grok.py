@@ -1,3 +1,5 @@
+# xai-sdk is absent on 3.15 (grpcio), leaving these imports unresolved there
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
 from typing import cast, get_type_hints
 
 import pytest
