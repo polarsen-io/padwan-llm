@@ -5,7 +5,7 @@ import enum
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
 from .._base import NO_TURN_DETECTION, RealtimeClientBase
 from .._ws import READ_POLL_INTERVAL, WsConnection, enable_read_polling
@@ -14,6 +14,13 @@ from .client import _OpenAIAuth
 
 if TYPE_CHECKING:
     import niquests
+    from openai.types.realtime import (
+        RealtimeAudioConfigInputParam,
+        RealtimeAudioInputTurnDetectionParam,
+        RealtimeSessionCreateRequestParam,
+        SessionUpdateEventParam,
+    )
+    from openai.types.realtime.realtime_audio_formats_param import AudioPCM
 
 __all__ = (
     "DEFAULT_REALTIME_MODEL",
@@ -145,26 +152,37 @@ class RealtimeConnection(WsConnection):
         """Build the ``session.update`` event for the GA Realtime schema.
 
         Split out from :meth:`configure` so the payload can be inspected and
-        unit-tested without a live connection. *turn_detection* of
+        unit-tested without a live connection; the construction is typed against
+        the OpenAI SDK's ``session.update`` params so wire drift surfaces at
+        type-check time on SDK bumps. *turn_detection* of
         :data:`NO_TURN_DETECTION` emits a JSON ``null`` to disable server VAD; a
         falsy value uses the ``server_vad`` default; a mapping is sent verbatim.
         """
-        audio_format = {"type": "audio/pcm", "rate": self.sample_rate}
+        audio_format: AudioPCM = {
+            "type": "audio/pcm",
+            # The SDK pins 24 kHz; Grok speaks the same wire at other rates.
+            "rate": cast("Literal[24000]", self.sample_rate),
+        }
         if isinstance(turn_detection, str):
-            detection: dict[str, Any] | None = None  # NO_TURN_DETECTION -> JSON null
+            detection: RealtimeAudioInputTurnDetectionParam | None = None
         elif turn_detection:
-            detection = dict(turn_detection)
+            # Caller-supplied mapping, sent verbatim.
+            detection = cast(
+                "RealtimeAudioInputTurnDetectionParam", dict(turn_detection)
+            )
         else:
             detection = {"type": "server_vad"}
-        audio_input: dict[str, Any] = {
+        audio_input: RealtimeAudioConfigInputParam = {
             "format": audio_format,
             "turn_detection": detection,
         }
         if transcription_model:
             audio_input["transcription"] = {"model": transcription_model}
-        session: dict[str, Any] = {
+        session: RealtimeSessionCreateRequestParam = {
             "type": "realtime",
-            "output_modalities": list(output_modalities),
+            "output_modalities": cast(
+                "list[Literal['text', 'audio']]", list(output_modalities)
+            ),
             "audio": {
                 "input": audio_input,
                 "output": {"format": audio_format, "voice": voice},
@@ -172,7 +190,8 @@ class RealtimeConnection(WsConnection):
         }
         if instructions:
             session["instructions"] = instructions
-        return {"type": "session.update", "session": session}
+        event: SessionUpdateEventParam = {"type": "session.update", "session": session}
+        return cast("dict[str, Any]", event)
 
     async def configure(
         self,
