@@ -2,7 +2,9 @@ import base64
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict, cast, get_args
+from typing import Any, Literal, NotRequired, TypedDict, cast, get_args
+
+import niquests
 
 from .._base import NO_TURN_DETECTION, RealtimeClientBase
 from .._ws import READ_POLL_INTERVAL, WsConnection, enable_read_polling
@@ -10,9 +12,6 @@ from ..errors import LLMError
 from ..logs import log
 from .client import _GeminiAuth
 from .models import SystemInstruction
-
-if TYPE_CHECKING:
-    import niquests
 
 __all__ = (
     "DEFAULT_LIVE_MODEL",
