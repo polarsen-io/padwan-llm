@@ -2,10 +2,7 @@
 # Maps a still-served Mistral model id to its ISO-8601 retirement date.
 
 DEPRECATED: dict[str, str] = {
-    "devstral-latest": "2026-07-31T12:00:00Z",
-    "devstral-medium-latest": "2026-07-31T12:00:00Z",
-    "magistral-medium-latest": "2026-07-31T12:00:00Z",
-    "mistral-code-agent-latest": "2026-07-31T12:00:00Z",
-    "mistral-tiny-latest": "2026-07-31T12:00:00Z",
-    "open-mistral-nemo": "2026-07-31T12:00:00Z",
+    "devstral-latest": "2026-08-31T12:00:00Z",
+    "devstral-medium-latest": "2026-08-31T12:00:00Z",
+    "mistral-code-agent-latest": "2026-08-31T12:00:00Z",
 }
