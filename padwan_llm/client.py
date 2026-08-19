@@ -1,6 +1,6 @@
 import os
 from collections.abc import Mapping, Sequence
-from typing import Any, NotRequired, TypedDict, overload
+from typing import Any, Never, NotRequired, TypedDict, overload
 
 from ._base import LLMClientBase, OnThought
 from .anthropic import AnthropicClient, AnthropicModel, is_anthropic_model
@@ -188,7 +188,7 @@ def RealtimeClient(
     instructions: str | None = None,
     voice: str | None = None,
     turn_detection: Mapping[str, Any] | str | None = None,
-    transcription_model: str | None = None,
+    transcription_model: Never = ...,
     output_modalities: Sequence[str] = ("audio",),
     sample_rate: int = REALTIME_SAMPLE_RATE,
     timeout: float = 30.0,
@@ -264,9 +264,13 @@ def RealtimeClient(
             api_key=api_key,
             timeout=timeout,
         )
-        # Grok transcribes natively; only forward the OpenAI-style default there
-        # when explicitly set.
-        if not is_grok_model(model) or transcription_model != "whisper-1":
+        if is_grok_model(model):
+            # Grok transcribes natively; the "whisper-1" default stands for unset.
+            if transcription_model not in (None, "whisper-1"):
+                raise ValueError(
+                    "Grok Voice transcribes natively; transcription_model is not supported"
+                )
+        else:
             client.transcription_model = transcription_model
     if voice is not None:
         client.voice = voice

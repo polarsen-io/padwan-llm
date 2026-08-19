@@ -93,7 +93,7 @@ class GrokClient(_GrokAuth, _OpenAIBase):
     async def create_batch(
         self,
         requests: list[GrokBatchRequest],
-        name: str = "",
+        name: str | None = None,
         model: str | None = None,
     ) -> GrokBatchJob:
         """Create a batch and submit requests to it.

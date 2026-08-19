@@ -223,7 +223,7 @@ class RealtimeClientBase[ConnT](abc.ABC):
 
     model: str
     api_key: str | None = field(default=None, repr=False)
-    base_url: str = ""
+    base_url: str = field(kw_only=True)
     timeout: float = 30.0
     session_kwargs: Mapping[str, Any] | None = field(default=None, repr=False)
     """Constructor arguments (e.g. proxies) for the managed ``AsyncSession``."""

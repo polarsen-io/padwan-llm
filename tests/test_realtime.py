@@ -423,8 +423,11 @@ def test_factory_provider_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert RealtimeClient("gemini-3.1-flash-live-preview").voice == "Puck"
     assert RealtimeClient("grok-voice-latest").voice == "eve"
     assert RealtimeClient("grok-voice-latest", voice="ara").voice == "ara"
-    # Grok transcribes natively: the OpenAI-style default is not forwarded.
+    # Grok transcribes natively: the OpenAI-style default is not forwarded,
+    # and an explicit transcription model is rejected.
     assert RealtimeClient("grok-voice-latest").transcription_model is None
+    with pytest.raises(ValueError, match="transcribes natively"):
+        RealtimeClient("grok-voice-latest", transcription_model="scribe-x")
     with pytest.raises(ValueError, match="sample_rate is fixed"):
         RealtimeClient("gemini-3.1-flash-live-preview", sample_rate=8_000)
 
