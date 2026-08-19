@@ -36,7 +36,10 @@ LIVE_ENDPOINT = (
 )
 DEFAULT_LIVE_MODEL = "gemini-3.1-flash-live-preview"
 
-GeminiLiveModel = Literal["gemini-3.1-flash-live-preview"]
+GeminiLiveModel = Literal[
+    "gemini-3.1-flash-live-preview",
+    "gemini-2.5-flash-native-audio-latest",
+]
 
 # The Live API is asymmetric: mono little-endian PCM16 at 16 kHz in, 24 kHz out.
 LIVE_INPUT_SAMPLE_RATE = 16_000

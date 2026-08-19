@@ -35,6 +35,7 @@ from piou import Cli, MaybePath, Option
 
 from padwan_llm.anthropic.client import ANTHROPIC_MODELS, ANTHROPIC_VERSION
 from padwan_llm.gemini.client import GEMINI_MODELS
+from padwan_llm.gemini.realtime import DEFAULT_LIVE_MODEL, GeminiLiveModel
 from padwan_llm.grok.client import GROK_MODELS
 from padwan_llm.mistral.client import (
     MISTRAL_MODELS,
@@ -89,6 +90,8 @@ _GEMINI_BLACKLIST = (
     "robotics",
 )
 _GEMINI_OLD_PREFIXES = ("gemini-1.", "gemini-2.0-")
+# Streaming specialists that are not general speech-to-speech models.
+_GEMINI_REALTIME_BLACKLIST = ("translate",)
 
 _MISTRAL_BLACKLIST = ("mistral-vibe-cli",)
 
@@ -225,6 +228,12 @@ def _is_public_mistral_model(model_id: str) -> bool:
     return not any(b in model_id for b in _MISTRAL_BLACKLIST)
 
 
+def _is_gemini_realtime_model(model_id: str) -> bool:
+    if not _is_gemini_text_model(model_id):
+        return False
+    return not any(b in model_id for b in _GEMINI_REALTIME_BLACKLIST)
+
+
 def _is_grok_public_model(model_id: str) -> bool:
     if not model_id.startswith("grok-"):
         return False
@@ -307,7 +316,10 @@ def _openai_live_aliases() -> RemoteModels:
     return RemoteModels(keep)
 
 
-def _gemini_live_models() -> RemoteModels:
+def _gemini_models(
+    method: str, keep_model: typing.Callable[[str], bool]
+) -> RemoteModels:
+    """List Gemini models supporting *method*, filtered by *keep_model*."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return RemoteModels(set(), skipped="GEMINI_API_KEY is not configured")
@@ -327,7 +339,7 @@ def _gemini_live_models() -> RemoteModels:
                 if not isinstance(item, dict):
                     continue
                 supported = _strings(item.get("supportedGenerationMethods"))
-                if "generateContent" not in supported:
+                if method not in supported:
                     continue
 
                 names = [
@@ -338,7 +350,7 @@ def _gemini_live_models() -> RemoteModels:
                     if name is None:
                         continue
                     model_id = name.removeprefix("models/")
-                    if _is_gemini_text_model(model_id):
+                    if keep_model(model_id):
                         keep.add(model_id)
 
             raw_token = data.get("nextPageToken") if isinstance(data, dict) else None
@@ -349,6 +361,14 @@ def _gemini_live_models() -> RemoteModels:
         return RemoteModels(set(), error=str(e))
 
     return RemoteModels(keep)
+
+
+def _gemini_live_models() -> RemoteModels:
+    return _gemini_models("generateContent", _is_gemini_text_model)
+
+
+def _gemini_realtime_models() -> RemoteModels:
+    return _gemini_models("bidiGenerateContent", _is_gemini_realtime_model)
 
 
 def _mistral_live_models() -> RemoteModels:
@@ -746,6 +766,22 @@ def check(
                 "Only models supporting `generateContent` are considered. "
                 "Embedding, image-generation, video, TTS, robotics, old, and "
                 "versioned names are filtered.",
+            ),
+        ),
+        _live_check(
+            "Gemini Live (realtime)",
+            "GET https://generativelanguage.googleapis.com/v1beta/models",
+            "padwan_llm/gemini/realtime.py::GeminiLiveModel, DEFAULT_LIVE_MODEL",
+            "https://ai.google.dev/gemini-api/docs/live",
+            _gemini_realtime_models(),
+            set(typing.get_args(GeminiLiveModel)) | {DEFAULT_LIVE_MODEL},
+            notes=(
+                "Only models supporting `bidiGenerateContent` are considered, "
+                "with the text-model filters plus streaming specialists "
+                "(translate) removed.",
+                "Grok voice models cannot be checked: the xAI API does not "
+                "list them; `grok-voice-latest` is a rolling alias maintained "
+                "upstream.",
             ),
         ),
         mistral_check,
