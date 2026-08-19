@@ -22,13 +22,12 @@ from padwan_llm import (
 )
 from padwan_llm._json import loads as _json_loads
 from padwan_llm.errors import LLMError
-from padwan_llm.gemini.realtime import (
-    DEFAULT_LIVE_MODEL,
-    LIVE_ENDPOINT,
+from padwan_llm.gemini.models import (
     AutomaticActivityDetection,
     LiveGenerationConfig,
     LiveSetup,
 )
+from padwan_llm.gemini.realtime import DEFAULT_LIVE_MODEL, LIVE_ENDPOINT
 from padwan_llm.openai.realtime import (
     NO_TURN_DETECTION,
     RealtimeConnection,

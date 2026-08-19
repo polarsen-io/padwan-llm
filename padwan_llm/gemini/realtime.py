@@ -2,7 +2,7 @@ import base64
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, Literal, NotRequired, TypedDict, cast, get_args
+from typing import Any, Literal, cast, get_args
 
 import niquests
 
@@ -11,7 +11,12 @@ from .._ws import READ_POLL_INTERVAL, WsConnection, enable_read_polling
 from ..errors import LLMError
 from ..logs import log
 from .client import _GeminiAuth
-from .models import SystemInstruction
+from .models import (
+    AutomaticActivityDetection,
+    LiveGenerationConfig,
+    LiveSetup,
+    LiveSetupMessage,
+)
 
 __all__ = (
     "DEFAULT_LIVE_MODEL",
@@ -19,14 +24,10 @@ __all__ = (
     "LIVE_INPUT_SAMPLE_RATE",
     "LIVE_OUTPUT_SAMPLE_RATE",
     "NO_TURN_DETECTION",
-    "AutomaticActivityDetection",
     "GeminiLiveModel",
     "GeminiRealtimeClient",
     "GeminiRealtimeConnection",
     "GeminiVoice",
-    "LiveGenerationConfig",
-    "LiveSetup",
-    "LiveSetupMessage",
 )
 
 LIVE_ENDPOINT = (
@@ -54,56 +55,6 @@ _KnownGeminiVoice = Literal[
 # `| str` keeps arbitrary voices valid while the Literal member drives IDE completion.
 type GeminiVoice = _KnownGeminiVoice | str
 _GEMINI_VOICES: tuple[str, ...] = get_args(_KnownGeminiVoice)
-
-
-# Wire shapes of BidiGenerateContentSetup, mirrored locally with the camelCase
-# keys the ws API expects; tests map them to google-genai's snake_case types.
-
-
-class _PrebuiltVoiceConfig(TypedDict):
-    voiceName: str
-
-
-class _VoiceConfig(TypedDict):
-    prebuiltVoiceConfig: _PrebuiltVoiceConfig
-
-
-class _SpeechConfig(TypedDict):
-    voiceConfig: _VoiceConfig
-
-
-class LiveGenerationConfig(TypedDict):
-    responseModalities: list[str]
-    speechConfig: _SpeechConfig
-
-
-class AutomaticActivityDetection(TypedDict, total=False):
-    disabled: bool
-    startOfSpeechSensitivity: str
-    endOfSpeechSensitivity: str
-    prefixPaddingMs: int
-    silenceDurationMs: int
-
-
-class _RealtimeInputConfig(TypedDict):
-    automaticActivityDetection: AutomaticActivityDetection
-
-
-class _AudioTranscriptionConfig(TypedDict):
-    """Empty by design — presence alone enables transcription."""
-
-
-class LiveSetup(TypedDict):
-    model: str
-    generationConfig: LiveGenerationConfig
-    systemInstruction: NotRequired[SystemInstruction]
-    realtimeInputConfig: NotRequired[_RealtimeInputConfig]
-    inputAudioTranscription: NotRequired[_AudioTranscriptionConfig]
-    outputAudioTranscription: NotRequired[_AudioTranscriptionConfig]
-
-
-class LiveSetupMessage(TypedDict):
-    setup: LiveSetup
 
 
 @dataclass

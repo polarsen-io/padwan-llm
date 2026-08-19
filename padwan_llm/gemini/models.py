@@ -28,6 +28,16 @@ __all__ = (
     "InlinedResponse",
     "BatchDestination",
     "BatchRequestPayload",
+    # Live (realtime) types
+    "AudioTranscriptionConfig",
+    "AutomaticActivityDetection",
+    "LiveGenerationConfig",
+    "LiveSetup",
+    "LiveSetupMessage",
+    "PrebuiltVoiceConfig",
+    "RealtimeInputConfig",
+    "SpeechConfig",
+    "VoiceConfig",
 )
 
 
@@ -192,3 +202,53 @@ class CompletionBody(TypedDict):
     systemInstruction: NotRequired[SystemInstruction]
     generationConfig: NotRequired[GenerationConfig]
     tools: NotRequired[list[GeminiTool]]
+
+
+# Live (realtime) wire shapes of BidiGenerateContentSetup; camelCase keys as
+# the ws API expects, mapped to google-genai's snake_case types by tests.
+
+
+class PrebuiltVoiceConfig(TypedDict):
+    voiceName: str
+
+
+class VoiceConfig(TypedDict):
+    prebuiltVoiceConfig: PrebuiltVoiceConfig
+
+
+class SpeechConfig(TypedDict):
+    voiceConfig: VoiceConfig
+
+
+class LiveGenerationConfig(TypedDict):
+    responseModalities: list[str]
+    speechConfig: SpeechConfig
+
+
+class AutomaticActivityDetection(TypedDict, total=False):
+    disabled: bool
+    startOfSpeechSensitivity: str
+    endOfSpeechSensitivity: str
+    prefixPaddingMs: int
+    silenceDurationMs: int
+
+
+class RealtimeInputConfig(TypedDict):
+    automaticActivityDetection: AutomaticActivityDetection
+
+
+class AudioTranscriptionConfig(TypedDict):
+    """Empty by design — presence alone enables transcription."""
+
+
+class LiveSetup(TypedDict):
+    model: str
+    generationConfig: LiveGenerationConfig
+    systemInstruction: NotRequired[SystemInstruction]
+    realtimeInputConfig: NotRequired[RealtimeInputConfig]
+    inputAudioTranscription: NotRequired[AudioTranscriptionConfig]
+    outputAudioTranscription: NotRequired[AudioTranscriptionConfig]
+
+
+class LiveSetupMessage(TypedDict):
+    setup: LiveSetup
