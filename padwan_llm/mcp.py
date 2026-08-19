@@ -31,10 +31,10 @@ from .models import ToolDefinition
 __version__ = _pkg_version("padwan-llm")
 
 __all__ = (
+    "McpStdio",
+    "McpStreamable",
     "McpTool",
     "McpTransport",
-    "McpStreamable",
-    "McpStdio",
     "OnAuth",
     "ProgressEvent",
 )
@@ -698,7 +698,7 @@ class McpStdio:
             try:
                 await asyncio.wait_for(self._process.wait(), timeout=2.0)
                 return
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
         log.warning("MCP stdio child did not exit after SIGKILL")
 

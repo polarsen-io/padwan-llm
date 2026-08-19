@@ -1,8 +1,16 @@
 import asyncio
 import base64
+import re
+from typing import get_type_hints
 
 import niquests
 import pytest
+from google.genai.types import (
+    LiveClientRealtimeInputDict,
+    LiveClientSetupDict,
+    LiveConnectConfigDict,
+    LiveServerContentDict,
+)
 
 from padwan_llm import (
     GeminiRealtimeClient,
@@ -413,3 +421,56 @@ def test_factory_provider_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert RealtimeClient("grok-voice-latest").transcription_model is None
     with pytest.raises(ValueError, match="sample_rate is fixed"):
         RealtimeClient("gemini-3.1-flash-live-preview", sample_rate=8_000)
+
+
+def _camel_to_snake(name: str) -> str:
+    return re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", name).lower()
+
+
+def test_gemini_setup_sdk_compat() -> None:
+    """Every key of our setup message maps to a field in google-genai's Live types.
+
+    The SDK splits the wire setup across LiveClientSetup and LiveConnectConfig
+    (its converters merge the latter into ``setup``), so both are checked.
+    """
+    client = GeminiRealtimeClient(
+        api_key="g", instructions="x", turn_detection=NO_TURN_DETECTION
+    )
+    setup = client.setup_payload()["setup"]
+    setup_fields = set(get_type_hints(LiveClientSetupDict)) | set(
+        get_type_hints(LiveConnectConfigDict)
+    )
+    for key in setup:
+        assert _camel_to_snake(key) in setup_fields, key
+    config_fields = set(get_type_hints(LiveConnectConfigDict))
+    for key in setup["generationConfig"]:
+        assert _camel_to_snake(key) in config_fields, key
+
+
+async def test_gemini_realtime_input_sdk_compat() -> None:
+    """Every realtimeInput key we send maps to a LiveClientRealtimeInput field."""
+    ext = FakeExt()
+    conn = GeminiRealtimeConnection(ext)
+    await conn.append_audio(b"\x00\x00")
+    await conn.send_text("hi")
+    await conn.activity_start()
+    await conn.activity_end()
+    await conn.audio_stream_end()
+    fields = set(get_type_hints(LiveClientRealtimeInputDict))
+    for sent in ext.sent:
+        for key in _json_loads(sent)["realtimeInput"]:
+            assert _camel_to_snake(key) in fields, key
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        pytest.param("modelTurn", id="model_turn"),
+        pytest.param("turnComplete", id="turn_complete"),
+        pytest.param("inputTranscription", id="input_transcription"),
+        pytest.param("outputTranscription", id="output_transcription"),
+    ],
+)
+def test_gemini_server_content_sdk_compat(key: str) -> None:
+    """The serverContent keys our accessors read exist in LiveServerContent."""
+    assert _camel_to_snake(key) in get_type_hints(LiveServerContentDict)

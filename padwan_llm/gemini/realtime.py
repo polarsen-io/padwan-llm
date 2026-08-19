@@ -2,9 +2,7 @@ import base64
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, Literal, get_args
-
-import niquests
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from .._base import NO_TURN_DETECTION, RealtimeClientBase
 from .._ws import READ_POLL_INTERVAL, WsConnection, enable_read_polling
@@ -12,16 +10,19 @@ from ..errors import LLMError
 from ..logs import log
 from .client import _GeminiAuth
 
+if TYPE_CHECKING:
+    import niquests
+
 __all__ = (
-    "LIVE_ENDPOINT",
     "DEFAULT_LIVE_MODEL",
+    "LIVE_ENDPOINT",
     "LIVE_INPUT_SAMPLE_RATE",
     "LIVE_OUTPUT_SAMPLE_RATE",
     "NO_TURN_DETECTION",
     "GeminiLiveModel",
-    "GeminiVoice",
     "GeminiRealtimeClient",
     "GeminiRealtimeConnection",
+    "GeminiVoice",
 )
 
 LIVE_ENDPOINT = (

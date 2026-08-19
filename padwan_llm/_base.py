@@ -20,9 +20,9 @@ if TYPE_CHECKING:
     from types import TracebackType
 
 __all__ = (
+    "NO_TURN_DETECTION",
     "ChatStream",
     "LLMClientBase",
-    "NO_TURN_DETECTION",
     "OnThought",
     "Provider",
     "RealtimeClientBase",

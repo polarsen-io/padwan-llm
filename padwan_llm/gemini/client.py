@@ -94,9 +94,9 @@ GeminiModel = Literal[
 ]
 
 __all__ = (
-    "GeminiClient",
-    "GEMINI_MODELS",
     "GEMINI_ENDPOINT",
+    "GEMINI_MODELS",
+    "GeminiClient",
     "GeminiModel",
     "is_gemini_model",
 )

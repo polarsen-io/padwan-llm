@@ -134,12 +134,12 @@ OpenAIModel = Literal[
 ]
 
 __all__ = (
-    "_OpenAIBase",
-    "OpenAIClient",
-    "OPENAI_MODELS",
     "OPENAI_CHAT_MODELS",
     "OPENAI_ENDPOINT",
+    "OPENAI_MODELS",
+    "OpenAIClient",
     "OpenAIModel",
+    "_OpenAIBase",
     "is_openai_model",
 )
 

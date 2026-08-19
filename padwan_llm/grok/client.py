@@ -55,7 +55,7 @@ GrokModel = Literal[
     "grok-latest",
 ]
 
-__all__ = ("GrokClient", "GROK_MODELS", "GROK_ENDPOINT", "GrokModel", "is_grok_model")
+__all__ = ("GROK_ENDPOINT", "GROK_MODELS", "GrokClient", "GrokModel", "is_grok_model")
 
 
 def is_grok_model(model_name: str | None) -> bool:

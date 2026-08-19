@@ -5,11 +5,11 @@ from ..openai.realtime import OpenAIRealtimeClient
 from .client import _GrokAuth
 
 __all__ = (
-    "VOICE_ENDPOINT",
     "DEFAULT_VOICE_MODEL",
+    "VOICE_ENDPOINT",
+    "GrokRealtimeClient",
     "GrokVoice",
     "GrokVoiceModel",
-    "GrokRealtimeClient",
 )
 
 VOICE_ENDPOINT = "wss://api.x.ai/v1/realtime"

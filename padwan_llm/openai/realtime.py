@@ -5,24 +5,25 @@ import enum
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, Literal, get_args
-
-import niquests
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from .._base import NO_TURN_DETECTION, RealtimeClientBase
 from .._ws import READ_POLL_INTERVAL, WsConnection, enable_read_polling
 from ..errors import LLMError
 from .client import _OpenAIAuth
 
+if TYPE_CHECKING:
+    import niquests
+
 __all__ = (
-    "REALTIME_ENDPOINT",
     "DEFAULT_REALTIME_MODEL",
-    "REALTIME_SAMPLE_RATE",
     "NO_TURN_DETECTION",
-    "RealtimeVoice",
-    "RealtimeServerEvent",
+    "REALTIME_ENDPOINT",
+    "REALTIME_SAMPLE_RATE",
     "OpenAIRealtimeClient",
     "RealtimeConnection",
+    "RealtimeServerEvent",
+    "RealtimeVoice",
 )
 
 REALTIME_ENDPOINT = "wss://api.openai.com/v1/realtime"

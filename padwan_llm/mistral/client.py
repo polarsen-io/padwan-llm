@@ -58,12 +58,12 @@ MistralAudioModel = Literal[
 ]
 
 __all__ = (
-    "MistralClient",
-    "MISTRAL_MODELS",
     "MISTRAL_ENDPOINT",
-    "MistralModel",
-    "MistralEmbeddingModel",
+    "MISTRAL_MODELS",
     "MistralAudioModel",
+    "MistralClient",
+    "MistralEmbeddingModel",
+    "MistralModel",
     "is_mistral_model",
 )
 
