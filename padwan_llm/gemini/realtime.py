@@ -54,15 +54,9 @@ _GEMINI_VOICES: tuple[str, ...] = get_args(_KnownGeminiVoice)
 class GeminiRealtimeClient(_GeminiAuth, RealtimeClientBase["GeminiRealtimeConnection"]):
     """Speech-to-speech client for the Gemini Live API over a WebSocket.
 
-    ``async with client as conn:`` yields a configured
-    :class:`GeminiRealtimeConnection`. *api_key* falls back to
-    ``GEMINI_API_KEY``. *turn_detection* defaults to automatic activity
-    detection (server VAD); pass a mapping of ``automaticActivityDetection``
-    fields to tune it, or :data:`NO_TURN_DETECTION` to disable it and mark
-    turns manually with :meth:`GeminiRealtimeConnection.activity_start` +
-    :meth:`GeminiRealtimeConnection.activity_end`. *transcription* enables
-    input/output transcription events. Wire shapes:
-    https://ai.google.dev/api/live
+    ``async with client as conn:`` yields a :class:`GeminiRealtimeConnection`.
+    Server VAD by default; pass :data:`NO_TURN_DETECTION` to mark turns
+    manually. Wire shapes: https://ai.google.dev/api/live
     """
 
     model: str = DEFAULT_LIVE_MODEL

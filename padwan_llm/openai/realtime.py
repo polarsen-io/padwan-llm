@@ -71,17 +71,11 @@ class RealtimeServerEvent(enum.StrEnum):
 
 @dataclass
 class OpenAIRealtimeClient(_OpenAIAuth, RealtimeClientBase["RealtimeConnection"]):
-    """Speech-to-speech client for the OpenAI Realtime API (``gpt-realtime``) over a WebSocket.
+    """Speech-to-speech client for the OpenAI Realtime API over a WebSocket.
 
-    ``async with client as conn:`` yields a configured :class:`RealtimeConnection`.
-    Requires the ``realtime`` extra. *api_key* falls back to ``OPENAI_API_KEY``;
-    *timeout* bounds only the opening handshake — the open socket tolerates a
-    silent model between turns. *turn_detection* defaults to server-side VAD;
-    pass a mapping to override, or :data:`NO_TURN_DETECTION` to drive turns
-    manually (push-to-talk) with :meth:`RealtimeConnection.commit_audio` +
-    :meth:`RealtimeConnection.create_response`. *transcription_model* ``None``
-    disables transcription of your own speech. Wire shapes:
-    https://platform.openai.com/docs/guides/realtime
+    ``async with client as conn:`` yields a :class:`RealtimeConnection`.
+    Server VAD by default; pass :data:`NO_TURN_DETECTION` to drive turns
+    manually. Wire shapes: https://platform.openai.com/docs/guides/realtime
     """
 
     model: str = DEFAULT_REALTIME_MODEL
