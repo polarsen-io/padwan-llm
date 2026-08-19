@@ -1,9 +1,13 @@
 import json
+import sys
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from dotenv import load_dotenv
 from niquests.exceptions import HTTPError
+
+# xai-sdk is not installed on 3.15 (grpcio lacks 3.15 support)
+collect_ignore = ["test_grok.py"] if sys.version_info >= (3, 15) else []
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
