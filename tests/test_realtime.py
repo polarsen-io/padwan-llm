@@ -6,6 +6,7 @@ from typing import get_type_hints
 import niquests
 import pytest
 from google.genai.types import (
+    AutomaticActivityDetectionDict,
     LiveClientRealtimeInputDict,
     LiveClientSetupDict,
     LiveConnectConfigDict,
@@ -21,7 +22,13 @@ from padwan_llm import (
 )
 from padwan_llm._json import loads as _json_loads
 from padwan_llm.errors import LLMError
-from padwan_llm.gemini.realtime import DEFAULT_LIVE_MODEL, LIVE_ENDPOINT
+from padwan_llm.gemini.realtime import (
+    DEFAULT_LIVE_MODEL,
+    LIVE_ENDPOINT,
+    AutomaticActivityDetection,
+    LiveGenerationConfig,
+    LiveSetup,
+)
 from padwan_llm.openai.realtime import (
     NO_TURN_DETECTION,
     RealtimeConnection,
@@ -326,7 +333,7 @@ def test_gemini_setup_payload(
     assert ("inputAudioTranscription" in setup) is has_transcription
     assert ("outputAudioTranscription" in setup) is has_transcription
     if instructions:
-        assert setup["systemInstruction"] == {"parts": [{"text": instructions}]}
+        assert setup.get("systemInstruction") == {"parts": [{"text": instructions}]}
     else:
         assert "systemInstruction" not in setup
 
@@ -427,24 +434,29 @@ def _camel_to_snake(name: str) -> str:
     return re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", name).lower()
 
 
-def test_gemini_setup_sdk_compat() -> None:
-    """Every key of our setup message maps to a field in google-genai's Live types.
-
-    The SDK splits the wire setup across LiveClientSetup and LiveConnectConfig
-    (its converters merge the latter into ``setup``), so both are checked.
-    """
-    client = GeminiRealtimeClient(
-        api_key="g", instructions="x", turn_detection=NO_TURN_DETECTION
-    )
-    setup = client.setup_payload()["setup"]
-    setup_fields = set(get_type_hints(LiveClientSetupDict)) | set(
-        get_type_hints(LiveConnectConfigDict)
-    )
-    for key in setup:
-        assert _camel_to_snake(key) in setup_fields, key
-    config_fields = set(get_type_hints(LiveConnectConfigDict))
-    for key in setup["generationConfig"]:
-        assert _camel_to_snake(key) in config_fields, key
+@pytest.mark.parametrize(
+    "local_type, sdk_types",
+    [
+        # The SDK splits the wire setup across LiveClientSetup and
+        # LiveConnectConfig (its converters merge the latter into ``setup``).
+        pytest.param(
+            LiveSetup, (LiveClientSetupDict, LiveConnectConfigDict), id="LiveSetup"
+        ),
+        pytest.param(
+            LiveGenerationConfig, (LiveConnectConfigDict,), id="LiveGenerationConfig"
+        ),
+        pytest.param(
+            AutomaticActivityDetection,
+            (AutomaticActivityDetectionDict,),
+            id="AutomaticActivityDetection",
+        ),
+    ],
+)
+def test_gemini_live_sdk_compat(local_type: type, sdk_types: tuple[type, ...]) -> None:
+    """Every field of our local Live types maps to a field in google-genai's."""
+    sdk_fields = {field for t in sdk_types for field in get_type_hints(t)}
+    for key in get_type_hints(local_type):
+        assert _camel_to_snake(key) in sdk_fields, f"{local_type.__name__}.{key}"
 
 
 async def test_gemini_realtime_input_sdk_compat() -> None:

@@ -2,13 +2,14 @@ import base64
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict, cast, get_args
 
 from .._base import NO_TURN_DETECTION, RealtimeClientBase
 from .._ws import READ_POLL_INTERVAL, WsConnection, enable_read_polling
 from ..errors import LLMError
 from ..logs import log
 from .client import _GeminiAuth
+from .models import SystemInstruction
 
 if TYPE_CHECKING:
     import niquests
@@ -19,10 +20,14 @@ __all__ = (
     "LIVE_INPUT_SAMPLE_RATE",
     "LIVE_OUTPUT_SAMPLE_RATE",
     "NO_TURN_DETECTION",
+    "AutomaticActivityDetection",
     "GeminiLiveModel",
     "GeminiRealtimeClient",
     "GeminiRealtimeConnection",
     "GeminiVoice",
+    "LiveGenerationConfig",
+    "LiveSetup",
+    "LiveSetupMessage",
 )
 
 LIVE_ENDPOINT = (
@@ -52,6 +57,56 @@ type GeminiVoice = _KnownGeminiVoice | str
 _GEMINI_VOICES: tuple[str, ...] = get_args(_KnownGeminiVoice)
 
 
+# Wire shapes of BidiGenerateContentSetup, mirrored locally with the camelCase
+# keys the ws API expects; tests map them to google-genai's snake_case types.
+
+
+class _PrebuiltVoiceConfig(TypedDict):
+    voiceName: str
+
+
+class _VoiceConfig(TypedDict):
+    prebuiltVoiceConfig: _PrebuiltVoiceConfig
+
+
+class _SpeechConfig(TypedDict):
+    voiceConfig: _VoiceConfig
+
+
+class LiveGenerationConfig(TypedDict):
+    responseModalities: list[str]
+    speechConfig: _SpeechConfig
+
+
+class AutomaticActivityDetection(TypedDict, total=False):
+    disabled: bool
+    startOfSpeechSensitivity: str
+    endOfSpeechSensitivity: str
+    prefixPaddingMs: int
+    silenceDurationMs: int
+
+
+class _RealtimeInputConfig(TypedDict):
+    automaticActivityDetection: AutomaticActivityDetection
+
+
+class _AudioTranscriptionConfig(TypedDict):
+    """Empty by design — presence alone enables transcription."""
+
+
+class LiveSetup(TypedDict):
+    model: str
+    generationConfig: LiveGenerationConfig
+    systemInstruction: NotRequired[SystemInstruction]
+    realtimeInputConfig: NotRequired[_RealtimeInputConfig]
+    inputAudioTranscription: NotRequired[_AudioTranscriptionConfig]
+    outputAudioTranscription: NotRequired[_AudioTranscriptionConfig]
+
+
+class LiveSetupMessage(TypedDict):
+    setup: LiveSetup
+
+
 @dataclass
 class GeminiRealtimeClient(_GeminiAuth, RealtimeClientBase["GeminiRealtimeConnection"]):
     """Speech-to-speech client for the Gemini Live API over a WebSocket.
@@ -73,19 +128,19 @@ class GeminiRealtimeClient(_GeminiAuth, RealtimeClientBase["GeminiRealtimeConnec
         # upgrade request (see _connect), not via headers.
         pass
 
-    def setup_payload(self) -> dict[str, Any]:
+    def setup_payload(self) -> LiveSetupMessage:
         """Build the ``BidiGenerateContentSetup`` message opening the session.
 
         Split out from :meth:`_connect` so the payload can be inspected and
         unit-tested without a live connection.
         """
-        generation_config: dict[str, Any] = {
+        generation_config: LiveGenerationConfig = {
             "responseModalities": [m.upper() for m in self.output_modalities],
             "speechConfig": {
                 "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": self.voice}}
             },
         }
-        setup: dict[str, Any] = {
+        setup: LiveSetup = {
             "model": f"models/{self.model}",
             "generationConfig": generation_config,
         }
@@ -96,8 +151,11 @@ class GeminiRealtimeClient(_GeminiAuth, RealtimeClientBase["GeminiRealtimeConnec
                 "automaticActivityDetection": {"disabled": True}
             }
         elif self.turn_detection:
+            # Caller-supplied mapping, sent verbatim.
             setup["realtimeInputConfig"] = {
-                "automaticActivityDetection": dict(self.turn_detection)
+                "automaticActivityDetection": cast(
+                    "AutomaticActivityDetection", dict(self.turn_detection)
+                )
             }
         if self.transcription:
             setup["inputAudioTranscription"] = {}

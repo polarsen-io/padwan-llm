@@ -10,9 +10,9 @@ standalone client (not OpenAI-compatible).
 from padwan_llm.anthropic import AnthropicClient
 
 client = AnthropicClient(
-    api_key="...",             # or set ANTHROPIC_API_KEY env var
-    model="claude-opus-4-8",   # default model
-    max_tokens=4096,           # required by the Messages API, per-response cap
+    api_key="...",  # or set ANTHROPIC_API_KEY env var
+    model="claude-opus-4-8",  # default model
+    max_tokens=4096,  # required by the Messages API, per-response cap
 )
 ```
 
@@ -29,9 +29,9 @@ client = AnthropicClient(
 from padwan_llm.conversation import Message
 
 async with AnthropicClient() as client:
-    response, usage = await client.complete_chat([
-        Message(role="user", content="Hello!")
-    ])
+    response, usage = await client.complete_chat(
+        [Message(role="user", content="Hello!")]
+    )
     print(response["content"])
 ```
 
@@ -41,9 +41,7 @@ async with AnthropicClient() as client:
 from padwan_llm.conversation import Message
 
 async with AnthropicClient() as client:
-    stream = client.stream_chat([
-        Message(role="user", content="Tell me a story")
-    ])
+    stream = client.stream_chat([Message(role="user", content="Tell me a story")])
     async for chunk in stream:
         print(chunk, end="")
 ```
@@ -93,7 +91,12 @@ async with AnthropicClient() as client:
         [
             {"role": "user", "content": "Weather in Paris?"},
             {"role": "assistant", "content": response["content"], "tool_calls": [call]},
-            {"role": "tool", "tool_call_id": call["id"], "name": "get_weather", "content": "18°C"},
+            {
+                "role": "tool",
+                "tool_call_id": call["id"],
+                "name": "get_weather",
+                "content": "18°C",
+            },
         ],
         tools=[WEATHER_TOOL],
     )

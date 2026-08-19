@@ -54,9 +54,9 @@ weather_tool = McpTool(
 async with AgentSession(
     client=LLMClient(model="gpt-4o"),
     mcp_tools=[
-        weather_tool,                                                       # local definition
+        weather_tool,  # local definition
         McpStdio(command="uvx", args=["filesystem-mcp", "/home/me/docs"]),  # subprocess
-        McpStreamable(url="https://tools.example.com/mcp", token="sk-..."), # remote
+        McpStreamable(url="https://tools.example.com/mcp", token="sk-..."),  # remote
     ],
 ) as session:
     text = await session.send("Summarize the README and check the forecast.")
@@ -68,18 +68,18 @@ On `__aenter__` the session enters every transport in order (via an `AsyncExitSt
 
 ```python
 AgentSession(
-    client=...,                    # LLMClientBase (e.g. LLMClient(model=...))
-    system=None,                   # system prompt, stored in ConversationState
-    mcp_tools=[],                  # McpTool | McpTransport instances
-    max_tool_rounds=5,             # round cap; None = unbounded (use with care)
-    max_tool_result_chars=8_000,   # truncate tool results sent to the LLM; None = no limit
-    execution="sequential",        # "sequential" or "parallel"
-    on_tool=None,                  # callback fired per tool call: (name, args) -> None
-    on_tool_error=None,            # custom error formatter — see below
-    approve_tool=None,             # pre-execution hook returning bool | Awaitable[bool]
-    on_mcp_connect=None,           # fired per MCP transport after entering + pinging
-    session_id=...,                # auto-generated; override to resume a saved session
-    store=None,                    # optional ConversationStore for persistence
+    client=...,  # LLMClientBase (e.g. LLMClient(model=...))
+    system=None,  # system prompt, stored in ConversationState
+    mcp_tools=[],  # McpTool | McpTransport instances
+    max_tool_rounds=5,  # round cap; None = unbounded (use with care)
+    max_tool_result_chars=8_000,  # truncate tool results sent to the LLM; None = no limit
+    execution="sequential",  # "sequential" or "parallel"
+    on_tool=None,  # callback fired per tool call: (name, args) -> None
+    on_tool_error=None,  # custom error formatter — see below
+    approve_tool=None,  # pre-execution hook returning bool | Awaitable[bool]
+    on_mcp_connect=None,  # fired per MCP transport after entering + pinging
+    session_id=...,  # auto-generated; override to resume a saved session
+    store=None,  # optional ConversationStore for persistence
 )
 ```
 
@@ -105,6 +105,7 @@ Use the default `"sequential"` if you care about ordering side effects or want t
 def prompt_user(tool, args):
     return input(f"Run {tool.name}({args})? [y/N] ").lower() == "y"
 
+
 session = AgentSession(
     client=LLMClient(model="gpt-4o"),
     mcp_tools=[...],
@@ -120,6 +121,7 @@ By default, exceptions raised inside a tool handler are caught, formatted via a 
 def format_error(tool, args, exc):
     return f"[{tool.name} failed: {type(exc).__name__}: {exc}]"
 
+
 session = AgentSession(
     client=...,
     mcp_tools=[...],
@@ -134,11 +136,13 @@ session = AgentSession(
 ```python
 from contextlib import contextmanager
 
+
 @contextmanager
 def log_call(tc):
     print(f"→ {tc.name}({tc.args})")
     yield
     print(f"← {tc.name} done")
+
 
 session = AgentSession(..., on_tool=log_call)
 ```
@@ -152,10 +156,14 @@ Conversation state can be saved to any backend via the `ConversationStore` proto
 ```python
 from padwan_llm import ConversationSnapshot, ConversationStore
 
+
 class JsonStore:
-    def __init__(self, path): self.path = path
+    def __init__(self, path):
+        self.path = path
+
     def save(self, session_id: str, snapshot: ConversationSnapshot) -> None:
         (self.path / f"{session_id}.json").write_text(json.dumps(snapshot))
+
     def load(self, session_id: str) -> ConversationSnapshot:
         return json.loads((self.path / f"{session_id}.json").read_text())
 ```
@@ -212,9 +220,9 @@ Long tool results are truncated to `max_tool_result_chars` **in the copy sent to
 ## Reading state
 
 ```python
-session.messages       # full ChatMessage list including tool calls + results
-session.last_usage     # UsageToken from the most recent LLM call
-session.total_usage    # accumulated usage across all rounds in this session
+session.messages  # full ChatMessage list including tool calls + results
+session.last_usage  # UsageToken from the most recent LLM call
+session.total_usage  # accumulated usage across all rounds in this session
 ```
 
 ## Limitations

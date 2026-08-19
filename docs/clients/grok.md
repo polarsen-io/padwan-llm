@@ -8,8 +8,8 @@ The Grok client provides access to xAI's Grok models. It inherits from [`OpenAIC
 from padwan_llm.grok import GrokClient
 
 client = GrokClient(
-    api_key="...",      # or set GROK_API_KEY env var
-    model="grok-3",     # default model
+    api_key="...",  # or set GROK_API_KEY env var
+    model="grok-3",  # default model
 )
 ```
 
@@ -21,9 +21,9 @@ client = GrokClient(
 from padwan_llm.conversation import Message
 
 async with GrokClient() as client:
-    response, usage = await client.complete_chat([
-        Message(role="user", content="Hello!")
-    ])
+    response, usage = await client.complete_chat(
+        [Message(role="user", content="Hello!")]
+    )
     print(response["content"])
 ```
 
@@ -33,9 +33,7 @@ async with GrokClient() as client:
 from padwan_llm.conversation import Message
 
 async with GrokClient() as client:
-    stream = client.stream_chat([
-        Message(role="user", content="Tell me a story")
-    ])
+    stream = client.stream_chat([Message(role="user", content="Tell me a story")])
     async for chunk in stream:
         print(chunk, end="")
 ```

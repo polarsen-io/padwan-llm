@@ -9,7 +9,7 @@ from padwan_llm.openai import OpenAIClient
 
 client = OpenAIClient(
     api_key="sk-...",  # or set OPENAI_API_KEY env var
-    model="gpt-4o",    # default model
+    model="gpt-4o",  # default model
 )
 ```
 
@@ -21,9 +21,9 @@ client = OpenAIClient(
 from padwan_llm.conversation import Message
 
 async with OpenAIClient() as client:
-    response, usage = await client.complete_chat([
-        Message(role="user", content="Hello!")
-    ])
+    response, usage = await client.complete_chat(
+        [Message(role="user", content="Hello!")]
+    )
     print(response["content"])
 ```
 
@@ -33,9 +33,7 @@ async with OpenAIClient() as client:
 from padwan_llm.conversation import Message
 
 async with OpenAIClient() as client:
-    stream = client.stream_chat([
-        Message(role="user", content="Tell me a story")
-    ])
+    stream = client.stream_chat([Message(role="user", content="Tell me a story")])
     async for chunk in stream:
         print(chunk, end="")
 ```
@@ -132,9 +130,9 @@ Audio in both directions is mono little-endian PCM16 at 24 kHz (`REALTIME_SAMPLE
 from padwan_llm import RealtimeClient
 
 client = RealtimeClient(
-    api_key="sk-...",      # or set OPENAI_API_KEY
+    api_key="sk-...",  # or set OPENAI_API_KEY
     model="gpt-realtime",  # default
-    timeout=30.0,          # bounds the upgrade handshake only
+    timeout=30.0,  # bounds the upgrade handshake only
 )
 ```
 

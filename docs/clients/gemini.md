@@ -8,8 +8,8 @@ The Gemini client provides access to Google's Gemini models.
 from padwan_llm.gemini import GeminiClient
 
 client = GeminiClient(
-    api_key="...",           # or set GEMINI_API_KEY env var
-    model="gemini-2.5-flash", # default model
+    api_key="...",  # or set GEMINI_API_KEY env var
+    model="gemini-2.5-flash",  # default model
 )
 ```
 
@@ -21,9 +21,9 @@ client = GeminiClient(
 from padwan_llm.conversation import Message
 
 async with GeminiClient() as client:
-    response, usage = await client.complete_chat([
-        Message(role="user", content="Hello!")
-    ])
+    response, usage = await client.complete_chat(
+        [Message(role="user", content="Hello!")]
+    )
     print(response["content"])
 ```
 
@@ -33,9 +33,7 @@ async with GeminiClient() as client:
 from padwan_llm.conversation import Message
 
 async with GeminiClient() as client:
-    stream = client.stream_chat([
-        Message(role="user", content="Tell me a story")
-    ])
+    stream = client.stream_chat([Message(role="user", content="Tell me a story")])
     async for chunk in stream:
         print(chunk, end="")
 ```
@@ -57,9 +55,9 @@ async with GeminiClient(
     on_thought=thoughts.append,
     thinking_config={"thinkingBudget": 2048, "includeThoughts": True},
 ) as client:
-    stream = client.stream_chat([
-        {"role": "user", "content": "What is 7 * 8? Think step by step."}
-    ])
+    stream = client.stream_chat(
+        [{"role": "user", "content": "What is 7 * 8? Think step by step."}]
+    )
     async for chunk in stream:
         print(chunk, end="")
 
