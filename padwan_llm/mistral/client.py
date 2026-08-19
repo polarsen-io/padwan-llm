@@ -42,6 +42,7 @@ MistralModel = Literal[
     "mistral-ocr-3-0",
     "mistral-ocr-4",
     "mistral-ocr-4-0",
+    "mistral-ocr-4-1",
     "mistral-ocr-latest",
     "magistral-small-latest",
     "magistral-medium-latest",
