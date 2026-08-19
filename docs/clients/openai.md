@@ -9,7 +9,7 @@ from padwan_llm.openai import OpenAIClient
 
 client = OpenAIClient(
     api_key="sk-...",  # or set OPENAI_API_KEY env var
-    model="gpt-4o",    # default model
+    model="gpt-4o",  # default model
 )
 ```
 
@@ -21,9 +21,9 @@ client = OpenAIClient(
 from padwan_llm.conversation import Message
 
 async with OpenAIClient() as client:
-    response, usage = await client.complete_chat([
-        Message(role="user", content="Hello!")
-    ])
+    response, usage = await client.complete_chat(
+        [Message(role="user", content="Hello!")]
+    )
     print(response["content"])
 ```
 
@@ -33,9 +33,7 @@ async with OpenAIClient() as client:
 from padwan_llm.conversation import Message
 
 async with OpenAIClient() as client:
-    stream = client.stream_chat([
-        Message(role="user", content="Tell me a story")
-    ])
+    stream = client.stream_chat([Message(role="user", content="Tell me a story")])
     async for chunk in stream:
         print(chunk, end="")
 ```
@@ -129,26 +127,28 @@ uv add "padwan-llm[realtime]"
 Audio in both directions is mono little-endian PCM16 at 24 kHz (`REALTIME_SAMPLE_RATE`), the `gpt-realtime` native rate.
 
 ```python
-from padwan_llm.openai import RealtimeClient
+from padwan_llm import RealtimeClient
 
 client = RealtimeClient(
-    api_key="sk-...",      # or set OPENAI_API_KEY
+    api_key="sk-...",  # or set OPENAI_API_KEY
     model="gpt-realtime",  # default
-    timeout=30.0,          # bounds the upgrade handshake only
+    timeout=30.0,  # bounds the upgrade handshake only
 )
 ```
 
 `timeout` bounds only the WebSocket upgrade handshake. Reads on the open socket are unbounded, so the model can stay silent between turns without the connection being torn down.
+
+`async with client as conn:` opens the underlying `niquests.AsyncSession`, performs the handshake, and yields the live `RealtimeConnection`; everything is closed on exit.
 
 ### Conversation with server VAD (default)
 
 By default the server decides when you have stopped talking. Stream microphone audio in with `append_audio` and consume events by async-iterating the connection:
 
 ```python
-from padwan_llm.openai import RealtimeClient, RealtimeServerEvent
+from padwan_llm import RealtimeClient
+from padwan_llm.openai import RealtimeServerEvent
 
-client = RealtimeClient()
-async with client.connect(instructions="Answer briefly.", voice="marin") as conn:
+async with RealtimeClient(instructions="Answer briefly.", voice="marin") as conn:
     await conn.append_audio(pcm16_chunk)  # mono PCM16 @ 24 kHz
     async for event in conn:
         if audio := conn.audio_delta_bytes(event):
@@ -162,10 +162,10 @@ async with client.connect(instructions="Answer briefly.", voice="marin") as conn
 Pass `NO_TURN_DETECTION` to disable server VAD, then drive each turn yourself:
 
 ```python
-from padwan_llm.openai import NO_TURN_DETECTION, RealtimeClient
+from padwan_llm import RealtimeClient
+from padwan_llm.openai import NO_TURN_DETECTION
 
-client = RealtimeClient()
-async with client.connect(turn_detection=NO_TURN_DETECTION) as conn:
+async with RealtimeClient(turn_detection=NO_TURN_DETECTION) as conn:
     await conn.append_audio(recorded_pcm16)
     await conn.commit_audio()
     await conn.create_response()
@@ -173,31 +173,22 @@ async with client.connect(turn_detection=NO_TURN_DETECTION) as conn:
         ...
 ```
 
-### Reusing an HTTP session
-
-`connect()` creates and closes its own `niquests.AsyncSession` per connection. Pass `session=` to reuse a caller-owned session (left open on exit), or `session_kwargs=` to forward constructor arguments to the internally managed one; the two are mutually exclusive.
-
-```python
-import niquests
-
-async with niquests.AsyncSession() as session:
-    async with client.connect(session=session) as conn:
-        ...
-    # session is still open here for the next connect()
-```
-
-### `connect()` parameters
+### Client parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `model` | `"gpt-realtime"` | Realtime model id |
 | `instructions` | `None` | System prompt steering the voice agent |
 | `voice` | `"marin"` | Spoken voice (`RealtimeVoice`) |
 | `turn_detection` | `None` | `None`/falsy uses `server_vad`; a mapping (e.g. `{"type": "semantic_vad"}`) is sent verbatim; `NO_TURN_DETECTION` disables VAD |
 | `transcription_model` | `"whisper-1"` | Transcribes your own speech; `None` disables |
 | `output_modalities` | `("audio",)` | Response modalities; `("audio", "text")` also emits text |
 | `sample_rate` | `24_000` | PCM16 sample rate in both directions |
-| `session` | `None` | Caller-owned `AsyncSession`; left open on exit |
-| `session_kwargs` | `None` | Constructor arguments for the internally managed session |
+| `timeout` | `30.0` | Bounds the upgrade handshake |
+| `api_key` | `None` | Falls back to `OPENAI_API_KEY` |
+| `base_url` | realtime endpoint | Custom `wss://` endpoint |
+
+Constructing `OpenAIRealtimeClient` directly additionally accepts `session_kwargs=` to forward constructor arguments (e.g. proxies) to the managed `AsyncSession`. To reconfigure a live session, call `conn.configure(...)`.
 
 ### Server events
 

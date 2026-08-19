@@ -116,6 +116,7 @@ Set `on_auth` to recover from expired bearer tokens. When an RPC returns HTTP 40
 async def refresh(transport: McpStreamable) -> str:
     return await oauth.fetch_token(...)
 
+
 async with McpStreamable(url="...", token=initial_token, on_auth=refresh) as mcp:
     ...
 ```

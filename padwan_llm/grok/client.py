@@ -1,8 +1,8 @@
 import dataclasses
-import os
 from typing import ClassVar, Literal, get_args
 
-from .._base import LLMError, Provider
+from .._base import Provider, env_api_key
+from ..errors import LLMError
 from ..openai.client import _check_resp, _check_resp_status, _OpenAIBase
 from .batch import GrokBatchJob, GrokBatchRequest, GrokBatchResult
 from .types import (
@@ -55,7 +55,7 @@ GrokModel = Literal[
     "grok-latest",
 ]
 
-__all__ = ("GrokClient", "GROK_MODELS", "GROK_ENDPOINT", "GrokModel", "is_grok_model")
+__all__ = ("GROK_ENDPOINT", "GROK_MODELS", "GrokClient", "GrokModel", "is_grok_model")
 
 
 def is_grok_model(model_name: str | None) -> bool:
@@ -71,26 +71,29 @@ GROK_ENDPOINT = "https://api.x.ai/v1/"
 
 
 @dataclasses.dataclass
-class GrokClient(_OpenAIBase):
+class _GrokAuth:
+    """Grok provider identity, shared by the chat and realtime clients."""
+
+    provider: ClassVar[Provider] = "grok"
+
+    def _get_default_api_key(self) -> str:
+        return env_api_key(self.provider, "GROK_API_KEY")
+
+
+@dataclasses.dataclass
+class GrokClient(_GrokAuth, _OpenAIBase):
     """Grok API client with xAI-native batch support.
 
     https://docs.x.ai/developers/rest-api-reference/inference/batches
     """
 
-    provider: ClassVar[Provider] = "grok"
     model: str | None = "grok-3"
     base_url: str = GROK_ENDPOINT
-
-    def _get_default_api_key(self) -> str:
-        api_key = os.environ.get("GROK_API_KEY")
-        if not api_key:
-            raise LLMError(self.provider, "GROK_API_KEY not set")
-        return api_key
 
     async def create_batch(
         self,
         requests: list[GrokBatchRequest],
-        name: str = "",
+        name: str | None = None,
         model: str | None = None,
     ) -> GrokBatchJob:
         """Create a batch and submit requests to it.

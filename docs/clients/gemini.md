@@ -8,8 +8,8 @@ The Gemini client provides access to Google's Gemini models.
 from padwan_llm.gemini import GeminiClient
 
 client = GeminiClient(
-    api_key="...",           # or set GEMINI_API_KEY env var
-    model="gemini-2.5-flash", # default model
+    api_key="...",  # or set GEMINI_API_KEY env var
+    model="gemini-2.5-flash",  # default model
 )
 ```
 
@@ -21,9 +21,9 @@ client = GeminiClient(
 from padwan_llm.conversation import Message
 
 async with GeminiClient() as client:
-    response, usage = await client.complete_chat([
-        Message(role="user", content="Hello!")
-    ])
+    response, usage = await client.complete_chat(
+        [Message(role="user", content="Hello!")]
+    )
     print(response["content"])
 ```
 
@@ -33,9 +33,7 @@ async with GeminiClient() as client:
 from padwan_llm.conversation import Message
 
 async with GeminiClient() as client:
-    stream = client.stream_chat([
-        Message(role="user", content="Tell me a story")
-    ])
+    stream = client.stream_chat([Message(role="user", content="Tell me a story")])
     async for chunk in stream:
         print(chunk, end="")
 ```
@@ -57,9 +55,9 @@ async with GeminiClient(
     on_thought=thoughts.append,
     thinking_config={"thinkingBudget": 2048, "includeThoughts": True},
 ) as client:
-    stream = client.stream_chat([
-        {"role": "user", "content": "What is 7 * 8? Think step by step."}
-    ])
+    stream = client.stream_chat(
+        [{"role": "user", "content": "What is 7 * 8? Think step by step."}]
+    )
     async for chunk in stream:
         print(chunk, end="")
 
@@ -120,3 +118,25 @@ await client.cancel_batch("batches/123456")
 | `BatchRequest` | Single request: `contents`, `generation_config`, `system_instruction`, `key` |
 | `BatchJob` | Job state: `name`, `state`, `dest`, `stats`, `is_terminal`, `succeeded` |
 | `BatchResult` | Parsed result: `key`, `content`, `input_tokens`, `output_tokens`, `total_tokens` |
+
+## Realtime (Live API)
+
+`RealtimeClient` with a Gemini model opens a speech-to-speech [Live API](https://ai.google.dev/api/live) session over a WebSocket. Audio is mono little-endian PCM16 — 16 kHz in (`LIVE_INPUT_SAMPLE_RATE`), 24 kHz out (`LIVE_OUTPUT_SAMPLE_RATE`). Requires the `realtime` extra.
+
+```python
+from padwan_llm import RealtimeClient
+
+async with RealtimeClient(
+    "gemini-3.1-flash-live-preview",
+    instructions="Answer briefly.",
+    voice="Puck",
+) as conn:
+    await conn.append_audio(pcm16_chunk)  # mono PCM16 @ 16 kHz
+    async for message in conn:
+        if audio := conn.audio_delta_bytes(message):
+            playback.write(audio)  # PCM16 @ 24 kHz
+        if conn.is_turn_complete(message):
+            break
+```
+
+Automatic activity detection (server VAD) is the default. Pass `turn_detection=NO_TURN_DETECTION` to disable it and mark turns yourself with `conn.activity_start()` / `conn.activity_end()`; a mapping tunes the `automaticActivityDetection` fields (e.g. `{"silenceDurationMs": 500}`). Input/output transcription events arrive via `conn.input_transcript(message)` / `conn.output_transcript(message)`; disable them by constructing `GeminiRealtimeClient(transcription=False)` directly.

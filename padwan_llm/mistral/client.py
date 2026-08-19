@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import dataclasses
 import mimetypes
-import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, get_args
 
-from .._base import LLMError, Provider
+from .._base import Provider, env_api_key
+from ..errors import LLMError
 from ..openai.client import _check_resp, _OpenAIBase
 from ._deprecations import DEPRECATED
 
@@ -58,12 +58,12 @@ MistralAudioModel = Literal[
 ]
 
 __all__ = (
-    "MistralClient",
-    "MISTRAL_MODELS",
     "MISTRAL_ENDPOINT",
-    "MistralModel",
-    "MistralEmbeddingModel",
+    "MISTRAL_MODELS",
     "MistralAudioModel",
+    "MistralClient",
+    "MistralEmbeddingModel",
+    "MistralModel",
     "is_mistral_model",
 )
 
@@ -98,15 +98,13 @@ class MistralClient(_OpenAIBase):
     """Mistral API client."""
 
     provider: ClassVar[Provider] = "mistral"
+
+    def _get_default_api_key(self) -> str:
+        return env_api_key(self.provider, "MISTRAL_API_KEY")
+
     _deprecations: ClassVar[Mapping[str, str]] = DEPRECATED
     model: str | None = "mistral-large-latest"
     base_url: str = MISTRAL_ENDPOINT
-
-    def _get_default_api_key(self) -> str:
-        api_key = os.environ.get("MISTRAL_API_KEY")
-        if not api_key:
-            raise LLMError(self.provider, "MISTRAL_API_KEY not set")
-        return api_key
 
     async def fetch_embeddings(
         self,

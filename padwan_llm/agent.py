@@ -5,6 +5,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
+from types import TracebackType
 from typing import Any, Literal, Protocol, Self
 
 from ._base import LLMClientBase
@@ -191,8 +192,13 @@ class AgentSession:
             raise
         return self
 
-    async def __aexit__(self, *args: Any) -> None:
-        await self._exit_stack.__aexit__(*args)
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
 
     def save(self) -> None:
         """Persist the current state via the configured store, if any."""

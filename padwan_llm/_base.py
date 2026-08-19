@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import abc
+import os
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
@@ -18,13 +20,19 @@ if TYPE_CHECKING:
     from types import TracebackType
 
 __all__ = (
+    "NO_TURN_DETECTION",
     "ChatStream",
     "LLMClientBase",
     "OnThought",
     "Provider",
+    "RealtimeClientBase",
 )
 
 OnThought = Callable[[str], None]
+
+# Pass as ``turn_detection`` to disable server-side VAD (manual / push-to-talk);
+# you then drive each turn yourself with the provider's manual-turn methods.
+NO_TURN_DETECTION = "none"
 
 
 class ChatStream(abc.ABC):
@@ -37,6 +45,14 @@ class ChatStream(abc.ABC):
     def __aiter__(self) -> AsyncIterator[str]:
         """Iterate over text chunks from the stream."""
         ...
+
+
+def env_api_key(provider: Provider, var: str) -> str:
+    """Read an API key from environment variable *var*, raising :class:`LLMError` if unset."""
+    api_key = os.environ.get(var)
+    if not api_key:
+        raise LLMError(provider, f"{var} not set")
+    return api_key
 
 
 def to_sse_url(url: str) -> str:
@@ -196,4 +212,83 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
         Returns a ChatResponse with content, optional tool_calls, and finish_reason,
         along with token usage.
         """
+        ...
+
+
+@dataclass
+class RealtimeClientBase[ConnT](abc.ABC):
+    """Abstract base for realtime speech-to-speech clients over a WebSocket."""
+
+    provider: ClassVar[Provider]
+
+    model: str
+    api_key: str | None = field(default=None, repr=False)
+    base_url: str = field(kw_only=True)
+    timeout: float = 30.0
+    session_kwargs: Mapping[str, Any] | None = field(default=None, repr=False)
+    """Constructor arguments (e.g. proxies) for the managed ``AsyncSession``."""
+
+    _api_key: str = field(init=False, repr=False)
+    _session: niquests.AsyncSession | None = field(init=False, default=None, repr=False)
+    _conn_cm: AbstractAsyncContextManager[Any] | None = field(
+        init=False, default=None, repr=False
+    )
+
+    def __post_init__(self) -> None:
+        self._api_key = self.api_key or self._get_default_api_key()
+
+    @property
+    def session(self) -> niquests.AsyncSession:
+        """Get active session, raising if not initialized."""
+        if self._session is None:
+            raise LLMError(
+                self.provider, "Client not initialized. Use async context manager."
+            )
+        return self._session
+
+    async def __aenter__(self) -> ConnT:
+        if self._session is not None:
+            raise RuntimeError(
+                f"{type(self).__name__} is already open; "
+                "using the same client in nested `async with` blocks is not supported"
+            )
+        self._session = niquests.AsyncSession(**(self.session_kwargs or {}))
+        self._set_auth_headers(self._session)
+        try:
+            self._conn_cm = self._connect()
+            return await self._conn_cm.__aenter__()
+        except BaseException:
+            await self.__aexit__(None, None, None)
+            raise
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        try:
+            if self._conn_cm is not None:
+                await self._conn_cm.__aexit__(exc_type, exc_val, exc_tb)
+        finally:
+            self._conn_cm = None
+            if self._session:
+                try:
+                    await self._session.close()
+                finally:
+                    self._session = None
+
+    @abc.abstractmethod
+    def _get_default_api_key(self) -> str:
+        """Get API key from environment."""
+        ...
+
+    @abc.abstractmethod
+    def _set_auth_headers(self, session: niquests.AsyncSession) -> None:
+        """Set provider-specific authentication headers."""
+        ...
+
+    @abc.abstractmethod
+    def _connect(self) -> AbstractAsyncContextManager[ConnT]:
+        """Open the provider handshake over the client's session."""
         ...

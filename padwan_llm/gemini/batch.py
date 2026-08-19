@@ -17,10 +17,10 @@ if TYPE_CHECKING:
     )
 
 __all__ = (
+    "TERMINAL_STATES",
     "BatchJob",
     "BatchRequest",
     "BatchResult",
-    "TERMINAL_STATES",
 )
 
 TERMINAL_STATES: frozenset[BatchState] = frozenset(

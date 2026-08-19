@@ -13,8 +13,8 @@ from padwan_llm import content_parts
 
 parts = content_parts(
     "What is in this screenshot?",  # str -> text part
-    Path("shot.png"),               # image extension -> base64 data: URL image part
-    Path("notes.md"),               # any other file -> inlined text file part
+    Path("shot.png"),  # image extension -> base64 data: URL image part
+    Path("notes.md"),  # any other file -> inlined text file part
 )
 ```
 
@@ -27,7 +27,7 @@ from padwan_llm import image_part, text_file_part, text_part
 
 parts = [
     text_part("What is in this screenshot?"),
-    image_part("shot.png"),      # reads the file into a base64 data: URL
+    image_part("shot.png"),  # reads the file into a base64 data: URL
     text_file_part("notes.md"),  # inlines a text file, labelled with its name
 ]
 ```
@@ -40,10 +40,12 @@ parts = [
 from padwan_llm import ConversationState, LLMClient, image_part, text_part
 
 state = ConversationState()
-state.add_user_message([
-    text_part("Describe this image."),
-    image_part("shot.png"),
-])
+state.add_user_message(
+    [
+        text_part("Describe this image."),
+        image_part("shot.png"),
+    ]
+)
 
 async with LLMClient("gpt-4o") as client:
     response, usage = await client.complete_chat(state.messages)
@@ -56,9 +58,9 @@ async with LLMClient("gpt-4o") as client:
 ```python
 from padwan_llm import supports_vision
 
-supports_vision("gpt-4o")                # True
+supports_vision("gpt-4o")  # True
 supports_vision("mistral-large-latest")  # False - text-only
-supports_vision("some-local-model")      # True - unknown models are attempted
+supports_vision("some-local-model")  # True - unknown models are attempted
 ```
 
 Each provider package exposes its own `supports_vision` (e.g. `padwan_llm.mistral.supports_vision`); the top-level function dispatches to them in the same order as `LLMClient` routing. Unknown models default to `True` so the request is attempted and the provider surfaces the real error instead of the check guessing wrong.

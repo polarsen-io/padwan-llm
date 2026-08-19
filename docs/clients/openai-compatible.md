@@ -63,9 +63,9 @@ async with OpenAIClient(
     base_url="https://api.groq.com/openai/v1/",
     api_key="gsk-...",
 ) as client:
-    response, usage = await client.complete_chat([
-        {"role": "user", "content": "Hello!"}
-    ])
+    response, usage = await client.complete_chat(
+        [{"role": "user", "content": "Hello!"}]
+    )
     print(response["content"])
 ```
 
@@ -77,9 +77,7 @@ async with OpenAIClient(
     base_url="https://api.groq.com/openai/v1/",
     api_key="gsk-...",
 ) as client:
-    stream = client.stream_chat([
-        {"role": "user", "content": "Tell me a story"}
-    ])
+    stream = client.stream_chat([{"role": "user", "content": "Tell me a story"}])
     async for chunk in stream:
         print(chunk, end="", flush=True)
 
@@ -97,9 +95,9 @@ async with OpenAIClient(
     base_url="http://localhost:11434/v1/",
     api_key="ollama",  # Ollama doesn't require a real key
 ) as client:
-    response, usage = await client.complete_chat([
-        {"role": "user", "content": "Hello!"}
-    ])
+    response, usage = await client.complete_chat(
+        [{"role": "user", "content": "Hello!"}]
+    )
 ```
 
 ### Together AI
@@ -110,9 +108,9 @@ async with OpenAIClient(
     base_url="https://api.together.xyz/v1/",
     api_key="...",
 ) as client:
-    response, usage = await client.complete_chat([
-        {"role": "user", "content": "Hello!"}
-    ])
+    response, usage = await client.complete_chat(
+        [{"role": "user", "content": "Hello!"}]
+    )
 ```
 
 ### vLLM
@@ -123,9 +121,9 @@ async with OpenAIClient(
     base_url="http://localhost:8000/v1/",
     api_key="token-abc123",
 ) as client:
-    response, usage = await client.complete_chat([
-        {"role": "user", "content": "Hello!"}
-    ])
+    response, usage = await client.complete_chat(
+        [{"role": "user", "content": "Hello!"}]
+    )
 ```
 
 ## Subclassing
@@ -138,6 +136,7 @@ import os
 from typing import ClassVar
 from padwan_llm import OpenAIClient
 from padwan_llm.errors import LLMError
+
 
 @dataclasses.dataclass
 class GroqClient(OpenAIClient):

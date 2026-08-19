@@ -24,17 +24,17 @@ from padwan_llm.conversation import Message
 
 # Using context manager (recommended)
 async with LLMClient("gpt-4o") as client:
-    response, usage = await client.complete_chat([
-        Message(role="user", content="Hello!")
-    ])
+    response, usage = await client.complete_chat(
+        [Message(role="user", content="Hello!")]
+    )
     print(response["content"])
 
 # Or manually manage the client
 client = LLMClient("gemini-2.5-flash")
 async with client:
-    response, usage = await client.complete_chat([
-        Message(role="user", content="Hello!")
-    ])
+    response, usage = await client.complete_chat(
+        [Message(role="user", content="Hello!")]
+    )
 ```
 
 ### Supported Models
@@ -51,9 +51,9 @@ async with OpenAIClient(
     base_url="https://api.groq.com/openai/v1/",
     api_key="gsk-...",
 ) as client:
-    response, usage = await client.complete_chat([
-        {"role": "user", "content": "Hello!"}
-    ])
+    response, usage = await client.complete_chat(
+        [{"role": "user", "content": "Hello!"}]
+    )
 ```
 
 ### Environment Variables
@@ -74,9 +74,9 @@ from padwan_llm import LLMClient
 from padwan_llm.conversation import Message
 
 async with LLMClient("gpt-4o") as client:
-    response, usage = await client.complete_chat([
-        Message(role="user", content="Hello!")
-    ])
+    response, usage = await client.complete_chat(
+        [Message(role="user", content="Hello!")]
+    )
 ```
 
 ## Streaming
@@ -87,9 +87,7 @@ All clients support streaming responses:
 from padwan_llm import LLMClient, Message
 
 async with LLMClient("gpt-4o") as client:
-    stream = client.stream_chat([
-        Message(role="user", content="Tell me a story")
-    ])
+    stream = client.stream_chat([Message(role="user", content="Tell me a story")])
     async for chunk in stream:
         print(chunk, end="", flush=True)
 

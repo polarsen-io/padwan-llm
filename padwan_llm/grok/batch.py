@@ -37,7 +37,7 @@ class GrokBatchJob:
     """
 
     batch_id: str
-    name: str = ""
+    name: str | None = None
     num_requests: int = 0
     num_pending: int = 0
     num_success: int = 0
@@ -62,7 +62,7 @@ class GrokBatchJob:
         state = data.get("state", {})
         return cls(
             batch_id=data["batch_id"],
-            name=data.get("name", ""),
+            name=data.get("name"),
             num_requests=state.get("num_requests", 0),
             num_pending=state.get("num_pending", 0),
             num_success=state.get("num_success", 0),

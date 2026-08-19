@@ -9,10 +9,10 @@ if TYPE_CHECKING:
     from .types import CreateChatCompletionRequest
 
 __all__ = (
+    "TERMINAL_STATUSES",
     "BatchJob",
     "BatchRequest",
     "BatchResult",
-    "TERMINAL_STATUSES",
 )
 
 BatchStatus = Literal[

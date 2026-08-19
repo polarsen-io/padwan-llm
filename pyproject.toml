@@ -29,7 +29,6 @@ module-name = "padwan_llm"
 
 [dependency-groups]
 dev = [
-    "anthropic>=0.116.0",
     "prek>=0.2.30",
     "pyright>=1.1.400",
     "pytest>=8.0.0",
@@ -39,10 +38,11 @@ dev = [
     "ruff>=0.15.2",
 ]
 llms = [
-    "google-genai>=2.1.0",
+    "anthropic>=0.122.0",
+    "google-genai>=2.18.1",
     "mcp>=2.0.0",
-    "openai>=2.36.0",
-    "xai-sdk>=1.12.2",
+    "openai>=3.3.0",
+    "xai-sdk>=1.19.0",
 ]
 research = [
     "jupyter>=1.1.1",
@@ -57,7 +57,9 @@ bump = [
 ]
 
 [tool.ruff.lint]
-extend-select = ["G", "I"]
+# Pin the pre-ruff-0.16 default rule set; adopting the expanded defaults
+# (BLE, SIM, S, TC, ...) is a separate cleanup.
+select = ["E4", "E7", "E9", "F", "G", "I"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true

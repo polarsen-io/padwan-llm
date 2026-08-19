@@ -1,14 +1,24 @@
 import os
-from typing import NotRequired, TypedDict, overload
+from collections.abc import Mapping, Sequence
+from typing import Any, Never, NotRequired, TypedDict, overload
 
 from ._base import LLMClientBase, OnThought
 from .anthropic import AnthropicClient, AnthropicModel, is_anthropic_model
-from .gemini import GeminiClient, GeminiModel, is_gemini_model
-from .grok import GrokClient, GrokModel, is_grok_model
+from .gemini import GeminiClient, GeminiModel, GeminiRealtimeClient, is_gemini_model
+from .gemini.realtime import GeminiLiveModel
+from .grok import GrokClient, GrokModel, GrokRealtimeClient, is_grok_model
+from .grok.realtime import GrokVoiceModel
 from .mistral import MistralClient, MistralModel, is_mistral_model
-from .openai import OpenAIClient, OpenAIModel, is_openai_model
+from .openai import (
+    DEFAULT_REALTIME_MODEL,
+    REALTIME_SAMPLE_RATE,
+    OpenAIClient,
+    OpenAIModel,
+    OpenAIRealtimeClient,
+    is_openai_model,
+)
 
-__all__ = ("LLMClient",)
+__all__ = ("LLMClient", "RealtimeClient")
 
 # Unified gateway: a single OpenAI-compatible endpoint + token serving every
 # model family. Set these to route all models through one endpoint/token
@@ -153,3 +163,122 @@ def LLMClient(
     if kwargs["api_key"] is None:
         kwargs["api_key"] = "no-key-required"
     return OpenAIClient(**kwargs)
+
+
+# The literal overloads intentionally overlap the str fallback (which assumes
+# OpenAI, mirroring the runtime prefix dispatch), hence the overlap ignore.
+@overload
+def RealtimeClient(  # pyright: ignore[reportOverlappingOverload]
+    model: GeminiModel | GeminiLiveModel,
+    *,
+    instructions: str | None = None,
+    voice: str | None = None,
+    turn_detection: Mapping[str, Any] | str | None = None,
+    transcription_model: None = ...,
+    output_modalities: Sequence[str] = ("audio",),
+    sample_rate: Never = ...,
+    timeout: float = 30.0,
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> GeminiRealtimeClient: ...
+@overload
+def RealtimeClient(
+    model: GrokModel | GrokVoiceModel,
+    *,
+    instructions: str | None = None,
+    voice: str | None = None,
+    turn_detection: Mapping[str, Any] | str | None = None,
+    transcription_model: Never = ...,
+    output_modalities: Sequence[str] = ("audio",),
+    sample_rate: int = REALTIME_SAMPLE_RATE,
+    timeout: float = 30.0,
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> GrokRealtimeClient: ...
+@overload
+def RealtimeClient(
+    model: str = DEFAULT_REALTIME_MODEL,
+    *,
+    instructions: str | None = None,
+    voice: str | None = None,
+    turn_detection: Mapping[str, Any] | str | None = None,
+    transcription_model: str | None = "whisper-1",
+    output_modalities: Sequence[str] = ("audio",),
+    sample_rate: int = REALTIME_SAMPLE_RATE,
+    timeout: float = 30.0,
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> OpenAIRealtimeClient: ...
+
+
+def RealtimeClient(
+    model: str = DEFAULT_REALTIME_MODEL,
+    *,
+    instructions: str | None = None,
+    voice: str | None = None,
+    turn_detection: Mapping[str, Any] | str | None = None,
+    transcription_model: str | None = "whisper-1",
+    output_modalities: Sequence[str] = ("audio",),
+    sample_rate: int = REALTIME_SAMPLE_RATE,
+    timeout: float = 30.0,
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> OpenAIRealtimeClient | GeminiRealtimeClient:
+    """Create a realtime speech-to-speech client based on model name.
+
+    ``async with RealtimeClient(...) as conn:`` yields the live connection.
+    Gemini models route to :class:`GeminiRealtimeClient` (Live API), Grok
+    models to :class:`GrokRealtimeClient` (OpenAI Realtime-compatible), and
+    everything else to :class:`OpenAIRealtimeClient`. *voice* ``None`` uses
+    the provider default. When no *api_key* is given, an explicit *base_url*
+    prefers ``PADWAN_API_KEY`` over the provider env key (which remains the
+    fallback).
+    """
+    if base_url is not None and api_key is None:
+        api_key = os.environ.get(PADWAN_API_KEY_ENV)
+    client: OpenAIRealtimeClient | GeminiRealtimeClient
+    if is_gemini_model(model):
+        if sample_rate != REALTIME_SAMPLE_RATE:
+            raise ValueError(
+                "sample_rate is fixed for the Gemini Live API (16 kHz in, 24 kHz out)"
+            )
+        if transcription_model not in (None, "whisper-1"):
+            raise ValueError(
+                "Gemini Live has no transcription model choice; "
+                "pass transcription_model=None to disable transcription"
+            )
+        client = GeminiRealtimeClient(
+            model=model,
+            instructions=instructions,
+            turn_detection=turn_detection,
+            transcription=transcription_model is not None,
+            output_modalities=output_modalities,
+            api_key=api_key,
+            timeout=timeout,
+        )
+    else:
+        client_cls = (
+            GrokRealtimeClient if is_grok_model(model) else OpenAIRealtimeClient
+        )
+        client = client_cls(
+            model=model,
+            instructions=instructions,
+            turn_detection=turn_detection,
+            output_modalities=output_modalities,
+            sample_rate=sample_rate,
+            api_key=api_key,
+            timeout=timeout,
+        )
+        if is_grok_model(model):
+            # Grok transcribes natively; the "whisper-1" default stands for unset.
+            if transcription_model not in (None, "whisper-1"):
+                raise ValueError(
+                    "Grok Voice transcribes natively; transcription_model is not supported"
+                )
+        else:
+            client.transcription_model = transcription_model
+    if voice is not None:
+        client.voice = voice
+    if base_url is not None:
+        client.base_url = base_url
+    return client

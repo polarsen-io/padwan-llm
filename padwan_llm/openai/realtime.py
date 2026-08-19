@@ -2,27 +2,35 @@ from __future__ import annotations
 
 import base64
 import enum
-import os
 from collections.abc import AsyncIterator, Mapping, Sequence
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
-import niquests
+from .._base import NO_TURN_DETECTION, RealtimeClientBase
+from .._ws import READ_POLL_INTERVAL, WsConnection, enable_read_polling
+from ..errors import LLMError
+from .client import _OpenAIAuth
 
-from .._base import LLMError
-from .._json import dumps as _json_dumps, loads as _json_loads
-from ..logs import log
+if TYPE_CHECKING:
+    import niquests
+    from openai.types.realtime import (
+        RealtimeAudioConfigInputParam,
+        RealtimeAudioInputTurnDetectionParam,
+        RealtimeSessionCreateRequestParam,
+        SessionUpdateEventParam,
+    )
+    from openai.types.realtime.realtime_audio_formats_param import AudioPCM
 
 __all__ = (
-    "REALTIME_ENDPOINT",
     "DEFAULT_REALTIME_MODEL",
-    "REALTIME_SAMPLE_RATE",
     "NO_TURN_DETECTION",
-    "RealtimeVoice",
-    "RealtimeServerEvent",
-    "RealtimeClient",
+    "REALTIME_ENDPOINT",
+    "REALTIME_SAMPLE_RATE",
+    "OpenAIRealtimeClient",
     "RealtimeConnection",
+    "RealtimeServerEvent",
+    "RealtimeVoice",
 )
 
 REALTIME_ENDPOINT = "wss://api.openai.com/v1/realtime"
@@ -30,33 +38,6 @@ DEFAULT_REALTIME_MODEL = "gpt-realtime"
 
 # gpt-realtime exchanges mono little-endian PCM16 at 24 kHz.
 REALTIME_SAMPLE_RATE = 24_000
-
-# Pass as ``turn_detection`` to disable server VAD (manual / push-to-talk mode);
-# you then drive each turn yourself with commit_audio() + create_response().
-NO_TURN_DETECTION = "none"
-
-# The transport locks the socket per task, so a parked read starves senders.
-# A socket read timeout makes the read release the lock periodically; the
-# transport treats it as clean ("ws algorithms based on timeouts") and the
-# connection iterator swallows the tick. Bounds send latency on a quiet socket;
-# roughly one queued send gets through per tick, so senders should batch.
-_READ_POLL_INTERVAL = 0.1
-
-
-def _enable_read_polling(ext: Any, interval: float) -> None:
-    """Arm the ws socket read timeout that drives send/receive interleaving.
-
-    Reaches through transport internals (the connection behind the extension's
-    stream reader) because no public knob exists (see
-    https://github.com/jawah/urllib3.future/issues/400); best effort — without
-    it, sends block until the server happens to emit an event.
-    """
-    try:
-        conn = ext._dsa._read.__self__
-        conn.timeout = interval
-        conn.sock.settimeout(interval)
-    except AttributeError:
-        log.debug("could not arm ws read polling", exc_info=True)
 
 
 # "marin" and "cedar" are the voices introduced with gpt-realtime; the rest carry
@@ -98,112 +79,66 @@ class RealtimeServerEvent(enum.StrEnum):
 
 
 @dataclass
-class RealtimeClient:
+class OpenAIRealtimeClient(_OpenAIAuth, RealtimeClientBase["RealtimeConnection"]):
     """Speech-to-speech client for the OpenAI Realtime API over a WebSocket.
 
-    Talks to the GA ``gpt-realtime`` model; wire shapes follow
-    https://platform.openai.com/docs/guides/realtime. The transport is niquests'
-    native WebSocket support (requires the ``ws`` extra, i.e. ``padwan-llm[realtime]``).
-    Pass *api_key* explicitly or leave it unset to read ``OPENAI_API_KEY`` from the
-    environment. *timeout* bounds the opening handshake; on the open socket the
-    connection polls reads internally, so the model can stay silent between turns
-    without the connection being torn down.
+    Server VAD by default; pass :data:`NO_TURN_DETECTION` to drive turns
+    manually. Wire shapes: https://platform.openai.com/docs/guides/realtime
     """
 
     model: str = DEFAULT_REALTIME_MODEL
-    api_key: str | None = None
     base_url: str = REALTIME_ENDPOINT
-    timeout: float = 30.0
+    instructions: str | None = None
+    voice: RealtimeVoice = "marin"
+    turn_detection: Mapping[str, Any] | str | None = None
+    transcription_model: str | None = "whisper-1"
+    output_modalities: Sequence[str] = ("audio",)
+    sample_rate: int = REALTIME_SAMPLE_RATE
 
-    def __post_init__(self) -> None:
-        self._api_key = self.api_key or os.environ.get("OPENAI_API_KEY")
-        if not self._api_key:
-            raise LLMError("openai", "OPENAI_API_KEY not set")
+    def _set_auth_headers(self, session: niquests.AsyncSession) -> None:
+        session.headers["Authorization"] = f"Bearer {self._api_key}"
 
     @asynccontextmanager
-    async def connect(
-        self,
-        *,
-        instructions: str | None = None,
-        voice: RealtimeVoice = "marin",
-        turn_detection: Mapping[str, Any] | str | None = None,
-        transcription_model: str | None = "whisper-1",
-        output_modalities: Sequence[str] = ("audio",),
-        sample_rate: int = REALTIME_SAMPLE_RATE,
-        session: niquests.AsyncSession | None = None,
-        session_kwargs: Mapping[str, Any] | None = None,
-    ) -> AsyncIterator[RealtimeConnection]:
-        """Open a configured realtime session and yield a :class:`RealtimeConnection`.
-
-        *instructions* is the system prompt steering the voice agent and *voice*
-        selects the spoken voice. *turn_detection* defaults to server-side VAD so
-        the model decides when you have stopped talking; pass an explicit mapping
-        (e.g. ``{"type": "semantic_vad"}``) to override, or :data:`NO_TURN_DETECTION`
-        to disable VAD and drive each turn manually (push-to-talk) with
-        :meth:`RealtimeConnection.commit_audio` + :meth:`RealtimeConnection.create_response`.
-        *transcription_model* enables transcription of your own speech (set to
-        ``None`` to disable). The session is configured before control returns and
-        closed automatically on exit. Pass *session* to reuse a caller-owned
-        ``AsyncSession`` (left open on exit), or *session_kwargs* to forward
-        constructor arguments (e.g. proxies) to the internally managed session;
-        the two are mutually exclusive.
-        """
-        if session is not None and session_kwargs is not None:
-            raise ValueError("pass either session or session_kwargs, not both")
-        headers = {"Authorization": f"Bearer {self._api_key}"}
-        async with AsyncExitStack() as stack:
-            if session is None:
-                session = await stack.enter_async_context(
-                    niquests.AsyncSession(**(session_kwargs or {}))
-                )
-            # timeout bounds only the upgrade handshake; afterwards the read
-            # timeout is re-armed as the poll interval (see _enable_read_polling).
-            resp = await session.get(
-                self.base_url,
-                headers=headers,
-                params={"model": self.model},
-                timeout=self.timeout,
+    async def _connect(self) -> AsyncIterator[RealtimeConnection]:
+        # timeout bounds only the upgrade handshake; afterwards the read
+        # timeout is re-armed as the poll interval (see _enable_read_polling).
+        resp = await self.session.get(
+            self.base_url,
+            params={"model": self.model},
+            timeout=self.timeout,
+        )
+        ext = resp.extension
+        if ext is None:
+            raise LLMError(
+                "openai",
+                f"realtime handshake did not upgrade to a websocket "
+                f"(status {resp.status_code})",
             )
-            ext = resp.extension
-            if ext is None:
-                raise LLMError(
-                    "openai",
-                    f"realtime handshake did not upgrade to a websocket "
-                    f"(status {resp.status_code})",
-                )
-            _enable_read_polling(ext, _READ_POLL_INTERVAL)
-            conn = RealtimeConnection(ext, sample_rate=sample_rate)
-            await conn.configure(
-                instructions=instructions,
-                voice=voice,
-                turn_detection=turn_detection,
-                transcription_model=transcription_model,
-                output_modalities=list(output_modalities),
-            )
-            try:
-                yield conn
-            finally:
-                await conn.close()
+        enable_read_polling(ext, READ_POLL_INTERVAL)
+        conn = RealtimeConnection(ext, sample_rate=self.sample_rate)
+        await conn.configure(
+            instructions=self.instructions,
+            voice=self.voice,
+            turn_detection=self.turn_detection,
+            transcription_model=self.transcription_model,
+            output_modalities=list(self.output_modalities),
+        )
+        try:
+            yield conn
+        finally:
+            await conn.close()
 
 
 @dataclass
-class RealtimeConnection:
+class RealtimeConnection(WsConnection):
     """An open realtime session.
 
     Stream microphone audio with :meth:`append_audio` and consume server events by
     async-iterating the connection. Audio is mono little-endian PCM16 at
     *sample_rate* Hz in both directions.
-
-    The transport allows only one task on the socket at a time, so a read parked
-    in ``next_payload`` would block every send until the server happens to emit
-    an event. ``connect()`` therefore arms a short socket read timeout: the
-    iterator silently swallows the periodic timeout ticks, and each tick
-    releases the socket so queued sends go out within ``_READ_POLL_INTERVAL``.
     """
 
-    ext: Any
     sample_rate: int = REALTIME_SAMPLE_RATE
-    _closed: bool = False
 
     def session_payload(
         self,
@@ -217,26 +152,37 @@ class RealtimeConnection:
         """Build the ``session.update`` event for the GA Realtime schema.
 
         Split out from :meth:`configure` so the payload can be inspected and
-        unit-tested without a live connection. *turn_detection* of
+        unit-tested without a live connection; the construction is typed against
+        the OpenAI SDK's ``session.update`` params so wire drift surfaces at
+        type-check time on SDK bumps. *turn_detection* of
         :data:`NO_TURN_DETECTION` emits a JSON ``null`` to disable server VAD; a
         falsy value uses the ``server_vad`` default; a mapping is sent verbatim.
         """
-        audio_format = {"type": "audio/pcm", "rate": self.sample_rate}
+        audio_format: AudioPCM = {
+            "type": "audio/pcm",
+            # The SDK pins 24 kHz; Grok speaks the same wire at other rates.
+            "rate": cast("Literal[24000]", self.sample_rate),
+        }
         if isinstance(turn_detection, str):
-            detection: dict[str, Any] | None = None  # NO_TURN_DETECTION -> JSON null
+            detection: RealtimeAudioInputTurnDetectionParam | None = None
         elif turn_detection:
-            detection = dict(turn_detection)
+            # Caller-supplied mapping, sent verbatim.
+            detection = cast(
+                "RealtimeAudioInputTurnDetectionParam", dict(turn_detection)
+            )
         else:
             detection = {"type": "server_vad"}
-        audio_input: dict[str, Any] = {
+        audio_input: RealtimeAudioConfigInputParam = {
             "format": audio_format,
             "turn_detection": detection,
         }
         if transcription_model:
             audio_input["transcription"] = {"model": transcription_model}
-        session: dict[str, Any] = {
+        session: RealtimeSessionCreateRequestParam = {
             "type": "realtime",
-            "output_modalities": list(output_modalities),
+            "output_modalities": cast(
+                "list[Literal['text', 'audio']]", list(output_modalities)
+            ),
             "audio": {
                 "input": audio_input,
                 "output": {"format": audio_format, "voice": voice},
@@ -244,7 +190,8 @@ class RealtimeConnection:
         }
         if instructions:
             session["instructions"] = instructions
-        return {"type": "session.update", "session": session}
+        event: SessionUpdateEventParam = {"type": "session.update", "session": session}
+        return cast("dict[str, Any]", event)
 
     async def configure(
         self,
@@ -266,14 +213,6 @@ class RealtimeConnection:
             )
         )
 
-    async def send_event(self, event: Mapping[str, Any]) -> None:
-        """Send a raw client event as a JSON text frame.
-
-        Safe to call while another task awaits server events: the frame goes out
-        at the next read-poll tick, within ``_READ_POLL_INTERVAL`` seconds.
-        """
-        await self.ext.send_payload(_json_dumps(event))
-
     async def append_audio(self, pcm16: bytes) -> None:
         """Append a chunk of mono PCM16 audio to the input buffer."""
         audio = base64.b64encode(pcm16).decode("ascii")
@@ -294,25 +233,3 @@ class RealtimeConnection:
             return None
         delta = event.get("delta")
         return base64.b64decode(delta) if isinstance(delta, str) else None
-
-    async def __aiter__(self) -> AsyncIterator[dict[str, Any]]:
-        while not self._closed:
-            try:
-                payload = await self.ext.next_payload()
-            except niquests.exceptions.ReadTimeout:
-                continue  # read-poll tick: lets queued sends borrow the socket
-            if payload is None:
-                break
-            if isinstance(payload, (bytes, bytearray)):
-                payload = bytes(payload).decode("utf-8")
-            yield _json_loads(payload)
-
-    async def close(self) -> None:
-        """Close the underlying websocket (idempotent)."""
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            await self.ext.close()
-        except Exception:  # best effort — the socket may already be gone
-            log.debug("error closing realtime websocket", exc_info=True)

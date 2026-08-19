@@ -8,8 +8,8 @@ The Grok client provides access to xAI's Grok models. It inherits from [`OpenAIC
 from padwan_llm.grok import GrokClient
 
 client = GrokClient(
-    api_key="...",      # or set GROK_API_KEY env var
-    model="grok-3",     # default model
+    api_key="...",  # or set GROK_API_KEY env var
+    model="grok-3",  # default model
 )
 ```
 
@@ -21,9 +21,9 @@ client = GrokClient(
 from padwan_llm.conversation import Message
 
 async with GrokClient() as client:
-    response, usage = await client.complete_chat([
-        Message(role="user", content="Hello!")
-    ])
+    response, usage = await client.complete_chat(
+        [Message(role="user", content="Hello!")]
+    )
     print(response["content"])
 ```
 
@@ -33,9 +33,7 @@ async with GrokClient() as client:
 from padwan_llm.conversation import Message
 
 async with GrokClient() as client:
-    stream = client.stream_chat([
-        Message(role="user", content="Tell me a story")
-    ])
+    stream = client.stream_chat([Message(role="user", content="Tell me a story")])
     async for chunk in stream:
         print(chunk, end="")
 ```
@@ -118,3 +116,16 @@ async for chunk in stream:
     ...
 usage = stream.usage
 ```
+
+## Realtime (Voice Agent)
+
+`RealtimeClient` with a Grok voice model opens a speech-to-speech [Voice Agent](https://docs.x.ai/developers/model-capabilities/audio/voice-agent) session. The wire protocol is OpenAI Realtime-compatible, so the connection is the same `RealtimeConnection` as OpenAI's; only the endpoint, model, and voices differ. Known voices include `eve` (default), `ara`, and `leo`; Grok transcribes natively, so no transcription model is configured.
+
+```python
+from padwan_llm import RealtimeClient
+
+async with RealtimeClient("grok-voice-latest", instructions="Answer briefly.") as conn:
+    await conn.append_audio(pcm16_chunk)  # mono PCM16 @ 24 kHz
+    async for event in conn:
+        if audio := conn.audio_delta_bytes(event):
+            playback.write(audio)
