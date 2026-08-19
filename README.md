@@ -118,6 +118,30 @@ async with GeminiClient(
 print("\n---\nReasoning:", "".join(thoughts))
 ```
 
+### Realtime speech-to-speech
+
+`RealtimeClient` opens a bidirectional voice session over a WebSocket and yields
+the live connection: stream microphone audio in, receive model audio and
+transcripts back. OpenAI (`gpt-realtime`), Gemini Live, and Grok Voice are
+supported, dispatched by model name. Requires the `realtime` extra
+(`pip install "padwan-llm[realtime]"`):
+
+```python
+from padwan_llm import RealtimeClient
+
+async with RealtimeClient(instructions="Answer briefly.", voice="marin") as conn:
+    await conn.append_audio(pcm16_chunk)  # mono PCM16 microphone audio
+    async for event in conn:
+        if audio := conn.audio_delta_bytes(event):
+            playback.write(audio)
+```
+
+Server-side VAD drives turn-taking by default; pass `turn_detection=NO_TURN_DETECTION`
+for manual push-to-talk. See the realtime sections of
+[docs/clients/openai.md](docs/clients/openai.md),
+[docs/clients/gemini.md](docs/clients/gemini.md), and
+[docs/clients/grok.md](docs/clients/grok.md).
+
 ## One-Shot Command
 
 ```bash
