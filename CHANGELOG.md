@@ -1,3 +1,37 @@
+## 0.8.0 (2026-08-19)
+
+Two big additions to the unified client — a native Anthropic chat provider and multi-provider realtime voice — alongside multimodal content building blocks, runtime model-deprecation warnings, typed response decoding, and Python 3.15 support.
+
+### Features
+
+- **Python 3.15 support** — CI now tests 3.13 through 3.15. Grok SDK conformance tests are skipped on 3.15 until grpcio ships 3.15 wheels; the Grok client itself is unaffected (#40).
+- **Anthropic client** — native `AnthropicClient` over the Messages API: `complete_chat`/`stream_chat`, tool use, SSE streaming, thinking tokens forwarded to `on_thought`, usage mapping with cache-read tokens. The `LLMClient` factory dispatches `claude-*` models; authenticates via `ANTHROPIC_API_KEY`. The weekly drift check now tracks the Anthropic model catalog (#28, #29).
+- **Realtime voice clients** — `RealtimeClient` factory (mirroring `LLMClient`) dispatching by model prefix to `OpenAIRealtimeClient` (Realtime API), `GeminiRealtimeClient` (Live API), and `GrokRealtimeClient` (Voice Agent). A single `async with` opens the session, performs the handshake, and yields the connection; session config (instructions, voice, turn detection, ...) lives on the client constructor, with `NO_TURN_DETECTION` for manual push-to-talk. E2e speech roundtrips cover all three providers (#24, #35).
+- **Multimodal content parts** — typed text/image/file parts in the OpenAI content-part shape, with `image_part`/`text_part`/`text_file_part` helpers and a `content_parts` builder that infers part types; `supports_vision(model)` best-effort image-input capability check (#24).
+- **Model deprecation warnings** — constructing a client with a provider-retired model emits a one-time `ModelDeprecationWarning` (a `FutureWarning`, suppressible by category for deliberate pins). Deprecation maps are regenerated weekly by the drift run — no runtime network call (#23).
+- **Typed response decoding** — `_check_resp(decoder=...)` deserializes provider responses through a validating decoder (e.g. msgspec) instead of untyped `.json()`; clients forward `json_encoder` to their `AsyncSession` for typed request payloads (niquests >= 3.21) (#33).
+- **Gateway auth** — an explicit `base_url` with no explicit `api_key` authenticates with `PADWAN_API_KEY`, so a provider secret is never sent to a custom endpoint (#24).
+
+### New model IDs (weekly drift runs)
+
+- OpenAI: `gpt-5.5`
+- Gemini: `gemini-3.5-flash-lite`, `gemini-3.6-flash`, `gemini-3.7-flash`, `gemini-omni-flash-preview`, `gemini-2.5-flash-native-audio-latest`
+- Anthropic: `claude-opus-5`
+- Mistral: `mistral-ocr-3`/`-3-0`/`-4`/`-4-0`/`-4-1`, `labs-leanstral`, `mistral-code-agent-latest`, `mistral-code-fim-latest`, `mistral-medium-3-5-0`
+- Grok: `grok-4.6`, `grok-3-mini-fast-high`, `grok-3-mini-high`
+
+### Fixes
+
+- **Drift**: source the OpenAI spec from the official `openai/openai-openapi` repo after openai-python removed its spec pointer, unbreaking weekly type regeneration (#34).
+- **Realtime**: poll websocket reads so control events (e.g. push-to-talk commits) are not blocked behind a parked read (#24).
+
+### Chore
+
+- Require `mcp>=2.0.0`; migrate tests to `mcp.server.mcpserver.MCPServer` (#32).
+- SDK floors bumped by the weekly refreshes: openai 3.x, google-genai 2.18, ruff 0.16, pyright 1.1.411.
+
+**Full Changelog**: https://github.com/polarsen-io/padwan-llm/compare/0.7.1...0.8.0
+
 ## 0.7.1 (2026-06-01)
 
 Maintenance release: a Mistral model-ID correction, regenerated provider types, and a batch of improvements to the weekly model-drift automation.
