@@ -1,9 +1,10 @@
 ## 0.8.0 (2026-08-19)
 
-Two big additions to the unified client — a native Anthropic chat provider and multi-provider realtime voice — alongside multimodal content building blocks, runtime model-deprecation warnings, and typed response decoding.
+Two big additions to the unified client — a native Anthropic chat provider and multi-provider realtime voice — alongside multimodal content building blocks, runtime model-deprecation warnings, typed response decoding, and Python 3.15 support.
 
 ### Features
 
+- **Python 3.15 support** — CI now tests 3.13 through 3.15. Grok SDK conformance tests are skipped on 3.15 until grpcio ships 3.15 wheels; the Grok client itself is unaffected (#40).
 - **Anthropic client** — native `AnthropicClient` over the Messages API: `complete_chat`/`stream_chat`, tool use, SSE streaming, thinking tokens forwarded to `on_thought`, usage mapping with cache-read tokens. The `LLMClient` factory dispatches `claude-*` models; authenticates via `ANTHROPIC_API_KEY`. The weekly drift check now tracks the Anthropic model catalog (#28, #29).
 - **Realtime voice clients** — `RealtimeClient` factory (mirroring `LLMClient`) dispatching by model prefix to `OpenAIRealtimeClient` (Realtime API), `GeminiRealtimeClient` (Live API), and `GrokRealtimeClient` (Voice Agent). A single `async with` opens the session, performs the handshake, and yields the connection; session config (instructions, voice, turn detection, ...) lives on the client constructor, with `NO_TURN_DETECTION` for manual push-to-talk. E2e speech roundtrips cover all three providers (#24, #35).
 - **Multimodal content parts** — typed text/image/file parts in the OpenAI content-part shape, with `image_part`/`text_part`/`text_file_part` helpers and a `content_parts` builder that infers part types; `supports_vision(model)` best-effort image-input capability check (#24).
