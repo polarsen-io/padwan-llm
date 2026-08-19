@@ -34,6 +34,8 @@ Most LLM client libraries pull in heavy dependencies (pydantic, httpx) and lock 
 | Anthropic | ✅  | ✅        | ❌    | ❌       | ❌            | ❌         |
 | [OpenAI-Compatible](clients/openai-compatible.md) | ✅ | ✅ | ➕ | ➕ | ➕ | ➕ |
 
+➕ = depends on the endpoint: the request is sent in OpenAI's wire format; support is up to the server.
+
 ## Quick Example
 
 ```bash
