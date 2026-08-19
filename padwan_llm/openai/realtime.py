@@ -9,10 +9,9 @@ from typing import Any, ClassVar, Literal, get_args
 
 import niquests
 
-from .._base import LLMError, RealtimeClientBase, env_api_key
-from .._json import dumps as _json_dumps, loads as _json_loads
+from .._base import NO_TURN_DETECTION, LLMError, RealtimeClientBase, env_api_key
+from .._ws import READ_POLL_INTERVAL, WsConnection, enable_read_polling
 from ..errors import Provider
-from ..logs import log
 
 __all__ = (
     "REALTIME_ENDPOINT",
@@ -30,33 +29,6 @@ DEFAULT_REALTIME_MODEL = "gpt-realtime"
 
 # gpt-realtime exchanges mono little-endian PCM16 at 24 kHz.
 REALTIME_SAMPLE_RATE = 24_000
-
-# Pass as ``turn_detection`` to disable server VAD (manual / push-to-talk mode);
-# you then drive each turn yourself with commit_audio() + create_response().
-NO_TURN_DETECTION = "none"
-
-# The transport locks the socket per task, so a parked read starves senders.
-# A socket read timeout makes the read release the lock periodically; the
-# transport treats it as clean ("ws algorithms based on timeouts") and the
-# connection iterator swallows the tick. Bounds send latency on a quiet socket;
-# roughly one queued send gets through per tick, so senders should batch.
-_READ_POLL_INTERVAL = 0.1
-
-
-def _enable_read_polling(ext: Any, interval: float) -> None:
-    """Arm the ws socket read timeout that drives send/receive interleaving.
-
-    Reaches through transport internals (the connection behind the extension's
-    stream reader) because no public knob exists (see
-    https://github.com/jawah/urllib3.future/issues/400); best effort — without
-    it, sends block until the server happens to emit an event.
-    """
-    try:
-        conn = ext._dsa._read.__self__
-        conn.timeout = interval
-        conn.sock.settimeout(interval)
-    except AttributeError:
-        log.debug("could not arm ws read polling", exc_info=True)
 
 
 # "marin" and "cedar" are the voices introduced with gpt-realtime; the rest carry
@@ -145,7 +117,7 @@ class OpenAIRealtimeClient(RealtimeClientBase["RealtimeConnection"]):
                 f"realtime handshake did not upgrade to a websocket "
                 f"(status {resp.status_code})",
             )
-        _enable_read_polling(ext, _READ_POLL_INTERVAL)
+        enable_read_polling(ext, READ_POLL_INTERVAL)
         conn = RealtimeConnection(ext, sample_rate=self.sample_rate)
         await conn.configure(
             instructions=self.instructions,
@@ -161,23 +133,15 @@ class OpenAIRealtimeClient(RealtimeClientBase["RealtimeConnection"]):
 
 
 @dataclass
-class RealtimeConnection:
+class RealtimeConnection(WsConnection):
     """An open realtime session.
 
     Stream microphone audio with :meth:`append_audio` and consume server events by
     async-iterating the connection. Audio is mono little-endian PCM16 at
     *sample_rate* Hz in both directions.
-
-    The transport allows only one task on the socket at a time, so a read parked
-    in ``next_payload`` would block every send until the server happens to emit
-    an event. ``connect()`` therefore arms a short socket read timeout: the
-    iterator silently swallows the periodic timeout ticks, and each tick
-    releases the socket so queued sends go out within ``_READ_POLL_INTERVAL``.
     """
 
-    ext: Any
     sample_rate: int = REALTIME_SAMPLE_RATE
-    _closed: bool = False
 
     def session_payload(
         self,
@@ -240,14 +204,6 @@ class RealtimeConnection:
             )
         )
 
-    async def send_event(self, event: Mapping[str, Any]) -> None:
-        """Send a raw client event as a JSON text frame.
-
-        Safe to call while another task awaits server events: the frame goes out
-        at the next read-poll tick, within ``_READ_POLL_INTERVAL`` seconds.
-        """
-        await self.ext.send_payload(_json_dumps(event))
-
     async def append_audio(self, pcm16: bytes) -> None:
         """Append a chunk of mono PCM16 audio to the input buffer."""
         audio = base64.b64encode(pcm16).decode("ascii")
@@ -268,25 +224,3 @@ class RealtimeConnection:
             return None
         delta = event.get("delta")
         return base64.b64decode(delta) if isinstance(delta, str) else None
-
-    async def __aiter__(self) -> AsyncIterator[dict[str, Any]]:
-        while not self._closed:
-            try:
-                payload = await self.ext.next_payload()
-            except niquests.exceptions.ReadTimeout:
-                continue  # read-poll tick: lets queued sends borrow the socket
-            if payload is None:
-                break
-            if isinstance(payload, (bytes, bytearray)):
-                payload = bytes(payload).decode("utf-8")
-            yield _json_loads(payload)
-
-    async def close(self) -> None:
-        """Close the underlying websocket (idempotent)."""
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            await self.ext.close()
-        except Exception:  # best effort — the socket may already be gone
-            log.debug("error closing realtime websocket", exc_info=True)

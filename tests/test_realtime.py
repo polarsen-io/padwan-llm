@@ -4,9 +4,16 @@ import base64
 import niquests
 import pytest
 
-from padwan_llm import RealtimeClient
+from padwan_llm import (
+    GeminiRealtimeClient,
+    GeminiRealtimeConnection,
+    GrokRealtimeClient,
+    OpenAIRealtimeClient,
+    RealtimeClient,
+)
 from padwan_llm._json import loads as _json_loads
 from padwan_llm.errors import LLMError
+from padwan_llm.gemini.realtime import DEFAULT_LIVE_MODEL, LIVE_ENDPOINT
 from padwan_llm.openai.realtime import (
     NO_TURN_DETECTION,
     RealtimeConnection,
@@ -266,3 +273,143 @@ async def test_aiter_parses_until_none() -> None:
     conn = RealtimeConnection(FakeExt(incoming))
     seen = [event["type"] async for event in conn]
     assert seen == ["session.created", "response.output_audio.delta"]
+
+
+@pytest.mark.parametrize(
+    "kwargs, expected_vad, has_transcription, instructions",
+    [
+        pytest.param({}, None, True, None, id="defaults-automatic-vad"),
+        pytest.param(
+            {"turn_detection": NO_TURN_DETECTION},
+            {"disabled": True},
+            True,
+            None,
+            id="disabled-manual-turns",
+        ),
+        pytest.param(
+            {"turn_detection": {"silenceDurationMs": 500}},
+            {"silenceDurationMs": 500},
+            True,
+            None,
+            id="mapping-verbatim",
+        ),
+        pytest.param(
+            {"transcription": False, "instructions": "Parla italiano."},
+            None,
+            False,
+            "Parla italiano.",
+            id="no-transcription-with-instructions",
+        ),
+    ],
+)
+def test_gemini_setup_payload(
+    kwargs, expected_vad, has_transcription, instructions
+) -> None:
+    client = GeminiRealtimeClient(api_key="g-test", voice="Kore", **kwargs)
+    payload = client.setup_payload()
+    setup = payload["setup"]
+    assert setup["model"] == f"models/{DEFAULT_LIVE_MODEL}"
+    config = setup["generationConfig"]
+    assert config["responseModalities"] == ["AUDIO"]
+    voice_name = config["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]
+    assert voice_name == {"voiceName": "Kore"}
+    vad = setup.get("realtimeInputConfig", {}).get("automaticActivityDetection")
+    assert vad == expected_vad
+    assert ("inputAudioTranscription" in setup) is has_transcription
+    assert ("outputAudioTranscription" in setup) is has_transcription
+    if instructions:
+        assert setup["systemInstruction"] == {"parts": [{"text": instructions}]}
+    else:
+        assert "systemInstruction" not in setup
+
+
+async def test_gemini_append_audio_16k_mime() -> None:
+    ext = FakeExt()
+    conn = GeminiRealtimeConnection(ext)
+    pcm = b"\x01\x02" * 32
+    await conn.append_audio(pcm)
+    event = _json_loads(ext.sent[-1])
+    audio = event["realtimeInput"]["audio"]
+    assert audio["mimeType"] == "audio/pcm;rate=16000"
+    assert base64.b64decode(audio["data"]) == pcm
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        pytest.param(
+            {
+                "serverContent": {
+                    "modelTurn": {
+                        "parts": [
+                            {"inlineData": {"data": base64.b64encode(b"ab").decode()}},
+                            {"text": "ignored"},
+                            {"inlineData": {"data": base64.b64encode(b"cd").decode()}},
+                        ]
+                    }
+                }
+            },
+            b"abcd",
+            id="audio-parts-joined",
+        ),
+        pytest.param({"serverContent": {"turnComplete": True}}, None, id="no-audio"),
+        pytest.param({"setupComplete": {}}, None, id="setup-complete"),
+    ],
+)
+def test_gemini_audio_delta_bytes(message, expected) -> None:
+    assert GeminiRealtimeConnection.audio_delta_bytes(message) == expected
+
+
+@pytest.mark.parametrize(
+    "model, expected_cls, env_var, expected_url",
+    [
+        pytest.param(
+            "gpt-realtime",
+            OpenAIRealtimeClient,
+            "OPENAI_API_KEY",
+            "wss://api.openai.com/v1/realtime",
+            id="openai",
+        ),
+        pytest.param(
+            "gemini-3.1-flash-live-preview",
+            GeminiRealtimeClient,
+            "GEMINI_API_KEY",
+            LIVE_ENDPOINT,
+            id="gemini",
+        ),
+        pytest.param(
+            "grok-voice-latest",
+            GrokRealtimeClient,
+            "GROK_API_KEY",
+            "wss://api.x.ai/v1/realtime",
+            id="grok",
+        ),
+    ],
+)
+def test_factory_provider_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    model: str,
+    expected_cls: type,
+    env_var: str,
+    expected_url: str,
+) -> None:
+    for var in ("OPENAI_API_KEY", "GEMINI_API_KEY", "GROK_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv(env_var, "sk-env")
+    client = RealtimeClient(model)
+    assert type(client) is expected_cls
+    assert client._api_key == "sk-env"
+    assert client.base_url == expected_url
+
+
+def test_factory_provider_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    # voice=None keeps each provider's default; explicit voice overrides it.
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    monkeypatch.setenv("GROK_API_KEY", "x")
+    assert RealtimeClient("gemini-3.1-flash-live-preview").voice == "Puck"
+    assert RealtimeClient("grok-voice-latest").voice == "eve"
+    assert RealtimeClient("grok-voice-latest", voice="ara").voice == "ara"
+    # Grok transcribes natively: the OpenAI-style default is not forwarded.
+    assert RealtimeClient("grok-voice-latest").transcription_model is None
+    with pytest.raises(ValueError, match="sample_rate is fixed"):
+        RealtimeClient("gemini-3.1-flash-live-preview", sample_rate=8_000)

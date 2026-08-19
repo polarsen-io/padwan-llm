@@ -22,12 +22,17 @@ if TYPE_CHECKING:
 __all__ = (
     "ChatStream",
     "LLMClientBase",
+    "NO_TURN_DETECTION",
     "OnThought",
     "Provider",
     "RealtimeClientBase",
 )
 
 OnThought = Callable[[str], None]
+
+# Pass as ``turn_detection`` to disable server-side VAD (manual / push-to-talk);
+# you then drive each turn yourself with the provider's manual-turn methods.
+NO_TURN_DETECTION = "none"
 
 
 class ChatStream(abc.ABC):
@@ -212,13 +217,7 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
 
 @dataclass
 class RealtimeClientBase[ConnT](abc.ABC):
-    """Abstract base for realtime speech-to-speech clients over a WebSocket.
-
-    Use provider-specific clients (OpenAIRealtimeClient, ...) or the
-    :func:`padwan_llm.RealtimeClient` factory instead. ``async with client as
-    conn:`` opens the managed ``AsyncSession``, performs the provider
-    handshake, and yields the live connection.
-    """
+    """Abstract base for realtime speech-to-speech clients over a WebSocket."""
 
     provider: ClassVar[Provider]
 

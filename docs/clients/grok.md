@@ -118,3 +118,16 @@ async for chunk in stream:
     ...
 usage = stream.usage
 ```
+
+## Realtime (Voice Agent)
+
+`RealtimeClient` with a Grok voice model opens a speech-to-speech [Voice Agent](https://docs.x.ai/developers/model-capabilities/audio/voice-agent) session. The wire protocol is OpenAI Realtime-compatible, so the connection is the same `RealtimeConnection` as OpenAI's; only the endpoint, model, and voices differ. Known voices include `eve` (default), `ara`, and `leo`; Grok transcribes natively, so no transcription model is configured.
+
+```python
+from padwan_llm import RealtimeClient
+
+async with RealtimeClient("grok-voice-latest", instructions="Answer briefly.") as conn:
+    await conn.append_audio(pcm16_chunk)  # mono PCM16 @ 24 kHz
+    async for event in conn:
+        if audio := conn.audio_delta_bytes(event):
+            playback.write(audio)

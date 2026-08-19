@@ -120,3 +120,25 @@ await client.cancel_batch("batches/123456")
 | `BatchRequest` | Single request: `contents`, `generation_config`, `system_instruction`, `key` |
 | `BatchJob` | Job state: `name`, `state`, `dest`, `stats`, `is_terminal`, `succeeded` |
 | `BatchResult` | Parsed result: `key`, `content`, `input_tokens`, `output_tokens`, `total_tokens` |
+
+## Realtime (Live API)
+
+`RealtimeClient` with a Gemini model opens a speech-to-speech [Live API](https://ai.google.dev/api/live) session over a WebSocket. Audio is mono little-endian PCM16 — 16 kHz in (`LIVE_INPUT_SAMPLE_RATE`), 24 kHz out (`LIVE_OUTPUT_SAMPLE_RATE`). Requires the `realtime` extra.
+
+```python
+from padwan_llm import RealtimeClient
+
+async with RealtimeClient(
+    "gemini-3.1-flash-live-preview",
+    instructions="Answer briefly.",
+    voice="Puck",
+) as conn:
+    await conn.append_audio(pcm16_chunk)  # mono PCM16 @ 16 kHz
+    async for message in conn:
+        if audio := conn.audio_delta_bytes(message):
+            playback.write(audio)  # PCM16 @ 24 kHz
+        if conn.is_turn_complete(message):
+            break
+```
+
+Automatic activity detection (server VAD) is the default. Pass `turn_detection=NO_TURN_DETECTION` to disable it and mark turns yourself with `conn.activity_start()` / `conn.activity_end()`; a mapping tunes the `automaticActivityDetection` fields (e.g. `{"silenceDurationMs": 500}`). Input/output transcription events arrive via `conn.input_transcript(message)` / `conn.output_transcript(message)`; disable them by constructing `GeminiRealtimeClient(transcription=False)` directly.

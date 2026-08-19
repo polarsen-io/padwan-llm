@@ -28,8 +28,15 @@ from .conversation import (
     ToolResultMessage,
 )
 from .errors import LLMError, Provider
-from .gemini import GEMINI_MODELS, GeminiClient, GeminiModel, is_gemini_model
-from .grok import GROK_MODELS, GrokClient, GrokModel, is_grok_model
+from .gemini import (
+    GEMINI_MODELS,
+    GeminiClient,
+    GeminiModel,
+    GeminiRealtimeClient,
+    GeminiRealtimeConnection,
+    is_gemini_model,
+)
+from .grok import GROK_MODELS, GrokClient, GrokModel, GrokRealtimeClient, is_grok_model
 from .mcp import McpStdio, McpStreamable, McpTool, McpTransport, OnAuth, ProgressEvent
 from .mistral import MISTRAL_MODELS, MistralClient, MistralModel, is_mistral_model
 from .models import (
@@ -94,6 +101,9 @@ __all__ = (
     "OpenAIClient",
     "OpenAIModel",
     "OpenAIRealtimeClient",
+    "GeminiRealtimeClient",
+    "GeminiRealtimeConnection",
+    "GrokRealtimeClient",
     "RealtimeClient",
     "RealtimeClientBase",
     "RealtimeConnection",
