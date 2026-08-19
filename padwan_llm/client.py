@@ -188,7 +188,7 @@ def RealtimeClient(
     instructions: str | None = None,
     voice: str | None = None,
     turn_detection: Mapping[str, Any] | str | None = None,
-    transcription_model: str | None = "whisper-1",
+    transcription_model: str | None = None,
     output_modalities: Sequence[str] = ("audio",),
     sample_rate: int = REALTIME_SAMPLE_RATE,
     timeout: float = 30.0,
