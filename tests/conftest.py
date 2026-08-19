@@ -16,6 +16,13 @@ def pytest_configure(config: pytest.Config) -> None:
     load_dotenv(config.getoption("--env-file"))
 
 
+@pytest.fixture(autouse=True)
+def _clear_gateway_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the unified-gateway env vars out of tests that don't opt in."""
+    monkeypatch.delenv("PADWAN_BASE_URL", raising=False)
+    monkeypatch.delenv("PADWAN_API_KEY", raising=False)
+
+
 @pytest.fixture
 def make_resp():
     def _make(status_code: int, json_data: dict, headers: dict | None = None):

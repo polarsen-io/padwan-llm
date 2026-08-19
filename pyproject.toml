@@ -12,6 +12,9 @@ dependencies = [
     "urllib3-future>=2.19.908",
 ]
 
+[project.optional-dependencies]
+realtime = ["niquests[ws]>=3.21.0"]
+
 [project.scripts]
 padwan-llm = "padwan_llm.__main__:main"
 

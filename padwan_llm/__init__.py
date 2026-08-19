@@ -10,6 +10,15 @@ from .anthropic import (
     is_anthropic_model,
 )
 from .client import LLMClient
+from .content import (
+    ContentImagePart,
+    ContentPart,
+    ContentTextPart,
+    content_parts,
+    image_part,
+    text_file_part,
+    text_part,
+)
 from .conversation import (
     AssistantToolMessage,
     ChatMessage,
@@ -36,8 +45,12 @@ from .openai import (
     OPENAI_MODELS,
     OpenAIClient,
     OpenAIModel,
+    RealtimeClient,
+    RealtimeConnection,
+    RealtimeServerEvent,
     is_openai_model,
 )
+from .vision import supports_vision
 
 __all__ = (
     "AgentSession",
@@ -47,10 +60,18 @@ __all__ = (
     "ChatMessage",
     "ChatResponse",
     "ChatStream",
+    "ContentImagePart",
+    "ContentPart",
+    "ContentTextPart",
     "ConversationSnapshot",
     "ConversationState",
     "ConversationStore",
     "FinishReason",
+    "content_parts",
+    "image_part",
+    "supports_vision",
+    "text_file_part",
+    "text_part",
     "GeminiClient",
     "GeminiModel",
     "GrokClient",
@@ -72,6 +93,9 @@ __all__ = (
     "MistralModel",
     "OpenAIClient",
     "OpenAIModel",
+    "RealtimeClient",
+    "RealtimeConnection",
+    "RealtimeServerEvent",
     "Provider",
     "ToolCallContext",
     "ToolCall",

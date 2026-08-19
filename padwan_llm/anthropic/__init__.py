@@ -6,6 +6,7 @@ from .client import (
     AnthropicModel,
     is_anthropic_model,
 )
+from .vision import supports_vision
 
 __all__ = (
     "ANTHROPIC_ENDPOINT",
@@ -14,4 +15,5 @@ __all__ = (
     "AnthropicClient",
     "AnthropicModel",
     "is_anthropic_model",
+    "supports_vision",
 )

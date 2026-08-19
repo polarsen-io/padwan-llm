@@ -161,3 +161,26 @@ MISTRAL_API_KEY=...
 GROK_API_KEY=...
 ANTHROPIC_API_KEY=...
 ```
+
+### Unified gateway (one URL + one token)
+
+Aggregators that expose OSS variants of many model families behind a single
+OpenAI-compatible endpoint and token are supported with two env vars — every
+model then routes through that gateway, with no per-provider keys or per-call
+overrides:
+
+```bash
+PADWAN_BASE_URL=https://your-gateway.example.com/v1/
+PADWAN_API_KEY=...
+```
+
+```python
+# Names that would normally route to a native client (gemini-*, mistral-*, …)
+# go through the gateway as OpenAI-compatible instead.
+async with LLMClient(model="gemini-2.5-flash") as client:
+    response, usage = await client.complete_chat([{"role": "user", "content": "Hi!"}])
+```
+
+Precedence is explicit `base_url`/`api_key` args → `PADWAN_*` → native
+per-provider env vars. Passing an explicit `base_url` disables gateway mode and
+restores native provider routing.

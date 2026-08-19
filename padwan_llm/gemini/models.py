@@ -12,6 +12,8 @@ __all__ = (
     "FunctionResponsePart",
     "GeminiPart",
     "GeminiTool",
+    "InlineData",
+    "InlineDataPart",
     "Part",
     "StreamBody",
     "SystemInstruction",
@@ -109,6 +111,15 @@ class Part(TypedDict):
     text: str
 
 
+class InlineData(TypedDict):
+    mimeType: str
+    data: str
+
+
+class InlineDataPart(TypedDict):
+    inlineData: InlineData
+
+
 class FunctionCall(TypedDict):
     name: str
     args: dict[str, Any]
@@ -129,7 +140,7 @@ class FunctionResponsePart(TypedDict):
     functionResponse: FunctionResponse
 
 
-GeminiPart = Part | FunctionCallPart | FunctionResponsePart
+GeminiPart = Part | InlineDataPart | FunctionCallPart | FunctionResponsePart
 
 
 class Content(TypedDict):

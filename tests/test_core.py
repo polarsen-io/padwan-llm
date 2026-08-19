@@ -213,6 +213,91 @@ def test_llm_client_passes_params():
     assert client.timeout == 120
 
 
+# Gateway mode (PADWAN_BASE_URL / PADWAN_API_KEY)
+
+
+@pytest.fixture
+def gateway_env(monkeypatch: pytest.MonkeyPatch):
+    """Single OpenAI-compatible gateway URL + token, with native keys cleared
+    so a leak through provider env vars would surface as a test failure."""
+    monkeypatch.setenv("PADWAN_BASE_URL", "https://gateway.example.com/v1/")
+    monkeypatch.setenv("PADWAN_API_KEY", "gw-secret")
+    for var in ("OPENAI_API_KEY", "GEMINI_API_KEY", "MISTRAL_API_KEY", "GROK_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        pytest.param("gpt-4o", id="openai-prefix"),
+        pytest.param("gemini-2.5-flash", id="gemini-prefix"),
+        pytest.param("mistral-large-latest", id="mistral-prefix"),
+        pytest.param("grok-3", id="grok-prefix"),
+        pytest.param("custom-oss-model", id="unknown-fallback"),
+    ],
+)
+def test_gateway_routes_all_models_to_openai(model: str, gateway_env):
+    client = LLMClient(model)
+    assert isinstance(client, OpenAIClient)
+    assert client.base_url == "https://gateway.example.com/v1/"
+    assert client._api_key == "gw-secret"
+    assert client.model == model
+
+
+def test_gateway_explicit_api_key_wins(gateway_env):
+    client = LLMClient("mistral-large-latest", api_key="explicit")
+    assert isinstance(client, OpenAIClient)
+    assert client._api_key == "explicit"
+
+
+def test_gateway_explicit_base_url_restores_native_routing(gateway_env):
+    client = LLMClient(
+        "gemini-2.5-flash", base_url="https://gem.proxy/v1beta/", api_key="k"
+    )
+    assert isinstance(client, GeminiClient)
+    assert client.base_url == "https://gem.proxy/v1beta/"
+
+
+@pytest.mark.parametrize(
+    "model, cls",
+    [
+        pytest.param("gpt-oss-120b", OpenAIClient, id="openai-family"),
+        pytest.param("gemini-2.5-flash", GeminiClient, id="gemini-native"),
+    ],
+)
+def test_explicit_base_url_uses_padwan_token_when_no_key(
+    model, cls, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("PADWAN_API_KEY", "gw-secret")
+    monkeypatch.setenv("OPENAI_API_KEY", "real-openai-key")  # must not leak
+    monkeypatch.setenv("GEMINI_API_KEY", "real-gemini-key")  # must not leak
+    client = LLMClient(model, base_url="https://oss.example.com/v1")
+    assert isinstance(client, cls)
+    assert client._api_key == "gw-secret"
+
+
+def test_explicit_base_url_explicit_key_beats_padwan_token(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("PADWAN_API_KEY", "gw-secret")
+    client = LLMClient(
+        "gpt-oss-120b", base_url="https://oss.example.com/v1", api_key="explicit"
+    )
+    assert client._api_key == "explicit"
+
+
+def test_gateway_without_token_uses_no_key_not_openai_env(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("PADWAN_BASE_URL", "http://localhost:8000/v1/")
+    monkeypatch.delenv("PADWAN_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "real-openai-key")  # must not be used
+    client = LLMClient("gemini-2.5-flash")
+    assert isinstance(client, OpenAIClient)
+    assert client.base_url == "http://localhost:8000/v1/"
+    assert client._api_key == "no-key-required"
+
+
 @pytest.mark.parametrize(
     "cls, kwargs",
     [

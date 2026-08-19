@@ -21,6 +21,7 @@ nav = [
     { "Grok" = "clients/grok.md" },
     { "Anthropic" = "clients/anthropic.md" },
   ] },
+  { "Multimodal" = "multimodal.md" },
   { "MCP" = "mcp.md" },
   { "Agents" = "agents.md" },
 ]

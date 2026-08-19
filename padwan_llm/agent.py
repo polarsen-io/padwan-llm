@@ -10,6 +10,7 @@ from typing import Any, Literal, Protocol, Self
 from ._base import LLMClientBase
 from ._json import dumps as _json_dumps, loads as _json_loads
 from .client import LLMClient
+from .content import ContentPart
 from .conversation import (
     AssistantToolMessage,
     ChatMessage,
@@ -467,14 +468,15 @@ class AgentSession:
         for (tc, _tool, _args, _ok), result_str in zip(plan, results, strict=True):
             self._state.add_tool_result(tc["id"], tc["function"]["name"], result_str)
 
-    async def stream(self, user_input: str) -> AsyncIterator[str]:
+    async def stream(self, user_input: str | list[ContentPart]) -> AsyncIterator[str]:
         """Send a message and stream the response, dispatching tool calls.
 
-        Yields text chunks as the model produces them across all rounds. Tool
-        calls are silent on the stream — observe them via `on_tool`. The
-        iterator finishes once the model returns a plain text response with
-        no further tool calls, or once `max_tool_rounds` LLM calls have been
-        made (in which case a final limit-reached message is yielded).
+        `user_input` is either plain text or a list of multimodal content parts
+        (text + images). Yields text chunks as the model produces them across
+        all rounds. Tool calls are silent on the stream — observe them via
+        `on_tool`. The iterator finishes once the model returns a plain text
+        response with no further tool calls, or once `max_tool_rounds` LLM calls
+        have been made (in which case a final limit-reached message is yielded).
         """
         self._state.add_user_message(user_input)
         calls_remaining = self.max_tool_rounds
@@ -523,7 +525,7 @@ class AgentSession:
         log.warning(msg)
         yield msg
 
-    async def send(self, user_input: str) -> str:
+    async def send(self, user_input: str | list[ContentPart]) -> str:
         """Send a message and return the complete response (non-streaming)."""
         chunks: list[str] = []
         async for chunk in self.stream(user_input):

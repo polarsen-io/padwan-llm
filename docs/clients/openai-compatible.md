@@ -18,6 +18,41 @@ client = OpenAIClient(
 
 Both `base_url` and `api_key` are required when targeting a non-OpenAI endpoint.
 
+## Unified gateway via environment
+
+Aggregators that serve OSS variants of many model families behind a single
+OpenAI-compatible endpoint and one token are supported without overriding
+`base_url`/`api_key` on every call — or juggling per-provider env vars. Set two
+environment variables to switch the `LLMClient` facade into *gateway mode*:
+
+```bash
+export PADWAN_BASE_URL="https://your-gateway.example.com/v1/"
+export PADWAN_API_KEY="..."
+```
+
+```python
+from padwan_llm import LLMClient
+
+# Every model — including gemini-/mistral-/grok- prefixed names — is routed
+# through OpenAIClient against the gateway, using the single token.
+async with LLMClient(model="gemini-2.5-flash") as client:
+    response, usage = await client.complete_chat(
+        [{"role": "user", "content": "Hello!"}]
+    )
+```
+
+Resolution precedence:
+
+1. Explicit `base_url` / `api_key` arguments to `LLMClient`
+2. `PADWAN_BASE_URL` / `PADWAN_API_KEY`
+3. Native per-provider env vars (`OPENAI_API_KEY`, `GEMINI_API_KEY`, …) and
+   model-name routing
+
+Passing an explicit `base_url` disables gateway mode and restores native
+per-provider routing (so you can still point `GeminiClient` at a Gemini-protocol
+proxy). In gateway mode the token never falls back to `OPENAI_API_KEY`; if
+`PADWAN_API_KEY` is unset it defaults to `"no-key-required"` for local gateways.
+
 ## Usage
 
 ### Basic Chat
