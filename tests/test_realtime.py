@@ -429,7 +429,15 @@ def test_factory_provider_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(ValueError, match="transcribes natively"):
         RealtimeClient("grok-voice-latest", transcription_model="scribe-x")
     with pytest.raises(ValueError, match="sample_rate is fixed"):
-        RealtimeClient("gemini-3.1-flash-live-preview", sample_rate=8_000)
+        RealtimeClient("gemini-3.1-flash-live-preview", sample_rate=8_000)  # pyright: ignore[reportArgumentType, reportCallIssue]
+    # Gemini transcription is a toggle: None disables, a model name is rejected.
+    assert RealtimeClient("gemini-3.1-flash-live-preview").transcription is True
+    gemini_off = RealtimeClient(
+        "gemini-3.1-flash-live-preview", transcription_model=None
+    )
+    assert gemini_off.transcription is False
+    with pytest.raises(ValueError, match="no transcription model choice"):
+        RealtimeClient("gemini-3.1-flash-live-preview", transcription_model="scribe-x")  # pyright: ignore[reportArgumentType]
 
 
 def _camel_to_snake(name: str) -> str:

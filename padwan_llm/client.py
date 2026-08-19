@@ -174,9 +174,9 @@ def RealtimeClient(  # pyright: ignore[reportOverlappingOverload]
     instructions: str | None = None,
     voice: str | None = None,
     turn_detection: Mapping[str, Any] | str | None = None,
-    transcription_model: str | None = "whisper-1",
+    transcription_model: None = ...,
     output_modalities: Sequence[str] = ("audio",),
-    sample_rate: int = REALTIME_SAMPLE_RATE,
+    sample_rate: Never = ...,
     timeout: float = 30.0,
     api_key: str | None = None,
     base_url: str | None = None,
@@ -241,6 +241,11 @@ def RealtimeClient(
         if sample_rate != REALTIME_SAMPLE_RATE:
             raise ValueError(
                 "sample_rate is fixed for the Gemini Live API (16 kHz in, 24 kHz out)"
+            )
+        if transcription_model not in (None, "whisper-1"):
+            raise ValueError(
+                "Gemini Live has no transcription model choice; "
+                "pass transcription_model=None to disable transcription"
             )
         client = GeminiRealtimeClient(
             model=model,
