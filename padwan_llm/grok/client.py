@@ -1,7 +1,8 @@
 import dataclasses
 from typing import ClassVar, Literal, get_args
 
-from .._base import LLMError, Provider, env_api_key
+from .._base import Provider, env_api_key
+from ..errors import LLMError
 from ..openai.client import _check_resp, _check_resp_status, _OpenAIBase
 from .batch import GrokBatchJob, GrokBatchRequest, GrokBatchResult
 from .types import (

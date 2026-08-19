@@ -6,7 +6,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, get_args
 
-from .._base import LLMError, Provider, env_api_key
+from .._base import Provider, env_api_key
+from ..errors import LLMError
 from ..openai.client import _check_resp, _OpenAIBase
 from ._deprecations import DEPRECATED
 

@@ -6,8 +6,9 @@ from typing import Any, Literal, get_args
 
 import niquests
 
-from .._base import NO_TURN_DETECTION, LLMError, RealtimeClientBase
+from .._base import NO_TURN_DETECTION, RealtimeClientBase
 from .._ws import READ_POLL_INTERVAL, WsConnection, enable_read_polling
+from ..errors import LLMError
 from ..logs import log
 from .client import _GeminiAuth
 
@@ -54,7 +55,6 @@ _GEMINI_VOICES: tuple[str, ...] = get_args(_KnownGeminiVoice)
 class GeminiRealtimeClient(_GeminiAuth, RealtimeClientBase["GeminiRealtimeConnection"]):
     """Speech-to-speech client for the Gemini Live API over a WebSocket.
 
-    ``async with client as conn:`` yields a :class:`GeminiRealtimeConnection`.
     Server VAD by default; pass :data:`NO_TURN_DETECTION` to mark turns
     manually. Wire shapes: https://ai.google.dev/api/live
     """

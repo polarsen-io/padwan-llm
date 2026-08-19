@@ -9,8 +9,9 @@ from typing import Any, Literal, get_args
 
 import niquests
 
-from .._base import NO_TURN_DETECTION, LLMError, RealtimeClientBase
+from .._base import NO_TURN_DETECTION, RealtimeClientBase
 from .._ws import READ_POLL_INTERVAL, WsConnection, enable_read_polling
+from ..errors import LLMError
 from .client import _OpenAIAuth
 
 __all__ = (
@@ -73,7 +74,6 @@ class RealtimeServerEvent(enum.StrEnum):
 class OpenAIRealtimeClient(_OpenAIAuth, RealtimeClientBase["RealtimeConnection"]):
     """Speech-to-speech client for the OpenAI Realtime API over a WebSocket.
 
-    ``async with client as conn:`` yields a :class:`RealtimeConnection`.
     Server VAD by default; pass :data:`NO_TURN_DETECTION` to drive turns
     manually. Wire shapes: https://platform.openai.com/docs/guides/realtime
     """
