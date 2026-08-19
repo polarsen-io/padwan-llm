@@ -5,13 +5,13 @@ import enum
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal, get_args
+from typing import Any, Literal, get_args
 
 import niquests
 
-from .._base import NO_TURN_DETECTION, LLMError, RealtimeClientBase, env_api_key
+from .._base import NO_TURN_DETECTION, LLMError, RealtimeClientBase
 from .._ws import READ_POLL_INTERVAL, WsConnection, enable_read_polling
-from ..errors import Provider
+from .client import _OpenAIAuth
 
 __all__ = (
     "REALTIME_ENDPOINT",
@@ -70,7 +70,7 @@ class RealtimeServerEvent(enum.StrEnum):
 
 
 @dataclass
-class OpenAIRealtimeClient(RealtimeClientBase["RealtimeConnection"]):
+class OpenAIRealtimeClient(_OpenAIAuth, RealtimeClientBase["RealtimeConnection"]):
     """Speech-to-speech client for the OpenAI Realtime API (``gpt-realtime``) over a WebSocket.
 
     ``async with client as conn:`` yields a configured :class:`RealtimeConnection`.
@@ -84,8 +84,6 @@ class OpenAIRealtimeClient(RealtimeClientBase["RealtimeConnection"]):
     https://platform.openai.com/docs/guides/realtime
     """
 
-    provider: ClassVar[Provider] = "openai"
-
     model: str = DEFAULT_REALTIME_MODEL
     base_url: str = REALTIME_ENDPOINT
     instructions: str | None = None
@@ -94,9 +92,6 @@ class OpenAIRealtimeClient(RealtimeClientBase["RealtimeConnection"]):
     transcription_model: str | None = "whisper-1"
     output_modalities: Sequence[str] = ("audio",)
     sample_rate: int = REALTIME_SAMPLE_RATE
-
-    def _get_default_api_key(self) -> str:
-        return env_api_key(self.provider, "OPENAI_API_KEY")
 
     def _set_auth_headers(self, session: niquests.AsyncSession) -> None:
         session.headers["Authorization"] = f"Bearer {self._api_key}"

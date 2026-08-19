@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import dataclasses
-import os
 import typing
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import field
@@ -12,7 +11,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal, cast, get_args
 import niquests
 from urllib3.util.retry import Retry
 
-from .._base import ChatStream, LLMClientBase, LLMError, Provider
+from .._base import ChatStream, LLMClientBase, LLMError, Provider, env_api_key
 from .._json import dumps as _json_dumps, loads as _json_loads
 from ..conversation import ChatMessage
 from ..errors import QuotaExceededError, TooManyRequestsError
@@ -202,15 +201,23 @@ OPENAI_CHAT_MODELS: frozenset[str] = frozenset(OPENAI_MODELS - _OPENAI_NON_CHAT_
 OPENAI_ENDPOINT = "https://api.openai.com/v1/"
 
 
+class _OpenAIAuth:
+    """OpenAI provider identity, shared by the chat and realtime clients."""
+
+    provider: ClassVar[Provider] = "openai"
+
+    def _get_default_api_key(self) -> str:
+        return env_api_key(self.provider, "OPENAI_API_KEY")
+
+
 @dataclasses.dataclass
-class _OpenAIBase(LLMClientBase[Retry], OpenAIToolMixin):
+class _OpenAIBase(_OpenAIAuth, LLMClientBase[Retry], OpenAIToolMixin):
     """OpenAI-compatible base client with chat and auth logic.
 
     Shared by OpenAIClient, GrokClient, and MistralClient. Does not include
     batch methods — those live on the concrete provider clients.
     """
 
-    provider: ClassVar[Provider] = "openai"
     model: str | None = "gpt-4o"
     base_url: str = OPENAI_ENDPOINT
     _retry: Retry = field(
@@ -232,12 +239,6 @@ class _OpenAIBase(LLMClientBase[Retry], OpenAIToolMixin):
             allowed_methods=["POST"],
         )
     )
-
-    def _get_default_api_key(self) -> str:
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            raise LLMError(self.provider, "OPENAI_API_KEY not set")
-        return api_key
 
     def _set_auth_headers(self, session: niquests.AsyncSession) -> None:
         session.headers["Authorization"] = f"Bearer {self._api_key}"

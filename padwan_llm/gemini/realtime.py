@@ -2,14 +2,14 @@ import base64
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal, get_args
+from typing import Any, Literal, get_args
 
 import niquests
 
-from .._base import NO_TURN_DETECTION, LLMError, RealtimeClientBase, env_api_key
+from .._base import NO_TURN_DETECTION, LLMError, RealtimeClientBase
 from .._ws import READ_POLL_INTERVAL, WsConnection, enable_read_polling
-from ..errors import Provider
 from ..logs import log
+from .client import _GeminiAuth
 
 __all__ = (
     "LIVE_ENDPOINT",
@@ -51,7 +51,7 @@ _GEMINI_VOICES: tuple[str, ...] = get_args(_KnownGeminiVoice)
 
 
 @dataclass
-class GeminiRealtimeClient(RealtimeClientBase["GeminiRealtimeConnection"]):
+class GeminiRealtimeClient(_GeminiAuth, RealtimeClientBase["GeminiRealtimeConnection"]):
     """Speech-to-speech client for the Gemini Live API over a WebSocket.
 
     ``async with client as conn:`` yields a configured
@@ -65,8 +65,6 @@ class GeminiRealtimeClient(RealtimeClientBase["GeminiRealtimeConnection"]):
     https://ai.google.dev/api/live
     """
 
-    provider: ClassVar[Provider] = "gemini"
-
     model: str = DEFAULT_LIVE_MODEL
     base_url: str = LIVE_ENDPOINT
     instructions: str | None = None
@@ -74,9 +72,6 @@ class GeminiRealtimeClient(RealtimeClientBase["GeminiRealtimeConnection"]):
     turn_detection: Mapping[str, Any] | str | None = None
     transcription: bool = True
     output_modalities: Sequence[str] = ("audio",)
-
-    def _get_default_api_key(self) -> str:
-        return env_api_key(self.provider, "GEMINI_API_KEY")
 
     def _set_auth_headers(self, session: niquests.AsyncSession) -> None:
         # The Live API authenticates via the ``key`` query parameter on the

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import dataclasses
 import math
-import os
 import typing
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import field
@@ -13,7 +12,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal, cast, get_args
 import niquests
 from urllib3.util.retry import Retry
 
-from .._base import ChatStream, LLMClientBase, Provider
+from .._base import ChatStream, LLMClientBase, Provider, env_api_key
 from ..content import ContentPart
 from ..conversation import AssistantToolMessage, ChatMessage, ToolResultMessage
 from ..errors import LLMError, QuotaExceededError, TooManyRequestsError
@@ -200,10 +199,19 @@ _BATCH_STATE_MAP: dict[str, str] = {
 
 
 @dataclasses.dataclass
-class GeminiClient(LLMClientBase[Retry], GeminiToolMixin):
-    """Gemini API client with structured output support."""
+class _GeminiAuth:
+    """Gemini provider identity, shared by the chat and realtime clients."""
 
     provider: ClassVar[Provider] = "gemini"
+
+    def _get_default_api_key(self) -> str:
+        return env_api_key(self.provider, "GEMINI_API_KEY")
+
+
+@dataclasses.dataclass
+class GeminiClient(_GeminiAuth, LLMClientBase[Retry], GeminiToolMixin):
+    """Gemini API client with structured output support."""
+
     model: str | None = "gemini-2.5-flash"
     base_url: str = GEMINI_ENDPOINT
     thinking_config: ThinkingConfig | None = None
@@ -216,12 +224,6 @@ class GeminiClient(LLMClientBase[Retry], GeminiToolMixin):
             allowed_methods=["POST"],
         )
     )
-
-    def _get_default_api_key(self) -> str:
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            raise LLMError(self.provider, "GEMINI_API_KEY not set")
-        return api_key
 
     def _set_auth_headers(self, session: niquests.AsyncSession) -> None:
         session.headers["x-goog-api-key"] = self._api_key
