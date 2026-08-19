@@ -46,7 +46,12 @@ def _silence(seconds: float, rate: int) -> bytes:
 
 
 async def _collect_response(conn: RealtimeConnection, pcm: bytes) -> bytes:
-    """Stream *pcm*, then iterate events until the response completes."""
+    """Stream *pcm*, then iterate events until a response completes.
+
+    Pauses inside the clip can make VAD split it into several turns; a new turn
+    cancels the in-flight response ("turn_detected"), so only a ``completed``
+    response ends the wait.
+    """
     for i in range(0, len(pcm), CHUNK):
         await conn.append_audio(pcm[i : i + CHUNK])
     audio = bytearray()
@@ -55,7 +60,10 @@ async def _collect_response(conn: RealtimeConnection, pcm: bytes) -> bytes:
             pytest.fail(f"server error event: {event}")
         if delta := conn.audio_delta_bytes(event):
             audio.extend(delta)
-        if event.get("type") == RealtimeServerEvent.RESPONSE_DONE:
+        if (
+            event.get("type") == RealtimeServerEvent.RESPONSE_DONE
+            and event.get("response", {}).get("status") == "completed"
+        ):
             break
     return bytes(audio)
 

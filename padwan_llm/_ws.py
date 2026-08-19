@@ -62,8 +62,11 @@ class WsConnection:
             if payload is None:
                 break
             if isinstance(payload, (bytes, bytearray)):
-                payload = bytes(payload).decode("utf-8")
-            yield _json_loads(payload)
+                payload = bytes(payload).decode("utf-8", errors="replace")
+            try:
+                yield _json_loads(payload)
+            except ValueError:
+                log.debug("skipping non-JSON ws frame: %.100r", payload)
 
     async def close(self) -> None:
         """Close the underlying websocket (idempotent)."""
