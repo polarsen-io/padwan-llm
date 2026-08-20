@@ -1,6 +1,7 @@
 import functools
+import inspect
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
@@ -14,13 +15,14 @@ except ImportError as e:
     ) from e
 
 from . import __version__
-from ._base import ChatStream, LLMClientBase
+from ._base import ChatStream, LLMClientBase, RealtimeClientBase
+from .agent import AgentSession
 from .anthropic import AnthropicClient
 from .errors import Provider
 from .gemini import GeminiClient
 from .grok import GrokClient
 from .mistral import MistralClient
-from .models import UsageToken
+from .models import ToolCall, UsageToken
 from .openai import OpenAIClient
 
 __all__ = ("instrument", "uninstrument")
@@ -45,7 +47,28 @@ _CLIENT_CLASSES: tuple[type[LLMClientBase], ...] = (
     AnthropicClient,
 )
 
-_originals: dict[type[LLMClientBase], dict[str, Any]] = {}
+# batch/file operations instrumented as plain client spans, per defining class
+_BATCH_METHODS: dict[type[LLMClientBase], tuple[str, ...]] = {
+    OpenAIClient: (
+        "upload_batch_file",
+        "create_batch",
+        "get_batch",
+        "list_batches",
+        "cancel_batch",
+        "get_batch_results",
+    ),
+    GeminiClient: ("create_batch", "get_batch", "list_batches", "cancel_batch"),
+    GrokClient: (
+        "create_batch",
+        "add_batch_requests",
+        "get_batch",
+        "list_batches",
+        "cancel_batch",
+        "get_batch_results",
+    ),
+}
+
+_originals: dict[type, dict[str, Any]] = {}
 
 
 @dataclass
@@ -78,12 +101,47 @@ def instrument(
         ),
     )
     for cls in _CLIENT_CLASSES:
-        _originals[cls] = {
+        methods: dict[str, Any] = {
             "complete_chat": cls.complete_chat,
             "stream_chat": cls.stream_chat,
         }
         setattr(cls, "complete_chat", _wrap_complete_chat(cls.complete_chat, inst))
         setattr(cls, "stream_chat", _wrap_stream_chat(cls.stream_chat, inst))
+        for name in _BATCH_METHODS.get(cls, ()):
+            methods[name] = getattr(cls, name)
+            setattr(cls, name, _wrap_operation(methods[name], inst, name))
+        _originals[cls] = methods
+
+    _originals[MistralClient]["fetch_embeddings"] = MistralClient.fetch_embeddings
+    setattr(
+        MistralClient,
+        "fetch_embeddings",
+        _wrap_operation(
+            MistralClient.fetch_embeddings, inst, "embeddings", model_param="model"
+        ),
+    )
+
+    _originals[AgentSession] = {"_dispatch_one": AgentSession._dispatch_one}
+    setattr(
+        AgentSession,
+        "_dispatch_one",
+        _wrap_execute_tool(AgentSession._dispatch_one, inst),
+    )
+
+    _originals[RealtimeClientBase] = {
+        "__aenter__": RealtimeClientBase.__aenter__,
+        "__aexit__": RealtimeClientBase.__aexit__,
+    }
+    setattr(
+        RealtimeClientBase,
+        "__aenter__",
+        _wrap_realtime_enter(RealtimeClientBase.__aenter__, inst),
+    )
+    setattr(
+        RealtimeClientBase,
+        "__aexit__",
+        _wrap_realtime_exit(RealtimeClientBase.__aexit__, inst),
+    )
 
 
 def uninstrument() -> None:
@@ -94,10 +152,12 @@ def uninstrument() -> None:
     _originals.clear()
 
 
-def _request_attrs(client: LLMClientBase) -> dict[str, Any]:
+def _request_attrs(
+    client: LLMClientBase | RealtimeClientBase[Any], op: str = "chat"
+) -> dict[str, Any]:
     """Low-cardinality attributes shared by the span and both metrics."""
     attrs: dict[str, Any] = {
-        "gen_ai.operation.name": "chat",
+        "gen_ai.operation.name": op,
         "gen_ai.provider.name": _PROVIDER_NAMES.get(client.provider, client.provider),
     }
     if client.model:
@@ -105,6 +165,27 @@ def _request_attrs(client: LLMClientBase) -> dict[str, Any]:
     if host := urlsplit(client.base_url).hostname:
         attrs["server.address"] = host
     return attrs
+
+
+class _ThoughtTimer:
+    """Chains to the client's on_thought callback, timestamping thought chunks."""
+
+    def __init__(self, wrapped: Callable[[str], None] | None) -> None:
+        self.wrapped = wrapped
+        self.first: float | None = None
+        self.last: float | None = None
+
+    def __call__(self, text: str) -> None:
+        now = time.perf_counter()
+        if self.first is None:
+            self.first = now
+        self.last = now
+        if self.wrapped is not None:
+            self.wrapped(text)
+
+
+def _tool_names(tool_calls: Sequence[ToolCall] | None) -> tuple[str, ...] | None:
+    return tuple(tc["function"]["name"] for tc in tool_calls) if tool_calls else None
 
 
 def _record_end(
@@ -115,6 +196,8 @@ def _record_end(
     *,
     usage: UsageToken | None = None,
     finish_reasons: list[str] | None = None,
+    tool_names: tuple[str, ...] | None = None,
+    thinking: _ThoughtTimer | None = None,
     error: BaseException | None = None,
 ) -> None:
     elapsed = time.perf_counter() - start
@@ -129,6 +212,8 @@ def _record_end(
     if usage is not None:
         span.set_attribute("gen_ai.usage.input_tokens", usage["input"])
         span.set_attribute("gen_ai.usage.output_tokens", usage["output"])
+        if (reasoning := usage.get("reasoning")) is not None:
+            span.set_attribute("gen_ai.usage.reasoning_tokens", reasoning)
         for token_type, count in (
             ("input", usage["input"]),
             ("output", usage["output"]),
@@ -136,6 +221,16 @@ def _record_end(
             inst.tokens.record(count, {**metric_attrs, "gen_ai.token.type": token_type})
     if finish_reasons:
         span.set_attribute("gen_ai.response.finish_reasons", finish_reasons)
+    if tool_names:
+        span.set_attribute("padwan_llm.response.tool_names", tool_names)
+    if (
+        thinking is not None
+        and thinking.first is not None
+        and thinking.last is not None
+    ):
+        span.set_attribute(
+            "padwan_llm.thinking.duration", thinking.last - thinking.first
+        )
     span.end()
 
 
@@ -183,6 +278,7 @@ def _wrap_complete_chat(original: Any, inst: _Instruments) -> Any:
             start,
             usage=usage,
             finish_reasons=[response["finish_reason"]],
+            tool_names=_tool_names(response.get("tool_calls")),
         )
         return response, usage
 
@@ -192,10 +288,112 @@ def _wrap_complete_chat(original: Any, inst: _Instruments) -> Any:
 def _wrap_stream_chat(original: Any, inst: _Instruments) -> Any:
     @functools.wraps(original)
     def wrapper(self: LLMClientBase, *args: Any, **kwargs: Any) -> ChatStream:
-        stream: ChatStream = original(self, *args, **kwargs)
+        # Swap on_thought around the (synchronous) stream construction so the
+        # provider stream captures the timing callback.
+        thinking = _ThoughtTimer(self.on_thought)
+        self.on_thought = thinking
+        try:
+            stream: ChatStream = original(self, *args, **kwargs)
+        finally:
+            self.on_thought = thinking.wrapped
         return _InstrumentedChatStream(
-            stream, inst, _request_attrs(self), _sent_temperature(self)
+            stream, inst, _request_attrs(self), _sent_temperature(self), thinking
         )
+
+    return wrapper
+
+
+def _wrap_operation(
+    original: Any, inst: _Instruments, op: str, model_param: str | None = None
+) -> Any:
+    """Wrap a plain async client method in a CLIENT span named after `op`.
+
+    Batch operations are not tied to the client's default model, so the model
+    attribute is only set when `model_param` names the method's model argument.
+    """
+    sig = inspect.signature(original) if model_param else None
+
+    @functools.wraps(original)
+    async def wrapper(self: LLMClientBase, *args: Any, **kwargs: Any) -> Any:
+        attrs = _request_attrs(self, op=op)
+        attrs.pop("gen_ai.request.model", None)
+        if sig is not None and model_param is not None:
+            bound = sig.bind(self, *args, **kwargs)
+            bound.apply_defaults()
+            attrs["gen_ai.request.model"] = bound.arguments[model_param]
+        model = attrs.get("gen_ai.request.model")
+        span = inst.tracer.start_span(
+            f"{op} {model}" if model else op, kind=SpanKind.CLIENT, attributes=attrs
+        )
+        start = time.perf_counter()
+        try:
+            result = await original(self, *args, **kwargs)
+        except BaseException as e:
+            _record_end(inst, span, attrs, start, error=e)
+            raise
+        _record_end(inst, span, attrs, start)
+        return result
+
+    return wrapper
+
+
+def _wrap_execute_tool(original: Any, inst: _Instruments) -> Any:
+    @functools.wraps(original)
+    async def wrapper(
+        self: AgentSession, tc: ToolCall, *args: Any, **kwargs: Any
+    ) -> str:
+        name = tc["function"]["name"]
+        span = inst.tracer.start_span(
+            f"execute_tool {name}",
+            kind=SpanKind.INTERNAL,
+            attributes={
+                "gen_ai.operation.name": "execute_tool",
+                "gen_ai.tool.name": name,
+                "gen_ai.tool.type": "function",
+                "gen_ai.tool.call.id": tc["id"],
+            },
+        )
+        with trace.use_span(
+            span,
+            end_on_exit=True,
+            record_exception=True,
+            set_status_on_exception=True,
+        ):
+            return await original(self, tc, *args, **kwargs)
+
+    return wrapper
+
+
+def _wrap_realtime_enter(original: Any, inst: _Instruments) -> Any:
+    @functools.wraps(original)
+    async def wrapper(self: Any) -> Any:
+        attrs = _request_attrs(self, op="realtime")
+        span = inst.tracer.start_span(
+            f"realtime {self.model}", kind=SpanKind.CLIENT, attributes=attrs
+        )
+        start = time.perf_counter()
+        try:
+            conn = await original(self)
+        except BaseException as e:
+            _record_end(inst, span, attrs, start, error=e)
+            raise
+        self._otel_session = (span, attrs, start)
+        return conn
+
+    return wrapper
+
+
+def _wrap_realtime_exit(original: Any, inst: _Instruments) -> Any:
+    @functools.wraps(original)
+    async def wrapper(self: Any, *args: Any) -> None:
+        try:
+            return await original(self, *args)
+        finally:
+            if session := getattr(self, "_otel_session", None):
+                self._otel_session = None
+                span, attrs, start = session
+                exc_val = args[1] if len(args) > 1 else None
+                _record_end(inst, span, attrs, start, error=exc_val)
 
     return wrapper
 
@@ -210,11 +408,13 @@ class _InstrumentedChatStream(ChatStream):
         inst: _Instruments,
         attrs: dict[str, Any],
         temperature: float | None,
+        thinking: _ThoughtTimer | None = None,
     ) -> None:
         self._inner = inner
         self._inst = inst
         self._attrs = attrs
         self._temperature = temperature
+        self._thinking = thinking
 
     def __getattr__(self, name: str) -> Any:
         if name == "_inner":  # guard against recursion before __init__ ran
@@ -253,4 +453,6 @@ class _InstrumentedChatStream(ChatStream):
                     start,
                     usage=self._inner.usage,
                     finish_reasons=[reason] if reason else None,
+                    tool_names=_tool_names(self._inner.tool_calls),
+                    thinking=self._thinking,
                 )

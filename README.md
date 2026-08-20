@@ -154,11 +154,13 @@ from padwan_llm import otel
 otel.instrument()  # uses the global tracer/meter providers
 ```
 
-Each `complete_chat` / `stream_chat` call emits a `chat <model>` client span
-(provider, model, server address, token usage, finish reasons) plus the
-`gen_ai.client.operation.duration` and `gen_ai.client.token.usage` histograms.
-See [docs/observability.md](docs/observability.md) for the full attribute list
-and current limitations.
+Chat calls emit a `chat <model>` client span (provider, model, server address,
+token usage including reasoning tokens, thinking duration, finish reasons,
+requested tool names) plus the `gen_ai.client.operation.duration` and
+`gen_ai.client.token.usage` histograms. Agent tool execution emits
+`execute_tool` spans; embeddings, batch operations, and realtime sessions get
+their own spans. See [docs/observability.md](docs/observability.md) for the
+full attribute list.
 
 ## One-Shot Command
 

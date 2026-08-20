@@ -266,6 +266,9 @@ class _OpenAIBase(_OpenAIAuth, LLMClientBase[Retry], OpenAIToolMixin):
         if details := usage.get("prompt_tokens_details"):
             if (cached := details.get("cached_tokens")) is not None:
                 token["cached"] = cached
+        if details := usage.get("completion_tokens_details"):
+            if reasoning := details.get("reasoning_tokens"):
+                token["reasoning"] = reasoning
 
         return data, token
 
@@ -436,6 +439,9 @@ class OpenAIChatStream(ChatStream, OpenAIToolMixin):
             if details := usage.get("prompt_tokens_details"):
                 if (cached := details.get("cached_tokens")) is not None:
                     token["cached"] = cached
+            if details := usage.get("completion_tokens_details"):
+                if reasoning := details.get("reasoning_tokens"):
+                    token["reasoning"] = reasoning
             return token
         return None
 

@@ -252,6 +252,8 @@ class GeminiClient(_GeminiAuth, LLMClientBase[Retry], GeminiToolMixin):
         }
         if (cached := usage.get("cachedContentTokenCount")) is not None:
             token["cached"] = cached
+        if thoughts := usage.get("thoughtsTokenCount"):
+            token["reasoning"] = thoughts
 
         return data, token
 
@@ -623,5 +625,7 @@ class GeminiChatStream(ChatStream, GeminiToolMixin):
             }
             if (cached := usage.get("cachedContentTokenCount")) is not None:
                 token["cached"] = cached
+            if thoughts := usage.get("thoughtsTokenCount"):
+                token["reasoning"] = thoughts
             return token
         return None

@@ -14,7 +14,7 @@ from padwan_llm import otel
 otel.instrument()  # uses the global tracer/meter providers
 ```
 
-`instrument()` wraps `complete_chat` and `stream_chat` on every provider client (OpenAI, Gemini, Mistral, Grok, Anthropic). It is idempotent; call `otel.uninstrument()` to restore the original methods. Pass explicit providers to avoid globals:
+`instrument()` wraps every provider client (OpenAI, Gemini, Mistral, Grok, Anthropic): chat completions and streams, batch operations, embeddings, realtime sessions, plus agent tool execution. It is idempotent; call `otel.uninstrument()` to restore the original methods. Pass explicit providers to avoid globals:
 
 ```python
 otel.instrument(tracer_provider=my_tracer_provider, meter_provider=my_meter_provider)
@@ -33,8 +33,32 @@ Each chat call emits one `CLIENT` span named `chat <model>` (or `chat` when no m
 | `server.address` | `api.openai.com` | |
 | `gen_ai.usage.input_tokens` | `10` | |
 | `gen_ai.usage.output_tokens` | `20` | |
+| `gen_ai.usage.reasoning_tokens` | `5` | when the provider reports thought/reasoning tokens separately¹ |
 | `gen_ai.response.finish_reasons` | `["stop"]` | |
+| `padwan_llm.response.tool_names` | `["get_weather"]` | tool calls requested by the model (custom attribute) |
+| `padwan_llm.thinking.duration` | `1.2` | seconds between the first and last `on_thought` chunk of a stream (custom attribute) |
 | `error.type` | `LLMError`, `CancelledError` | on failure, with `ERROR` status and a recorded exception |
+
+¹ Token accounting follows each provider's usage report: OpenAI-style APIs count reasoning tokens inside `output_tokens`; Gemini reports thought tokens outside `candidatesTokenCount`, so they are not part of `gen_ai.usage.output_tokens`. Anthropic does not report a separate count.
+
+## Tool execution
+
+Each tool dispatched by an `AgentSession` emits an `execute_tool <name>` span following the semconv `execute_tool` operation:
+
+| Attribute | Example |
+|-----------|---------|
+| `gen_ai.operation.name` | `execute_tool` |
+| `gen_ai.tool.name` | `get_weather` |
+| `gen_ai.tool.type` | `function` |
+| `gen_ai.tool.call.id` | `call_1` |
+
+## Embeddings, batch, and realtime
+
+- **Embeddings**: `MistralClient.fetch_embeddings` emits an `embeddings <model>` span (`gen_ai.operation.name=embeddings`).
+- **Batch**: batch operations (`create_batch`, `get_batch`, `list_batches`, `cancel_batch`, and the OpenAI/Grok file helpers) emit a span named after the operation. No model attribute is set — batch requests carry their own per-request models.
+- **Realtime**: a `realtime <model>` span covers the whole `RealtimeClient` session, from connect to close, with connect failures recorded as errors.
+
+All of these record the `gen_ai.client.operation.duration` histogram with their `gen_ai.operation.name`.
 
 ## Metrics
 
@@ -42,9 +66,3 @@ Each chat call emits one `CLIENT` span named `chat <model>` (or `chat` when no m
 |------------|------|------|------------|
 | `gen_ai.client.operation.duration` | Histogram | `s` | request attributes, plus `error.type` on failure |
 | `gen_ai.client.token.usage` | Histogram | `{token}` | request attributes, plus `gen_ai.token.type` (`input` / `output`) |
-
-## Not yet captured
-
-- **Thoughts / reasoning**: no separate reasoning-token count or thinking-phase timing. Reasoning time is included in the overall span duration. Token accounting follows each provider's usage report: OpenAI-style APIs fold reasoning tokens into output tokens; Gemini reports thought tokens outside `candidatesTokenCount`, so they are absent from `gen_ai.usage.output_tokens`. The `on_thought` callback is not instrumented.
-- **Tool usage**: `tool_calls` returned by a chat turn are not recorded on the span, and agent-level tool execution (`AgentSession`) emits no `execute_tool` spans.
-- **Realtime, batch, embeddings**: only `complete_chat` / `stream_chat` are instrumented.
