@@ -27,7 +27,7 @@ Each chat call emits one `CLIENT` span named `chat <model>` (or `chat` when no m
 | Attribute | Example | Notes |
 |-----------|---------|-------|
 | `gen_ai.operation.name` | `chat` | |
-| `gen_ai.provider.name` | `openai`, `gcp.gemini`, `mistral_ai`, `x_ai`, `anthropic` | semconv well-known values |
+| `gen_ai.provider.name` | `openai`, `gcp.gemini`, `mistral_ai`, `x_ai`, `anthropic` | semconv well-known values; OpenAI-compatible endpoints report `openai`, distinguished by `server.address` |
 | `gen_ai.request.model` | `gpt-4o` | omitted when no model is set |
 | `gen_ai.request.temperature` | `0.7` | only when actually sent on the wire |
 | `server.address` | `api.openai.com` | |
@@ -40,7 +40,7 @@ Each chat call emits one `CLIENT` span named `chat <model>` (or `chat` when no m
 | `padwan_llm.thinking.duration` | `1.2` | seconds between the first and last `on_thought` chunk of a stream (custom attribute) |
 | `error.type` | `LLMError`, `CancelledError` | on failure, with `ERROR` status and a recorded exception |
 
-¹ Token accounting follows each provider's usage report: OpenAI-style APIs count reasoning tokens inside `output_tokens`; Gemini reports thought tokens outside `candidatesTokenCount`, so they are not part of `gen_ai.usage.output_tokens`. Anthropic does not report a separate count.
+¹ Token accounting follows each provider's usage report: OpenAI-style APIs count reasoning tokens inside `output_tokens`; Gemini reports thought tokens outside `candidatesTokenCount`, so they are not part of `gen_ai.usage.output_tokens`. Anthropic does not report a separate count. Per the Anthropic-specific conventions, `gen_ai.usage.input_tokens` includes cache read/write tokens (which Anthropic's raw `input_tokens` excludes).
 
 ## Tool execution
 

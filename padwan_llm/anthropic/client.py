@@ -106,16 +106,25 @@ def _check_resp[T](
 
 
 def _usage_from_anthropic(usage: dict[str, typing.Any] | None) -> UsageToken:
-    """Map an Anthropic usage object to a UsageToken."""
+    """Map an Anthropic usage object to a UsageToken.
+
+    Anthropic's raw `input_tokens` excludes cache tokens; fold them back in so
+    `input` means total prompt tokens like the other providers.
+    """
     usage = usage or {}
-    input_tokens = usage.get("input_tokens", 0)
+    cached = usage.get("cache_read_input_tokens")
+    input_tokens = (
+        usage.get("input_tokens", 0)
+        + (cached or 0)
+        + (usage.get("cache_creation_input_tokens") or 0)
+    )
     output_tokens = usage.get("output_tokens", 0)
     token: UsageToken = {
         "total": input_tokens + output_tokens,
         "input": input_tokens,
         "output": output_tokens,
     }
-    if (cached := usage.get("cache_read_input_tokens")) is not None:
+    if cached is not None:
         token["cached"] = cached
     return token
 
@@ -315,8 +324,13 @@ class AnthropicChatStream(ChatStream, AnthropicToolMixin):
             match event.get("type"):
                 case "message_start":
                     usage = event.get("message", {}).get("usage", {})
-                    input_tokens = usage.get("input_tokens", 0)
                     cached = usage.get("cache_read_input_tokens")
+                    # see _usage_from_anthropic: input includes cache tokens
+                    input_tokens = (
+                        usage.get("input_tokens", 0)
+                        + (cached or 0)
+                        + (usage.get("cache_creation_input_tokens") or 0)
+                    )
                 case "content_block_start":
                     block = event.get("content_block", {})
                     if block.get("type") == "tool_use":
