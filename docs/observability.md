@@ -1,6 +1,6 @@
 # Observability (OpenTelemetry)
 
-Padwan LLM ships opt-in OpenTelemetry instrumentation following the [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/). It only depends on `opentelemetry-api`, behind the `otel` extra:
+Padwan LLM ships opt-in OpenTelemetry instrumentation following the [GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai). It only depends on `opentelemetry-api`, behind the `otel` extra:
 
 ```bash
 pip install "padwan-llm[otel]"

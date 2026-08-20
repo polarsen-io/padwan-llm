@@ -161,7 +161,13 @@ def _check_resp_status(resp: niquests.Response) -> niquests.Response:
         if resp.status_code == HTTPStatus.PAYMENT_REQUIRED:
             raise QuotaExceededError(body=data)
         error = data.get("error", "") if isinstance(data, dict) else data
-        msg = error.get("message", "") if isinstance(error, dict) else str(error)
+        if isinstance(error, dict):
+            msg = error.get("message", "")
+        elif isinstance(data, dict) and data.get("message"):
+            # some OpenAI-compatible backends use {"error": "...", "message": "..."}
+            msg = f"{error} — {data['message']}" if error else str(data["message"])
+        else:
+            msg = str(error)
         raise LLMError("openai", f"{resp.status_code} {msg}", body=data) from e
 
 
