@@ -1,11 +1,16 @@
 import asyncio
-import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from opentelemetry._logs import SeverityNumber
+from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk._logs.export import (
+    InMemoryLogRecordExporter,
+    SimpleLogRecordProcessor,
+)
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.trace import TracerProvider
@@ -13,8 +18,9 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import StatusCode
 
-from padwan_llm import McpTool, otel
+from padwan_llm import McpStreamable, McpTool, otel
 from padwan_llm._base import RealtimeClientBase
+from padwan_llm._json import dumps as _json_dumps, loads as _json_loads
 from padwan_llm.errors import LLMError, Provider
 from padwan_llm.gemini import GeminiClient
 from padwan_llm.mistral import MistralClient
@@ -55,6 +61,34 @@ def _metric_names(reader: InMemoryMetricReader) -> set[str]:
     }
 
 
+def _histogram_count(reader: InMemoryMetricReader, name: str) -> int:
+    data = reader.get_metrics_data()
+    if data is None:
+        return 0
+    return sum(
+        point.count
+        for rm in data.resource_metrics
+        for sm in rm.scope_metrics
+        for metric in sm.metrics
+        if metric.name == name
+        for point in metric.data.data_points
+    )
+
+
+def _histogram_sum(reader: InMemoryMetricReader, name: str) -> int | float:
+    data = reader.get_metrics_data()
+    if data is None:
+        return 0
+    return sum(
+        point.sum
+        for rm in data.resource_metrics
+        for sm in rm.scope_metrics
+        for metric in sm.metrics
+        if metric.name == name
+        for point in metric.data.data_points
+    )
+
+
 async def test_complete_chat_emits_span_and_metrics(otel_setup, client, make_resp):
     exporter, reader = otel_setup
     payload = {
@@ -92,7 +126,7 @@ async def test_stream_chat_span_ends_after_iteration(
             "usage": USAGE,
         },
     ]
-    events = [make_sse_event(json.dumps(c)) for c in chunks]
+    events = [make_sse_event(_json_dumps(c)) for c in chunks]
     client._session.post.return_value = make_sse_resp(events)
 
     stream = client.stream_chat([{"role": "user", "content": "hey"}])
@@ -155,7 +189,7 @@ async def test_stream_abandoned_closes_span_cleanly(
 ):
     exporter, _ = otel_setup
     events = [
-        make_sse_event(json.dumps({"choices": [{"delta": {"content": t}}]}))
+        make_sse_event(_json_dumps({"choices": [{"delta": {"content": t}}]}))
         for t in ("Hello", " world")
     ]
     client._session.post.return_value = make_sse_resp(events)
@@ -303,7 +337,7 @@ async def test_stream_records_thinking_duration(
             },
         },
     ]
-    events = [make_sse_event(json.dumps(c)) for c in chunks]
+    events = [make_sse_event(_json_dumps(c)) for c in chunks]
     gemini._session.post.return_value = make_sse_resp(events)
 
     stream = gemini.stream_chat([{"role": "user", "content": "meaning of life?"}])
@@ -319,7 +353,7 @@ async def test_stream_records_thinking_duration(
 
 
 async def test_agent_tool_execution_emits_span(otel_setup):
-    exporter, _ = otel_setup
+    exporter, reader = otel_setup
 
     async def echo(args: dict) -> str:
         return args["text"]
@@ -335,7 +369,9 @@ async def test_agent_tool_execution_emits_span(otel_setup):
             FakeChatStream(
                 chunks=[], tool_calls=[make_tool_call("echo", {"text": "hi"})]
             ),
-            FakeChatStream(chunks=["done"]),
+            FakeChatStream(
+                chunks=["done"], usage={"total": 30, "input": 10, "output": 20}
+            ),
         ],
         mcp_tools=[tool],
     )
@@ -343,13 +379,29 @@ async def test_agent_tool_execution_emits_span(otel_setup):
     out = await session.send("run echo")
 
     assert out == "done"
-    (span,) = exporter.get_finished_spans()
-    assert span.name == "execute_tool echo"
-    attrs = dict(span.attributes or {})
+    tool_span, agent_span = exporter.get_finished_spans()
+    assert tool_span.name == "execute_tool echo"
+    attrs = dict(tool_span.attributes or {})
     assert attrs["gen_ai.operation.name"] == "execute_tool"
     assert attrs["gen_ai.tool.name"] == "echo"
     assert attrs["gen_ai.tool.call.id"] == "call_1"
     assert attrs["gen_ai.tool.description"] == "echo"
+    assert agent_span.name == "invoke_agent"
+    agent_attrs = dict(agent_span.attributes or {})
+    assert agent_attrs["gen_ai.operation.name"] == "invoke_agent"
+    assert agent_attrs["gen_ai.conversation.id"] == session.session_id
+    assert agent_attrs["gen_ai.usage.input_tokens"] == 10
+    assert agent_attrs["gen_ai.usage.output_tokens"] == 20
+    assert tool_span.parent is not None
+    assert tool_span.parent.span_id == agent_span.context.span_id
+    assert {
+        "gen_ai.invoke_agent.duration",
+        "gen_ai.invoke_agent.inference_calls",
+        "gen_ai.invoke_agent.tool_calls",
+        "gen_ai.execute_tool.duration",
+    } <= _metric_names(reader)
+    assert _histogram_sum(reader, "gen_ai.invoke_agent.inference_calls") == 2
+    assert _histogram_sum(reader, "gen_ai.invoke_agent.tool_calls") == 1
 
 
 async def test_embeddings_span(otel_setup, make_resp):
@@ -438,3 +490,272 @@ async def test_realtime_connect_failure_records_error(otel_setup):
     (span,) = exporter.get_finished_spans()
     assert span.status.status_code == StatusCode.ERROR
     assert dict(span.attributes or {})["error.type"] == "ValueError"
+
+
+async def test_stream_records_chunk_timing_metrics(
+    otel_setup, client, make_sse_event, make_sse_resp
+):
+    exporter, reader = otel_setup
+    chunks = [
+        {"choices": [{"delta": {"content": "Hello"}}]},
+        {"choices": [{"delta": {"content": " "}}]},
+        {
+            "choices": [{"delta": {"content": "world"}, "finish_reason": "stop"}],
+            "usage": USAGE,
+        },
+    ]
+    events = [make_sse_event(_json_dumps(c)) for c in chunks]
+    client._session.post.return_value = make_sse_resp(events)
+
+    _ = [t async for t in client.stream_chat([{"role": "user", "content": "hey"}])]
+
+    (span,) = exporter.get_finished_spans()
+    assert dict(span.attributes or {})["gen_ai.response.time_to_first_chunk"] > 0
+    assert {
+        "gen_ai.client.operation.time_to_first_chunk",
+        "gen_ai.client.operation.time_per_output_chunk",
+    } <= _metric_names(reader)
+    assert (
+        _histogram_count(reader, "gen_ai.client.operation.time_per_output_chunk") == 2
+    )
+
+
+async def test_openai_vendor_extras_on_chat_span(otel_setup, client, make_resp):
+    exporter, _ = otel_setup
+    payload = {
+        "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+        "usage": USAGE,
+        "service_tier": "default",
+        "system_fingerprint": "fp_123",
+    }
+    client._session.post.return_value = make_resp(200, payload)
+
+    await client.complete_chat([{"role": "user", "content": "hey"}])
+
+    (span,) = exporter.get_finished_spans()
+    attrs = dict(span.attributes or {})
+    assert attrs["openai.api.type"] == "chat_completions"
+    assert attrs["openai.response.service_tier"] == "default"
+    assert attrs["openai.response.system_fingerprint"] == "fp_123"
+
+
+async def test_openai_vendor_extras_on_stream(
+    otel_setup, client, make_sse_event, make_sse_resp
+):
+    exporter, _ = otel_setup
+    chunks = [
+        {
+            "choices": [{"delta": {"content": "hi"}, "finish_reason": "stop"}],
+            "usage": USAGE,
+            "service_tier": "flex",
+            "system_fingerprint": "fp_stream",
+        }
+    ]
+    client._session.post.return_value = make_sse_resp(
+        [make_sse_event(_json_dumps(chunk)) for chunk in chunks]
+    )
+
+    _ = [
+        text
+        async for text in client.stream_chat(
+            [{"role": "user", "content": "hey"}],
+            extra_params={"service_tier": "flex"},
+        )
+    ]
+
+    (span,) = exporter.get_finished_spans()
+    attrs = dict(span.attributes or {})
+    assert attrs["openai.api.type"] == "chat_completions"
+    assert attrs["openai.request.service_tier"] == "flex"
+    assert attrs["openai.response.service_tier"] == "flex"
+    assert attrs["openai.response.system_fingerprint"] == "fp_stream"
+
+
+async def test_mcp_tool_call_emits_span(otel_setup):
+    exporter, reader = otel_setup
+    mcp = McpStreamable(url="https://mcp.example.com/mcp")
+    mcp._rpc = AsyncMock(  # type: ignore[method-assign]
+        return_value={"content": [{"type": "text", "text": "ok"}]}
+    )
+
+    await mcp._call("search", {"q": "x"})
+
+    (span,) = exporter.get_finished_spans()
+    assert span.name == "tools/call search"
+    attrs = dict(span.attributes or {})
+    assert attrs["mcp.method.name"] == "tools/call"
+    assert attrs["mcp.protocol.version"]
+    assert attrs["gen_ai.tool.name"] == "search"
+    assert attrs["gen_ai.operation.name"] == "execute_tool"
+    assert attrs["network.transport"] == "tcp"
+    assert attrs["network.protocol.name"] == "http"
+    assert attrs["server.address"] == "mcp.example.com"
+    assert attrs["server.port"] == 443
+    assert "mcp.client.operation.duration" in _metric_names(reader)
+
+
+async def test_agent_mcp_call_enriches_tool_span_without_duplicate(otel_setup):
+    exporter, reader = otel_setup
+    mcp = McpStreamable(url="https://mcp.example.com/mcp")
+    mcp._rpc = AsyncMock(  # type: ignore[method-assign]
+        return_value={"content": [{"type": "text", "text": "ok"}]}
+    )
+    tool = McpTool(
+        name="search",
+        description="Search",
+        input_schema={"type": "object"},
+        handler=lambda args: mcp._call("search", args),
+    )
+    session, _ = make_session(
+        [
+            FakeChatStream(
+                chunks=[], tool_calls=[make_tool_call("search", {"q": "x"})]
+            ),
+            FakeChatStream(chunks=["done"]),
+        ],
+        mcp_tools=[tool],
+    )
+
+    assert await session.send("search") == "done"
+
+    tool_span, agent_span = exporter.get_finished_spans()
+    assert tool_span.name == "execute_tool search"
+    attrs = dict(tool_span.attributes or {})
+    assert attrs["mcp.method.name"] == "tools/call"
+    assert attrs["server.address"] == "mcp.example.com"
+    assert agent_span.name == "invoke_agent"
+    assert "mcp.client.operation.duration" in _metric_names(reader)
+
+
+@pytest.fixture
+def otel_capture():
+    span_exporter = InMemorySpanExporter()
+    tracer_provider = TracerProvider()
+    tracer_provider.add_span_processor(SimpleSpanProcessor(span_exporter))
+    log_exporter = InMemoryLogRecordExporter()
+    logger_provider = LoggerProvider()
+    logger_provider.add_log_record_processor(SimpleLogRecordProcessor(log_exporter))
+    otel.instrument(
+        tracer_provider=tracer_provider,
+        meter_provider=MeterProvider(metric_readers=[InMemoryMetricReader()]),
+        logger_provider=logger_provider,
+        capture_content=True,
+    )
+    yield span_exporter, log_exporter
+    otel.uninstrument()
+
+
+async def test_capture_content_on_complete(otel_capture, client, make_resp):
+    payload = {
+        "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+        "usage": USAGE,
+    }
+    client._session.post.return_value = make_resp(200, payload)
+
+    tool = {
+        "name": "get_weather",
+        "description": "Get the weather",
+        "parameters": {"type": "object", "properties": {}},
+    }
+    await client.complete_chat(
+        [
+            {"role": "system", "content": "be brief"},
+            {"role": "user", "content": "hey"},
+        ],
+        tools=[tool],
+    )
+
+    span_exporter, log_exporter = otel_capture
+    (span,) = span_exporter.get_finished_spans()
+    attrs = dict(span.attributes or {})
+    assert _json_loads(attrs["gen_ai.input.messages"]) == [
+        {"role": "system", "parts": [{"type": "text", "content": "be brief"}]},
+        {"role": "user", "parts": [{"type": "text", "content": "hey"}]},
+    ]
+    assert "gen_ai.system_instructions" not in attrs
+    assert _json_loads(attrs["gen_ai.tool.definitions"]) == [
+        {"type": "function", **tool}
+    ]
+    assert _json_loads(attrs["gen_ai.output.messages"]) == [
+        {
+            "role": "assistant",
+            "parts": [{"type": "text", "content": "hi"}],
+            "finish_reason": "stop",
+        }
+    ]
+    (log,) = log_exporter.get_finished_logs()
+    record = log.log_record
+    assert record.event_name == "gen_ai.client.inference.operation.details"
+    detail_attrs = dict(record.attributes or {})
+    assert detail_attrs["gen_ai.input.messages"][0]["role"] == "system"
+    assert detail_attrs["gen_ai.tool.definitions"][0]["name"] == "get_weather"
+
+
+async def test_capture_content_on_stream(
+    otel_capture, client, make_sse_event, make_sse_resp
+):
+    chunks = [
+        {"choices": [{"delta": {"content": "Hello"}}]},
+        {
+            "choices": [{"delta": {"content": " world"}, "finish_reason": "stop"}],
+            "usage": USAGE,
+        },
+    ]
+    events = [make_sse_event(_json_dumps(c)) for c in chunks]
+    client._session.post.return_value = make_sse_resp(events)
+
+    _ = [t async for t in client.stream_chat([{"role": "user", "content": "hey"}])]
+
+    span_exporter, _ = otel_capture
+    (span,) = span_exporter.get_finished_spans()
+    attrs = dict(span.attributes or {})
+    assert _json_loads(attrs["gen_ai.input.messages"]) == [
+        {"role": "user", "parts": [{"type": "text", "content": "hey"}]}
+    ]
+    (out,) = _json_loads(attrs["gen_ai.output.messages"])
+    assert out["parts"] == [{"type": "text", "content": "Hello world"}]
+
+
+async def test_content_not_captured_by_default(otel_setup, client, make_resp):
+    exporter, _ = otel_setup
+    payload = {
+        "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+        "usage": USAGE,
+    }
+    client._session.post.return_value = make_resp(200, payload)
+
+    await client.complete_chat([{"role": "user", "content": "hey"}])
+
+    (span,) = exporter.get_finished_spans()
+    assert "gen_ai.input.messages" not in dict(span.attributes or {})
+
+
+async def test_error_emits_exception_event():
+    span_exporter = InMemorySpanExporter()
+    tracer_provider = TracerProvider()
+    tracer_provider.add_span_processor(SimpleSpanProcessor(span_exporter))
+    log_exporter = InMemoryLogRecordExporter()
+    logger_provider = LoggerProvider()
+    logger_provider.add_log_record_processor(SimpleLogRecordProcessor(log_exporter))
+    otel.instrument(
+        tracer_provider=tracer_provider,
+        meter_provider=MeterProvider(metric_readers=[InMemoryMetricReader()]),
+        logger_provider=logger_provider,
+    )
+    try:
+        c = OpenAIClient(model=None, api_key="test")
+        with pytest.raises(LLMError):
+            await c.complete_chat([{"role": "user", "content": "hey"}])
+    finally:
+        otel.uninstrument()
+
+    (log,) = log_exporter.get_finished_logs()
+    record = log.log_record
+    assert record.event_name == "gen_ai.client.operation.exception"
+    assert record.severity_number == SeverityNumber.WARN
+    attrs = dict(record.attributes or {})
+    assert attrs["error.type"] == "LLMError"
+    assert "LLMError" in str(attrs["exception.type"])
+    (span,) = span_exporter.get_finished_spans()
+    assert span.context is not None
+    assert record.trace_id == span.context.trace_id

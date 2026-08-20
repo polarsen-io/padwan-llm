@@ -138,6 +138,10 @@ class ConversationState:
             self.total_usage["reasoning"] = (
                 self.total_usage.get("reasoning", 0) + usage["reasoning"]
             )
+        if "cache_write" in usage:
+            self.total_usage["cache_write"] = (
+                self.total_usage.get("cache_write", 0) + usage["cache_write"]
+            )
 
     def clear(self) -> None:
         """Clear conversation history, keeping only the system message if set."""

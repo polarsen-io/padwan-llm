@@ -113,11 +113,8 @@ def _usage_from_anthropic(usage: dict[str, typing.Any] | None) -> UsageToken:
     """
     usage = usage or {}
     cached = usage.get("cache_read_input_tokens")
-    input_tokens = (
-        usage.get("input_tokens", 0)
-        + (cached or 0)
-        + (usage.get("cache_creation_input_tokens") or 0)
-    )
+    cache_write = usage.get("cache_creation_input_tokens")
+    input_tokens = usage.get("input_tokens", 0) + (cached or 0) + (cache_write or 0)
     output_tokens = usage.get("output_tokens", 0)
     token: UsageToken = {
         "total": input_tokens + output_tokens,
@@ -126,6 +123,8 @@ def _usage_from_anthropic(usage: dict[str, typing.Any] | None) -> UsageToken:
     }
     if cached is not None:
         token["cached"] = cached
+    if cache_write is not None:
+        token["cache_write"] = cache_write
     return token
 
 
@@ -317,6 +316,7 @@ class AnthropicChatStream(ChatStream, AnthropicToolMixin):
         input_tokens = 0
         output_tokens = 0
         cached: int | None = None
+        cache_write: int | None = None
         # index -> partially assembled tool call; input arrives as input_json_delta
         pending: dict[int, tuple[str, str, list[str]]] = {}
 
@@ -325,11 +325,12 @@ class AnthropicChatStream(ChatStream, AnthropicToolMixin):
                 case "message_start":
                     usage = event.get("message", {}).get("usage", {})
                     cached = usage.get("cache_read_input_tokens")
+                    cache_write = usage.get("cache_creation_input_tokens")
                     # see _usage_from_anthropic: input includes cache tokens
                     input_tokens = (
                         usage.get("input_tokens", 0)
                         + (cached or 0)
-                        + (usage.get("cache_creation_input_tokens") or 0)
+                        + (cache_write or 0)
                     )
                 case "content_block_start":
                     block = event.get("content_block", {})
@@ -364,6 +365,8 @@ class AnthropicChatStream(ChatStream, AnthropicToolMixin):
         }
         if cached is not None:
             token["cached"] = cached
+        if cache_write is not None:
+            token["cache_write"] = cache_write
         self.usage = token
 
         if pending:

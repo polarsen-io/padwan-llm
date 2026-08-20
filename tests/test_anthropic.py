@@ -118,7 +118,7 @@ def test_check_resp(status, json_data, headers, ctx, make_resp):
                 "cache_read_input_tokens": 8,
                 "cache_creation_input_tokens": 4,
             },
-            {"total": 27, "input": 22, "output": 5, "cached": 8},
+            {"total": 27, "input": 22, "output": 5, "cached": 8, "cache_write": 4},
             id="cache_read_and_write",
         ),
         pytest.param(None, {"total": 0, "input": 0, "output": 0}, id="missing"),
