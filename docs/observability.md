@@ -20,9 +20,9 @@ Content capture is disabled by default. Enabling it records prompts, responses, 
 
 ```python
 otel.instrument(
-    tracer_provider=...,   # spans
-    meter_provider=...,    # metrics
-    logger_provider=...,   # exception events
+    tracer_provider=...,  # spans
+    meter_provider=...,  # metrics
+    logger_provider=...,  # exception events
     capture_content=True,  # sensitive content capture
 )
 ```
