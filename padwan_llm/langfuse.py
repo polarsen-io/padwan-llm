@@ -88,11 +88,6 @@ def _mapped_attributes(
         ("langfuse.observation.input", _input_attribute(attributes)),
         ("langfuse.observation.output", _output_attribute(attributes)),
         (
-            "langfuse.observation.model.name",
-            _string_attribute(attributes, "gen_ai.response.model")
-            or _string_attribute(attributes, "gen_ai.request.model"),
-        ),
-        (
             "langfuse.session.id",
             _string_attribute(attributes, "gen_ai.conversation.id"),
         ),

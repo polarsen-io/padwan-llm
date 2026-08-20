@@ -55,7 +55,7 @@ def test_span_adapter_maps_observation_type(operation: str, expected: str):
     assert patch.set_attributes["langfuse.observation.type"] == expected
 
 
-def test_span_adapter_maps_content_model_and_session():
+def test_span_adapter_maps_content_and_session():
     messages = [{"role": "user", "parts": [{"type": "text", "content": "hi"}]}]
     system = [{"type": "text", "content": "be brief"}]
     tools = [{"type": "function", "name": "search"}]
@@ -86,7 +86,7 @@ def test_span_adapter_maps_content_model_and_session():
     assert patch.set_attributes["langfuse.observation.output"] == _json_dumps(
         [{"role": "assistant"}]
     )
-    assert patch.set_attributes["langfuse.observation.model.name"] == "gpt-test"
+    assert "langfuse.observation.model.name" not in patch.set_attributes
     assert patch.set_attributes["langfuse.session.id"] == "session-1"
 
 

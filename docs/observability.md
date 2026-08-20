@@ -68,10 +68,9 @@ The adapter enriches the copy of each span sent to Langfuse while leaving its st
 | Batch, realtime, and MCP operations | `span` observation |
 | `gen_ai.input.messages`, system instructions, tool definitions, or tool arguments | observation input |
 | `gen_ai.output.messages` or tool result | observation output |
-| request/response model | observation model |
 | `gen_ai.conversation.id` | session id |
 
-Langfuse also reads the standard GenAI usage and cost attributes directly. Inputs and outputs remain absent unless `capture_content=True`.
+Langfuse reads the standard GenAI model, usage, and cost attributes directly. Inputs and outputs remain absent unless `capture_content=True`.
 
 Enabling content capture may send prompts, responses, tool definitions, tool arguments, and tool results to Langfuse. These values can contain personal data, secrets, or proprietary context. Use Langfuse's `mask_otel_spans` hook to redact them; the adapter applies that hook before deriving Langfuse input and output attributes, so deleted source content is not recreated under an alias.
 
