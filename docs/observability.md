@@ -68,3 +68,20 @@ All of these record the `gen_ai.client.operation.duration` histogram with their 
 |------------|------|------|------------|
 | `gen_ai.client.operation.duration` | Histogram | `s` | request attributes, plus `error.type` on failure |
 | `gen_ai.client.token.usage` | Histogram | `{token}` | request attributes, plus `gen_ai.token.type` (`input` / `output`) |
+
+## Semconv coverage
+
+Support status for each section of the [GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/README.md):
+
+| Convention | Status | Notes |
+|------------|--------|-------|
+| [Model spans](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md) | ✅ Supported | `chat` and `embeddings` spans with semconv naming, request/usage attributes (incl. `reasoning.output_tokens`, `cache_read.input_tokens`). Batch and realtime spans use custom operation names — semconv defines none for them. |
+| [Agent spans](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-agent-spans.md) | 🟡 Partial | `execute_tool` spans for `AgentSession` tool dispatch. No `invoke_agent` / `create_agent` spans — `AgentSession` turns are not wrapped. |
+| [Metrics](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-metrics.md) | 🟡 Partial | `gen_ai.client.operation.duration` and `gen_ai.client.token.usage`. No `time_to_first_chunk` / `time_per_output_chunk`; server metrics don't apply to a client library. |
+| [Events](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-events.md) | ❌ Not supported | No `gen_ai.client.inference.operation.details` event: message/prompt content (`gen_ai.input.messages`, `gen_ai.output.messages`) is deliberately never captured — it is opt-in in the spec and sensitive by nature. |
+| [Exceptions](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-exceptions.md) | 🟡 Partial | Failures set `error.type`, `ERROR` status, and a recorded span exception. The dedicated `gen_ai.client.operation.exception` log event is not emitted. |
+| [Anthropic](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/anthropic.md) | ✅ Supported | Cache-inclusive `input_tokens` accounting per the provider conventions. No `gen_ai.usage.cache_write.input_tokens` breakdown or `gen_ai.request.reasoning.level`. |
+| [OpenAI](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/openai.md) | 🟡 Partial | Core conventions apply; vendor extras (`openai.request.service_tier`, `openai.response.system_fingerprint`, `openai.api.type`) are not emitted. |
+| [Azure AI Inference](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/azure-ai-inference.md) | — N/A | Not a padwan-llm provider. |
+| [AWS Bedrock](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/aws-bedrock.md) | — N/A | Not a padwan-llm provider. |
+| [MCP](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/mcp.md) | ❌ Not supported | `McpStreamable` / `McpStdio` transports emit no `mcp.*` spans or metrics. |
