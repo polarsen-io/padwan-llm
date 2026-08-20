@@ -2020,7 +2020,7 @@ research = [
 requires-dist = [
     { name = "niquests", specifier = ">=3.21.0" },
     { name = "niquests", extras = ["ws"], marker = "extra == 'realtime'", specifier = ">=3.21.0" },
-    { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.36" },
+    { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.44" },
     { name = "qh3", specifier = ">=1.7.1" },
     { name = "typing-extensions", marker = "python_full_version < '3.14'", specifier = ">=4.10" },
     { name = "urllib3-future", specifier = ">=2.19.908" },
@@ -2030,7 +2030,7 @@ provides-extras = ["otel", "realtime"]
 [package.metadata.requires-dev]
 bump = [{ name = "commitizen", specifier = ">=4.0.0" }]
 dev = [
-    { name = "opentelemetry-sdk", specifier = ">=1.36" },
+    { name = "opentelemetry-sdk", specifier = ">=1.44" },
     { name = "prek", specifier = ">=0.2.30" },
     { name = "pyright", specifier = ">=1.1.400" },
     { name = "pytest", specifier = ">=8.0.0" },
