@@ -142,6 +142,24 @@ for manual push-to-talk. See the realtime sections of
 [docs/clients/gemini.md](docs/clients/gemini.md), and
 [docs/clients/grok.md](docs/clients/grok.md).
 
+### OpenTelemetry instrumentation
+
+Opt-in GenAI spans and metrics for every provider client, following the OTel
+GenAI semantic conventions. Requires the `otel` extra
+(`pip install "padwan-llm[otel]"`):
+
+```python
+from padwan_llm import otel
+
+otel.instrument()  # uses the global tracer/meter providers
+```
+
+Each `complete_chat` / `stream_chat` call emits a `chat <model>` client span
+(provider, model, server address, token usage, finish reasons) plus the
+`gen_ai.client.operation.duration` and `gen_ai.client.token.usage` histograms.
+See [docs/observability.md](docs/observability.md) for the full attribute list
+and current limitations.
+
 ## One-Shot Command
 
 ```bash
