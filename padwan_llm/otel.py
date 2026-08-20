@@ -25,18 +25,8 @@ from .openai import OpenAIClient
 
 __all__ = ("instrument", "uninstrument")
 
-# OTel GenAI semconv attribute names (pre-stable), inlined to avoid the
-# incubating semconv package.
-_OPERATION = "gen_ai.operation.name"
-_PROVIDER = "gen_ai.provider.name"
-_REQ_MODEL = "gen_ai.request.model"
-_REQ_TEMPERATURE = "gen_ai.request.temperature"
-_RESP_FINISH = "gen_ai.response.finish_reasons"
-_USAGE_INPUT = "gen_ai.usage.input_tokens"
-_USAGE_OUTPUT = "gen_ai.usage.output_tokens"
-_TOKEN_TYPE = "gen_ai.token.type"
-_ERROR_TYPE = "error.type"
-_SERVER_ADDRESS = "server.address"
+# GenAI semconv attributes are inlined as literals to avoid the incubating
+# semconv package.
 
 # semconv well-known values for gen_ai.provider.name
 _PROVIDER_NAMES: dict[Provider, str] = {
@@ -107,13 +97,13 @@ def uninstrument() -> None:
 def _request_attrs(client: LLMClientBase) -> dict[str, Any]:
     """Low-cardinality attributes shared by the span and both metrics."""
     attrs: dict[str, Any] = {
-        _OPERATION: "chat",
-        _PROVIDER: _PROVIDER_NAMES.get(client.provider, client.provider),
+        "gen_ai.operation.name": "chat",
+        "gen_ai.provider.name": _PROVIDER_NAMES.get(client.provider, client.provider),
     }
     if client.model:
-        attrs[_REQ_MODEL] = client.model
+        attrs["gen_ai.request.model"] = client.model
     if host := urlsplit(client.base_url).hostname:
-        attrs[_SERVER_ADDRESS] = host
+        attrs["server.address"] = host
     return attrs
 
 
@@ -131,18 +121,21 @@ def _record_end(
     metric_attrs = dict(attrs)
     if error is not None:
         error_type = type(error).__qualname__
-        metric_attrs[_ERROR_TYPE] = error_type
-        span.set_attribute(_ERROR_TYPE, error_type)
+        metric_attrs["error.type"] = error_type
+        span.set_attribute("error.type", error_type)
         span.set_status(StatusCode.ERROR, str(error))
         span.record_exception(error)
     inst.duration.record(elapsed, metric_attrs)
     if usage is not None:
-        span.set_attribute(_USAGE_INPUT, usage["input"])
-        span.set_attribute(_USAGE_OUTPUT, usage["output"])
-        inst.tokens.record(usage["input"], {**metric_attrs, _TOKEN_TYPE: "input"})
-        inst.tokens.record(usage["output"], {**metric_attrs, _TOKEN_TYPE: "output"})
+        span.set_attribute("gen_ai.usage.input_tokens", usage["input"])
+        span.set_attribute("gen_ai.usage.output_tokens", usage["output"])
+        for token_type, count in (
+            ("input", usage["input"]),
+            ("output", usage["output"]),
+        ):
+            inst.tokens.record(count, {**metric_attrs, "gen_ai.token.type": token_type})
     if finish_reasons:
-        span.set_attribute(_RESP_FINISH, finish_reasons)
+        span.set_attribute("gen_ai.response.finish_reasons", finish_reasons)
     span.end()
 
 
@@ -154,10 +147,10 @@ def _sent_temperature(client: LLMClientBase) -> float | None:
 def _start_span(
     inst: _Instruments, attrs: dict[str, Any], temperature: float | None
 ) -> trace.Span:
-    model = attrs.get(_REQ_MODEL)
+    model = attrs.get("gen_ai.request.model")
     span_attrs = dict(attrs)
     if temperature is not None:
-        span_attrs[_REQ_TEMPERATURE] = temperature
+        span_attrs["gen_ai.request.temperature"] = temperature
     return inst.tracer.start_span(
         f"chat {model}" if model else "chat",
         kind=SpanKind.CLIENT,
