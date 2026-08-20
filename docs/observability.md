@@ -53,10 +53,9 @@ async def main() -> None:
 
 with instrument() as telemetry:
     asyncio.run(main())
-    telemetry.flush()
 ```
 
-The returned `LangfuseIntegration` exposes the configured Langfuse client as `telemetry.client`. Its context manager shuts down the exporter and restores the original Padwan methods. Call `flush()` explicitly before a short-lived process exits; `shutdown()` is idempotent.
+The returned `LangfuseIntegration` exposes the configured Langfuse client as `telemetry.client`. Its context manager flushes and shuts down the exporter, then restores the original Padwan methods. Call `flush()` only to send pending traces without shutting down; `shutdown()` is idempotent.
 
 The adapter enriches the copy of each span sent to Langfuse while leaving its standard OpenTelemetry attributes unchanged for other exporters:
 
