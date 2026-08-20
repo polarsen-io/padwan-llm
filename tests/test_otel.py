@@ -12,7 +12,11 @@ from opentelemetry.sdk._logs.export import (
     SimpleLogRecordProcessor,
 )
 from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from opentelemetry.sdk.metrics.export import (
+    Histogram,
+    HistogramDataPoint,
+    InMemoryMetricReader,
+)
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -61,32 +65,27 @@ def _metric_names(reader: InMemoryMetricReader) -> set[str]:
     }
 
 
-def _histogram_count(reader: InMemoryMetricReader, name: str) -> int:
+def _histogram_points(
+    reader: InMemoryMetricReader, name: str
+) -> list[HistogramDataPoint]:
     data = reader.get_metrics_data()
     if data is None:
-        return 0
-    return sum(
-        point.count
-        for rm in data.resource_metrics
-        for sm in rm.scope_metrics
-        for metric in sm.metrics
-        if metric.name == name
-        for point in metric.data.data_points
-    )
+        return []
+    points: list[HistogramDataPoint] = []
+    for resource_metrics in data.resource_metrics:
+        for scope_metrics in resource_metrics.scope_metrics:
+            for metric in scope_metrics.metrics:
+                if metric.name == name and isinstance(metric.data, Histogram):
+                    points.extend(metric.data.data_points)
+    return points
+
+
+def _histogram_count(reader: InMemoryMetricReader, name: str) -> int:
+    return sum(point.count for point in _histogram_points(reader, name))
 
 
 def _histogram_sum(reader: InMemoryMetricReader, name: str) -> int | float:
-    data = reader.get_metrics_data()
-    if data is None:
-        return 0
-    return sum(
-        point.sum
-        for rm in data.resource_metrics
-        for sm in rm.scope_metrics
-        for metric in sm.metrics
-        if metric.name == name
-        for point in metric.data.data_points
-    )
+    return sum(point.sum for point in _histogram_points(reader, name))
 
 
 async def test_complete_chat_emits_span_and_metrics(otel_setup, client, make_resp):
