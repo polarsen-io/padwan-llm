@@ -27,6 +27,77 @@ otel.instrument(
 )
 ```
 
+## Langfuse
+
+The optional Langfuse adapter configures Padwan instrumentation and the Langfuse trace exporter together:
+
+```bash
+pip install "padwan-llm[langfuse]"
+
+export LANGFUSE_PUBLIC_KEY="<PUBLIC_KEY>"
+export LANGFUSE_SECRET_KEY="<SECRET_KEY>"
+export LANGFUSE_BASE_URL="https://cloud.langfuse.com"
+```
+
+```python
+import asyncio
+
+from padwan_llm import LLMClient
+from padwan_llm.langfuse import instrument
+
+
+async def main() -> None:
+    async with LLMClient(model="gpt-4o-mini") as client:
+        await client.complete_chat([{"role": "user", "content": "Hello!"}])
+
+
+with instrument() as telemetry:
+    asyncio.run(main())
+    telemetry.flush()
+```
+
+The returned `LangfuseIntegration` exposes the configured Langfuse client as `telemetry.client`. Its context manager shuts down the exporter and restores the original Padwan methods. Call `flush()` explicitly before a short-lived process exits; `shutdown()` is idempotent.
+
+The adapter enriches the copy of each span sent to Langfuse while leaving its standard OpenTelemetry attributes unchanged for other exporters:
+
+| Padwan telemetry | Langfuse mapping |
+|------------------|------------------|
+| `chat` | `generation` observation |
+| `embeddings` | `embedding` observation |
+| `invoke_agent` | `agent` observation |
+| `execute_tool` | `tool` observation |
+| Batch, realtime, and MCP operations | `span` observation |
+| `gen_ai.input.messages`, system instructions, tool definitions, or tool arguments | observation input |
+| `gen_ai.output.messages` or tool result | observation output |
+| request/response model | observation model |
+| `gen_ai.conversation.id` | session id |
+
+Langfuse also reads the standard GenAI usage and cost attributes directly. Inputs and outputs remain absent unless `capture_content=True`.
+
+Enabling content capture may send prompts, responses, tool definitions, tool arguments, and tool results to Langfuse. These values can contain personal data, secrets, or proprietary context. Use Langfuse's `mask_otel_spans` hook to redact them; the adapter applies that hook before deriving Langfuse input and output attributes, so deleted source content is not recreated under an alias.
+
+```python
+from langfuse.types import MaskOtelSpansParams, MaskOtelSpansResult, OtelSpanPatch
+
+from padwan_llm.langfuse import instrument
+
+
+def redact_inputs(*, params: MaskOtelSpansParams) -> MaskOtelSpansResult:
+    return MaskOtelSpansResult(
+        span_patches={
+            span_id: OtelSpanPatch(delete_attributes=("gen_ai.input.messages",))
+            for span_id in params.spans
+        }
+    )
+
+
+telemetry = instrument(capture_content=True, mask_otel_spans=redact_inputs)
+```
+
+`instrument()` accepts Langfuse credentials and routing (`public_key`, `secret_key`, `base_url`), trace metadata (`environment`, `release`), delivery controls (`sample_rate`, `timeout`, `flush_at`, `flush_interval`), `debug`, an existing `tracer_provider`, and `should_export_span`. The credential arguments fall back to the standard Langfuse environment variables. A custom span filter is applied after the adapter includes Padwan spans.
+
+The integration exports traces only. Padwan metrics and exception log events still require separately configured OpenTelemetry meter and logger providers. Start the Langfuse integration before using Padwan; if `padwan_llm.otel.instrument()` is already active, the adapter raises instead of silently attaching to a different provider. See the [Langfuse OpenTelemetry integration](https://langfuse.com/integrations/native/opentelemetry) for backend configuration and troubleshooting.
+
 ## Chat spans
 
 Each chat call emits one `CLIENT` span named `chat <model>` (or `chat` when no model is set). For streams, the span starts on first iteration and ends when the stream completes, errors, is cancelled, or is abandoned.

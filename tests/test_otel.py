@@ -385,6 +385,7 @@ async def test_agent_tool_execution_emits_span(otel_setup):
     assert attrs["gen_ai.tool.name"] == "echo"
     assert attrs["gen_ai.tool.call.id"] == "call_1"
     assert attrs["gen_ai.tool.description"] == "echo"
+    assert attrs["gen_ai.conversation.id"] == session.session_id
     assert agent_span.name == "invoke_agent"
     agent_attrs = dict(agent_span.attributes or {})
     assert agent_attrs["gen_ai.operation.name"] == "invoke_agent"

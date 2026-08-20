@@ -154,6 +154,19 @@ from padwan_llm import otel
 otel.instrument()  # uses the global tracer/meter providers
 ```
 
+For a managed trace backend, the Langfuse adapter configures both sides and maps
+Padwan chat, agent, tool, embedding, and MCP spans to Langfuse observations:
+
+```bash
+pip install "padwan-llm[langfuse]"
+```
+
+```python
+from padwan_llm.langfuse import instrument
+
+telemetry = instrument()  # uses the standard LANGFUSE_* environment variables
+```
+
 Chat calls emit a `chat <model>` client span (provider, model, server address,
 token usage including reasoning tokens, thinking duration, finish reasons,
 requested tool names) plus the `gen_ai.client.operation.duration` and

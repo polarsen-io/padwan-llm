@@ -29,7 +29,7 @@ from .mistral import MistralClient
 from .models import ToolCall, ToolDefinition, UsageToken
 from .openai import OpenAIClient
 
-__all__ = ("instrument", "uninstrument")
+__all__ = ("instrument", "is_instrumented", "uninstrument")
 
 # GenAI semconv attributes are inlined as literals to avoid the incubating
 # semconv package.
@@ -82,6 +82,7 @@ _active_chat_span: ContextVar[trace.Span | None] = ContextVar(
 
 @dataclass
 class _AgentCounters:
+    conversation_id: str
     inference_calls: int = 0
     tool_calls: int = 0
 
@@ -267,6 +268,11 @@ def instrument(
     )
 
 
+def is_instrumented() -> bool:
+    """Return whether Padwan OpenTelemetry instrumentation is active."""
+    return bool(_originals)
+
+
 def uninstrument() -> None:
     """Restore the original client methods."""
     for cls, methods in _originals.items():
@@ -284,6 +290,8 @@ def _request_attrs(
         attrs["gen_ai.provider.name"] = _PROVIDER_NAMES.get(provider, provider)
     if model := getattr(client, "model", None):
         attrs["gen_ai.request.model"] = model
+    if counters := _active_agent_counters.get():
+        attrs["gen_ai.conversation.id"] = counters.conversation_id
     endpoint = urlsplit(getattr(client, "base_url", ""))
     if endpoint.hostname:
         attrs["server.address"] = endpoint.hostname
@@ -703,7 +711,7 @@ def _wrap_invoke_agent(original: Any, inst: _Instruments) -> Any:
         ctx = trace.set_span_in_context(span)
         before = cast(dict[str, int], dict(self.total_usage))
         before_messages = len(self.messages)
-        counters = _AgentCounters()
+        counters = _AgentCounters(conversation_id=self.session_id)
         start = time.perf_counter()
         error: BaseException | None = None
         it = original(self, *args, **kwargs).__aiter__()
@@ -950,6 +958,8 @@ def _wrap_execute_tool(original: Any, inst: _Instruments) -> Any:
             "gen_ai.tool.type": "function",
             "gen_ai.tool.call.id": tc["id"],
         }
+        if counters := _active_agent_counters.get():
+            span_attrs["gen_ai.conversation.id"] = counters.conversation_id
         tool = args[0] if args else None
         call_args = args[1] if len(args) > 1 else None
         approved = args[2] if len(args) > 2 else True

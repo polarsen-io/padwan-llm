@@ -13,6 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+langfuse = ["langfuse>=4.9", "opentelemetry-api>=1.44"]
 otel = ["opentelemetry-api>=1.44"]
 realtime = ["niquests[ws]>=3.21.0"]
 
