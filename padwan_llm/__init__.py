@@ -1,3 +1,24 @@
+# Python 3.15 defers these imports; older runtimes ignore the declaration.
+__lazy_modules__ = frozenset(
+    {
+        "padwan_llm._base",
+        "padwan_llm._deprecation",
+        "padwan_llm.agent",
+        "padwan_llm.anthropic",
+        "padwan_llm.client",
+        "padwan_llm.content",
+        "padwan_llm.conversation",
+        "padwan_llm.errors",
+        "padwan_llm.gemini",
+        "padwan_llm.grok",
+        "padwan_llm.mcp",
+        "padwan_llm.mistral",
+        "padwan_llm.models",
+        "padwan_llm.openai",
+        "padwan_llm.vision",
+    }
+)
+
 from importlib.metadata import version as _pkg_version
 
 from ._base import ChatStream, LLMClientBase, OnThought, RealtimeClientBase

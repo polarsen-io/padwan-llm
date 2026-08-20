@@ -1,3 +1,6 @@
+# Python 3.15 defers provider components until first use.
+__lazy_modules__ = frozenset({"padwan_llm.mistral.client", "padwan_llm.mistral.vision"})
+
 from .client import (
     MISTRAL_ENDPOINT,
     MISTRAL_MODELS,

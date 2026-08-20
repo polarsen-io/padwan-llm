@@ -2044,7 +2044,6 @@ source = { editable = "." }
 dependencies = [
     { name = "niquests" },
     { name = "qh3" },
-    { name = "typing-extensions", marker = "python_full_version < '3.14'" },
     { name = "urllib3-future" },
 ]
 
@@ -2098,7 +2097,6 @@ requires-dist = [
     { name = "opentelemetry-api", marker = "extra == 'langfuse'", specifier = ">=1.44" },
     { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.44" },
     { name = "qh3", specifier = ">=1.7.1" },
-    { name = "typing-extensions", marker = "python_full_version < '3.14'", specifier = ">=4.10" },
     { name = "urllib3-future", specifier = ">=2.19.908" },
 ]
 provides-extras = ["langfuse", "otel", "realtime"]

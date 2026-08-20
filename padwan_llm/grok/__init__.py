@@ -1,3 +1,13 @@
+# Python 3.15 defers provider components until first use.
+__lazy_modules__ = frozenset(
+    {
+        "padwan_llm.grok.batch",
+        "padwan_llm.grok.client",
+        "padwan_llm.grok.realtime",
+        "padwan_llm.grok.vision",
+    }
+)
+
 from .batch import GrokBatchJob, GrokBatchRequest, GrokBatchResult
 from .client import GROK_ENDPOINT, GROK_MODELS, GrokClient, GrokModel, is_grok_model
 from .realtime import (
