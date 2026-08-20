@@ -213,7 +213,9 @@ def _record_end(
         span.set_attribute("gen_ai.usage.input_tokens", usage["input"])
         span.set_attribute("gen_ai.usage.output_tokens", usage["output"])
         if (reasoning := usage.get("reasoning")) is not None:
-            span.set_attribute("gen_ai.usage.reasoning_tokens", reasoning)
+            span.set_attribute("gen_ai.usage.reasoning.output_tokens", reasoning)
+        if (cached := usage.get("cached")) is not None:
+            span.set_attribute("gen_ai.usage.cache_read.input_tokens", cached)
         for token_type, count in (
             ("input", usage["input"]),
             ("output", usage["output"]),
@@ -343,15 +345,16 @@ def _wrap_execute_tool(original: Any, inst: _Instruments) -> Any:
         self: AgentSession, tc: ToolCall, *args: Any, **kwargs: Any
     ) -> str:
         name = tc["function"]["name"]
+        span_attrs: dict[str, Any] = {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.name": name,
+            "gen_ai.tool.type": "function",
+            "gen_ai.tool.call.id": tc["id"],
+        }
+        if args and args[0] is not None:  # tool: McpTool | None
+            span_attrs["gen_ai.tool.description"] = args[0].description
         span = inst.tracer.start_span(
-            f"execute_tool {name}",
-            kind=SpanKind.INTERNAL,
-            attributes={
-                "gen_ai.operation.name": "execute_tool",
-                "gen_ai.tool.name": name,
-                "gen_ai.tool.type": "function",
-                "gen_ai.tool.call.id": tc["id"],
-            },
+            f"execute_tool {name}", kind=SpanKind.INTERNAL, attributes=span_attrs
         )
         with trace.use_span(
             span,

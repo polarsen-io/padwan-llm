@@ -33,7 +33,8 @@ Each chat call emits one `CLIENT` span named `chat <model>` (or `chat` when no m
 | `server.address` | `api.openai.com` | |
 | `gen_ai.usage.input_tokens` | `10` | |
 | `gen_ai.usage.output_tokens` | `20` | |
-| `gen_ai.usage.reasoning_tokens` | `5` | when the provider reports thought/reasoning tokens separately¹ |
+| `gen_ai.usage.cache_read.input_tokens` | `3` | when the provider reports cached prompt tokens |
+| `gen_ai.usage.reasoning.output_tokens` | `5` | when the provider reports thought/reasoning tokens separately¹ |
 | `gen_ai.response.finish_reasons` | `["stop"]` | |
 | `padwan_llm.response.tool_names` | `["get_weather"]` | tool calls requested by the model (custom attribute) |
 | `padwan_llm.thinking.duration` | `1.2` | seconds between the first and last `on_thought` chunk of a stream (custom attribute) |
@@ -51,6 +52,7 @@ Each tool dispatched by an `AgentSession` emits an `execute_tool <name>` span fo
 | `gen_ai.tool.name` | `get_weather` |
 | `gen_ai.tool.type` | `function` |
 | `gen_ai.tool.call.id` | `call_1` |
+| `gen_ai.tool.description` | `Get the current weather` |
 
 ## Embeddings, batch, and realtime
 

@@ -227,7 +227,11 @@ async def test_complete_chat_records_reasoning_tokens(otel_setup, client, make_r
     exporter, _ = otel_setup
     payload = {
         "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
-        "usage": {**USAGE, "completion_tokens_details": {"reasoning_tokens": 5}},
+        "usage": {
+            **USAGE,
+            "completion_tokens_details": {"reasoning_tokens": 5},
+            "prompt_tokens_details": {"cached_tokens": 3},
+        },
     }
     client._session.post.return_value = make_resp(200, payload)
 
@@ -235,7 +239,9 @@ async def test_complete_chat_records_reasoning_tokens(otel_setup, client, make_r
 
     assert usage["reasoning"] == 5
     (span,) = exporter.get_finished_spans()
-    assert dict(span.attributes or {})["gen_ai.usage.reasoning_tokens"] == 5
+    attrs = dict(span.attributes or {})
+    assert attrs["gen_ai.usage.reasoning.output_tokens"] == 5
+    assert attrs["gen_ai.usage.cache_read.input_tokens"] == 3
 
 
 async def test_complete_chat_records_tool_names(otel_setup, client, make_resp):
@@ -308,7 +314,7 @@ async def test_stream_records_thinking_duration(
     assert gemini.on_thought is original_cb
     (span,) = exporter.get_finished_spans()
     attrs = dict(span.attributes or {})
-    assert attrs["gen_ai.usage.reasoning_tokens"] == 10
+    assert attrs["gen_ai.usage.reasoning.output_tokens"] == 10
     assert attrs["padwan_llm.thinking.duration"] >= 0
 
 
@@ -343,6 +349,7 @@ async def test_agent_tool_execution_emits_span(otel_setup):
     assert attrs["gen_ai.operation.name"] == "execute_tool"
     assert attrs["gen_ai.tool.name"] == "echo"
     assert attrs["gen_ai.tool.call.id"] == "call_1"
+    assert attrs["gen_ai.tool.description"] == "echo"
 
 
 async def test_embeddings_span(otel_setup, make_resp):
