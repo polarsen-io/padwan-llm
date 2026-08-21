@@ -57,6 +57,8 @@ with instrument() as telemetry:
 
 The returned `LangfuseIntegration` exposes the configured Langfuse client as `telemetry.client`. Its context manager flushes and shuts down the exporter, then restores the original Padwan methods. Call `flush()` only to send pending traces without shutting down; `shutdown()` is idempotent.
 
+![Langfuse tracing view](static/langfuse-traces.png)
+
 The adapter enriches the copy of each span sent to Langfuse while leaving its standard OpenTelemetry attributes unchanged for other exporters:
 
 | Padwan telemetry | Langfuse mapping |
@@ -206,3 +208,9 @@ Detailed status per section of the [GenAI semantic conventions](https://github.c
 | [Azure AI Inference](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/azure-ai-inference.md) | — | | Not a padwan-llm provider |
 | [AWS Bedrock](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/aws-bedrock.md) | — | | Not a padwan-llm provider |
 | [MCP](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/mcp.md) | ✅ | `initialize`, `tools/list`, `ping`, and `tools/call` CLIENT spans; protocol, session, transport, and server attributes; operation and session metrics | JSON-RPC request ids and context propagation; server-side conventions |
+
+## Local dev stack
+
+`just e2e-otel` runs the e2e suite instrumented and exports traces and metrics to a local [otel-lgtm](https://github.com/grafana/docker-otel-lgtm) container (Grafana on `:3000`), provisioned with a GenAI dashboard from `bin/observability/dashboards/`. `just e2e-langfuse` does the same through the Langfuse adapter against a local Langfuse on `:3001`, headless-initialised with a dev project and seeded model prices. Both stacks live in one compose file (`bin/observability/docker-compose.yml`) behind the `otel` and `langfuse` profiles.
+
+![Grafana GenAI dashboard](static/grafana-dashboard.png)

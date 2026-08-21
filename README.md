@@ -175,6 +175,12 @@ requested tool names) plus the `gen_ai.client.operation.duration` and
 their own spans. See [docs/observability.md](docs/observability.md) for the
 full attribute list.
 
+`just e2e-otel` runs the e2e suite against a local Grafana stack with a
+ready-made GenAI dashboard
+([bin/observability/dashboards](bin/observability/dashboards)):
+
+<img alt="Grafana GenAI dashboard" src="docs/static/grafana-dashboard.png" width="800"/>
+
 ## One-Shot Command
 
 ```bash

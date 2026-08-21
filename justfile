@@ -20,64 +20,40 @@ test-min *args:
 e2e env=".env" *args:
     uv run pytest tests/e2e/ -m e2e --env-file {{ env }} {{ args }}
 
-# Start the local OTel stack (Grafana on :3000, OTLP/HTTP on :4318)
+compose := "docker compose -p padwan-obs --env-file bin/observability/langfuse.env -f bin/observability/docker-compose.yml"
+
+# Start the local OTel stack (Grafana on :3000, OTLP on :4317/:4318, dashboards provisioned)
 [group('otel')]
 otel-up:
     #!/usr/bin/env bash
     set -euo pipefail
-    docker start padwan-otel-lgtm >/dev/null 2>&1 || \
-        docker run -d --name padwan-otel-lgtm \
-            -p 3000:3000 -p 4317:4317 -p 4318:4318 grafana/otel-lgtm >/dev/null
-    for _ in $(seq 60); do
-        curl -sf http://localhost:3000/api/health >/dev/null && break
-        sleep 1
-    done
-    just otel-dashboard
-    echo "Grafana: http://localhost:3000 (admin/admin) — user: admin, password: admin"
+    {{ compose }} --profile otel up -d
+    until curl -sf http://localhost:3000/api/health >/dev/null; do sleep 1; done
+    echo "Grafana: http://localhost:3000 (admin/admin)"
 
-# Import dashboards/ into the local Grafana (re-run after editing the JSON)
-[group('otel')]
-otel-dashboard:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    for f in bin/observability/dashboards/*.json; do
-        payload=$(jq '{dashboard: ., overwrite: true}' "$f")
-        curl -sf -u admin:admin -X POST http://localhost:3000/api/dashboards/db \
-            -H 'content-type: application/json' -d "$payload" \
-            | jq -r '"imported http://localhost:3000\(.url)"'
-    done
-
-# Stop and remove the local OTel stack (discards collected telemetry)
+# Stop the local OTel stack (discards collected telemetry)
 [group('otel')]
 otel-down:
-    docker rm -f padwan-otel-lgtm >/dev/null 2>&1 || true
+    {{ compose }} --profile otel down
 
 # Run e2e tests instrumented, exporting traces and metrics to the local OTel stack
 [group('otel')]
 e2e-otel env=".env" *args: otel-up
     OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 just e2e {{ env }} --otel {{ args }}
 
-# Start the local Langfuse stack (UI on :3001, headless-initialised dev project)
+# Start the local Langfuse stack (UI on :3001, dev project + model prices seeded)
 [group('langfuse')]
 langfuse-up:
     #!/usr/bin/env bash
     set -euo pipefail
-    mkdir -p .langfuse
-    [ -f .langfuse/docker-compose.yml ] || curl -fsSL \
-        https://raw.githubusercontent.com/langfuse/langfuse/v4.15.0/docker-compose.yml \
-        -o .langfuse/docker-compose.yml
-    docker compose -p padwan-langfuse --env-file bin/observability/langfuse.env \
-        -f .langfuse/docker-compose.yml -f bin/observability/langfuse.override.yml up -d
-    for _ in $(seq 150); do
-        curl -sf http://localhost:3001/api/public/health >/dev/null && break
-        sleep 2
-    done
+    {{ compose }} --profile langfuse up -d
+    until curl -sf http://localhost:3001/api/public/health >/dev/null; do sleep 2; done
     echo "Langfuse: http://localhost:3001 (dev@example.com / padwan-dev)"
 
 # Stop the local Langfuse stack (add -v to also drop its volumes)
 [group('langfuse')]
 langfuse-down *args:
-    docker compose -p padwan-langfuse -f .langfuse/docker-compose.yml down {{ args }}
+    {{ compose }} --profile langfuse down {{ args }}
 
 # Run e2e tests instrumented through the Langfuse adapter
 [group('langfuse')]

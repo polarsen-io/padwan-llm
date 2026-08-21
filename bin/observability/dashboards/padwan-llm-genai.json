@@ -44,7 +44,7 @@
           "uid": "${ds_prom}"
         },
         "query": "label_values(gen_ai_client_operation_duration_seconds_count, service_name)",
-        "refresh": 1,
+        "refresh": 2,
         "current": {
           "text": "padwan-llm-e2e",
           "value": "padwan-llm-e2e"
