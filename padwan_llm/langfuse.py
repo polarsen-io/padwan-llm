@@ -73,6 +73,7 @@ def _output_attribute(attributes: Mapping[str, AttributeValue]) -> str | None:
     )
 
 
+# Map only gaps in https://langfuse.com/integrations/native/opentelemetry#attribute-mapping
 def _mapped_attributes(
     span: OtelSpanData, attributes: Mapping[str, AttributeValue]
 ) -> dict[str, AttributeValue]:
