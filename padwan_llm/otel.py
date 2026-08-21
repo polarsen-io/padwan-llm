@@ -43,6 +43,57 @@ _PROVIDER_NAMES: dict[Provider, str] = {
     "anthropic": "anthropic",
 }
 
+# semconv advised bucket boundaries; the SDK default ladder starts at 5s and
+# collapses every GenAI latency into one bucket
+_DURATION_BUCKETS = (
+    0.01,
+    0.02,
+    0.04,
+    0.08,
+    0.16,
+    0.32,
+    0.64,
+    1.28,
+    2.56,
+    5.12,
+    10.24,
+    20.48,
+    40.96,
+    81.92,
+)
+_TOKEN_BUCKETS = (
+    1,
+    4,
+    16,
+    64,
+    256,
+    1024,
+    4096,
+    16384,
+    65536,
+    262144,
+    1048576,
+    4194304,
+    16777216,
+    67108864,
+)
+_AGENT_DURATION_BUCKETS = (
+    0.1,
+    0.2,
+    0.4,
+    0.8,
+    1.6,
+    3.2,
+    6.4,
+    12.8,
+    25.6,
+    51.2,
+    102.4,
+    204.8,
+    409.6,
+)
+_AGENT_CALL_BUCKETS = (1, 2, 4, 8, 16, 32, 64, 128)
+
 _CLIENT_CLASSES: tuple[type[LLMClientBase], ...] = (
     OpenAIClient,
     GeminiClient,
@@ -138,51 +189,61 @@ def instrument(
             "gen_ai.client.operation.duration",
             unit="s",
             description="GenAI operation duration",
+            explicit_bucket_boundaries_advisory=_DURATION_BUCKETS,
         ),
         tokens=meter.create_histogram(
             "gen_ai.client.token.usage",
             unit="{token}",
             description="Number of input and output tokens used",
+            explicit_bucket_boundaries_advisory=_TOKEN_BUCKETS,
         ),
         time_to_first_chunk=meter.create_histogram(
             "gen_ai.client.operation.time_to_first_chunk",
             unit="s",
             description="Time to receive the first streamed chunk",
+            explicit_bucket_boundaries_advisory=_DURATION_BUCKETS,
         ),
         time_per_output_chunk=meter.create_histogram(
             "gen_ai.client.operation.time_per_output_chunk",
             unit="s",
             description="Time between consecutive streamed chunks",
+            explicit_bucket_boundaries_advisory=_DURATION_BUCKETS,
         ),
         agent_duration=meter.create_histogram(
             "gen_ai.invoke_agent.duration",
             unit="s",
             description="Duration of an agent invocation",
+            explicit_bucket_boundaries_advisory=_AGENT_DURATION_BUCKETS,
         ),
         agent_inference_calls=meter.create_histogram(
             "gen_ai.invoke_agent.inference_calls",
             unit="{inference_call}",
             description="Inference calls made by an agent invocation",
+            explicit_bucket_boundaries_advisory=_AGENT_CALL_BUCKETS,
         ),
         agent_tool_calls=meter.create_histogram(
             "gen_ai.invoke_agent.tool_calls",
             unit="{tool_call}",
             description="Tool calls made by an agent invocation",
+            explicit_bucket_boundaries_advisory=_AGENT_CALL_BUCKETS,
         ),
         tool_duration=meter.create_histogram(
             "gen_ai.execute_tool.duration",
             unit="s",
             description="Duration of a tool execution",
+            explicit_bucket_boundaries_advisory=_DURATION_BUCKETS,
         ),
         mcp_duration=meter.create_histogram(
             "mcp.client.operation.duration",
             unit="s",
             description="Duration of MCP client operations",
+            explicit_bucket_boundaries_advisory=_DURATION_BUCKETS,
         ),
         mcp_session_duration=meter.create_histogram(
             "mcp.client.session.duration",
             unit="s",
             description="Duration of MCP client sessions",
+            explicit_bucket_boundaries_advisory=_DURATION_BUCKETS,
         ),
         capture_content=capture_content,
     )

@@ -125,7 +125,7 @@ Each chat call emits one `CLIENT` span named `chat <model>` (or `chat` when no m
 
 ### Content capture (opt-in)
 
-`instrument(capture_content=True)` additionally records `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions` when the provider API separates them, and `gen_ai.tool.definitions` on chat spans as semconv-shaped JSON strings. It also emits the structured `gen_ai.client.inference.operation.details` log event and records tool arguments and results on tool spans. Image and audio parts are captured as their type only, never their payload.
+`instrument(capture_content=True)` additionally records `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions` when the provider API separates them, and `gen_ai.tool.definitions` on chat spans as semconv-shaped JSON strings. It also emits the structured `gen_ai.client.inference.operation.details` log event and records `gen_ai.tool.call.arguments` and `gen_ai.tool.call.result` on tool spans. Image and audio parts are captured as their type only, never their payload.
 
 ## Agent spans
 
@@ -154,7 +154,18 @@ Agent invocations also record dedicated duration, inference-call count, and tool
 - **Embeddings**: `MistralClient.fetch_embeddings` emits an `embeddings <model>` span (`gen_ai.operation.name=embeddings`).
 - **Batch**: batch operations (`create_batch`, `get_batch`, `list_batches`, `cancel_batch`, and the OpenAI/Grok file helpers) emit a span named after the operation. No model attribute is set — batch requests carry their own per-request models.
 - **Realtime**: a `realtime <model>` span covers the whole `RealtimeClient` session, from connect to close, with connect failures recorded as errors.
-- **MCP**: initialization, tool-list refresh, ping, and direct tool calls emit CLIENT spans. Tool calls use `tools/call <name>`; spans carry `mcp.method.name`, protocol and transport attributes, server address and port for HTTP transports, and the MCP session id when available. An MCP call dispatched through an agent enriches the existing `execute_tool` span instead of creating a duplicate span.
+- **MCP**: initialization, tool-list refresh, ping, and direct tool calls emit CLIENT spans, named after `mcp.method.name` (tool calls use `tools/call <name>`). An MCP call dispatched through an agent enriches the existing `execute_tool` span instead of creating a duplicate span.
+
+| Attribute | Example | Notes |
+|-----------|---------|-------|
+| `mcp.method.name` | `tools/call` | |
+| `mcp.protocol.version` | `2025-06-18` | |
+| `mcp.session.id` | `1f5b…` | HTTP transports, once the server assigns one |
+| `network.transport` | `pipe`, `tcp` | `pipe` for stdio servers |
+| `network.protocol.name` | `http` | HTTP transports only |
+| `server.address` / `server.port` | `api.example.com`, `443` | HTTP transports only |
+| `rpc.response.status_code` | `-32602` | on `MCP error <code>` failures |
+| `error.type` | `-32602`, `tool_error` | tool results flagged `isError` report `tool_error` |
 
 ## Metrics
 
@@ -170,6 +181,8 @@ Agent invocations also record dedicated duration, inference-call count, and tool
 | `gen_ai.execute_tool.duration` | Histogram | `s` | tool name and type, plus `error.type` on failure |
 | `mcp.client.operation.duration` | Histogram | `s` | `mcp.method.name`, plus `error.type` on failure |
 | `mcp.client.session.duration` | Histogram | `s` | MCP protocol and transport attributes, plus `error.type` on failure |
+
+Every instrument advises the bucket boundaries the GenAI semantic conventions recommend — the SDK default ladder starts at 5s and would collapse every GenAI latency into a single bucket, making quantiles meaningless.
 
 Token metrics are recorded only for model calls. `invoke_agent` reports aggregate usage as span attributes to avoid double counting.
 

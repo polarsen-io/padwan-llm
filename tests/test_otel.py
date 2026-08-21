@@ -759,3 +759,147 @@ async def test_error_emits_exception_event():
     (span,) = span_exporter.get_finished_spans()
     assert span.context is not None
     assert record.trace_id == span.context.trace_id
+
+
+# semconv advised boundaries; the SDK default ladder would collapse GenAI latencies into one bucket
+_SEMCONV_DURATION = (
+    0.01,
+    0.02,
+    0.04,
+    0.08,
+    0.16,
+    0.32,
+    0.64,
+    1.28,
+    2.56,
+    5.12,
+    10.24,
+    20.48,
+    40.96,
+    81.92,
+)
+_SEMCONV_TOKENS = (
+    1,
+    4,
+    16,
+    64,
+    256,
+    1024,
+    4096,
+    16384,
+    65536,
+    262144,
+    1048576,
+    4194304,
+    16777216,
+    67108864,
+)
+_SEMCONV_AGENT_DURATION = (
+    0.1,
+    0.2,
+    0.4,
+    0.8,
+    1.6,
+    3.2,
+    6.4,
+    12.8,
+    25.6,
+    51.2,
+    102.4,
+    204.8,
+    409.6,
+)
+_SEMCONV_AGENT_CALLS = (1, 2, 4, 8, 16, 32, 64, 128)
+
+
+@pytest.fixture
+async def recorded_histograms(
+    otel_setup, client, make_resp, make_sse_event, make_sse_resp
+) -> InMemoryMetricReader:
+    """Drive a chat, a stream and an agent turn so every histogram has a data point."""
+    _, reader = otel_setup
+    payload = {
+        "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+        "usage": USAGE,
+    }
+    client._session.post.return_value = make_resp(200, payload)
+    await client.complete_chat([{"role": "user", "content": "hey"}])
+
+    chunks = [
+        {"choices": [{"delta": {"content": "Hello"}}]},
+        {
+            "choices": [{"delta": {"content": " world"}, "finish_reason": "stop"}],
+            "usage": USAGE,
+        },
+    ]
+    client._session.post.return_value = make_sse_resp(
+        [make_sse_event(_json_dumps(c)) for c in chunks]
+    )
+    async for _ in client.stream_chat([{"role": "user", "content": "hey"}]):
+        pass
+
+    async def echo(args: dict) -> str:
+        return args["text"]
+
+    session, _ = make_session(
+        [
+            FakeChatStream(
+                chunks=[], tool_calls=[make_tool_call("echo", {"text": "hi"})]
+            ),
+            FakeChatStream(
+                chunks=["done"], usage={"total": 30, "input": 10, "output": 20}
+            ),
+        ],
+        mcp_tools=[
+            McpTool(
+                name="echo",
+                description="echo",
+                input_schema={"type": "object"},
+                handler=echo,
+            )
+        ],
+    )
+    await session.send("run echo")
+    return reader
+
+
+@pytest.mark.parametrize(
+    ("metric", "boundaries"),
+    [
+        pytest.param(
+            "gen_ai.client.operation.duration", _SEMCONV_DURATION, id="duration"
+        ),
+        pytest.param("gen_ai.client.token.usage", _SEMCONV_TOKENS, id="tokens"),
+        pytest.param(
+            "gen_ai.client.operation.time_to_first_chunk", _SEMCONV_DURATION, id="ttfc"
+        ),
+        pytest.param(
+            "gen_ai.client.operation.time_per_output_chunk",
+            _SEMCONV_DURATION,
+            id="per_chunk",
+        ),
+        pytest.param(
+            "gen_ai.invoke_agent.duration", _SEMCONV_AGENT_DURATION, id="agent"
+        ),
+        pytest.param(
+            "gen_ai.invoke_agent.inference_calls",
+            _SEMCONV_AGENT_CALLS,
+            id="inference_calls",
+        ),
+        pytest.param(
+            "gen_ai.invoke_agent.tool_calls", _SEMCONV_AGENT_CALLS, id="tool_calls"
+        ),
+        pytest.param(
+            "gen_ai.execute_tool.duration", _SEMCONV_DURATION, id="execute_tool"
+        ),
+    ],
+)
+async def test_histogram_buckets_follow_semconv(
+    recorded_histograms: InMemoryMetricReader,
+    metric: str,
+    boundaries: tuple[float, ...],
+) -> None:
+    points = _histogram_points(recorded_histograms, metric)
+    assert points, f"{metric} recorded no data point"
+    for point in points:
+        assert tuple(point.explicit_bounds) == boundaries

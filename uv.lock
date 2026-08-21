@@ -2064,6 +2064,7 @@ bump = [
     { name = "commitizen" },
 ]
 dev = [
+    { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
     { name = "prek" },
     { name = "pyright" },
@@ -2104,6 +2105,7 @@ provides-extras = ["langfuse", "otel", "realtime"]
 [package.metadata.requires-dev]
 bump = [{ name = "commitizen", specifier = ">=4.0.0" }]
 dev = [
+    { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.44" },
     { name = "opentelemetry-sdk", specifier = ">=1.44" },
     { name = "prek", specifier = ">=0.2.30" },
     { name = "pyright", specifier = ">=1.1.400" },

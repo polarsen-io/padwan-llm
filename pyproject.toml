@@ -30,6 +30,7 @@ module-name = "padwan_llm"
 
 [dependency-groups]
 dev = [
+    "opentelemetry-exporter-otlp-proto-http>=1.44",
     "opentelemetry-sdk>=1.44",
     "prek>=0.2.30",
     "pyright>=1.1.400",
@@ -76,7 +77,10 @@ exclude = ["bin"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --cov=padwan_llm --cov-report=term-missing -m 'not e2e'"
-markers = ["e2e: end-to-end tests requiring real API keys"]
+markers = [
+    "e2e: end-to-end tests requiring real API keys",
+    "otel_expect_error: test whose spans are expected to end in ERROR status under --otel",
+]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [

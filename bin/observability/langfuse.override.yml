@@ -1,0 +1,18 @@
+# Local dev overrides for the pinned upstream Langfuse compose file.
+# Only the web UI is published; the backing services stay on the compose network
+# so they cannot collide with a local Postgres/Redis/ClickHouse.
+services:
+  langfuse-web:
+    # :3000 belongs to the Grafana stack (just otel-up)
+    ports: !override
+      - 3001:3000
+  langfuse-worker:
+    ports: !reset []
+  postgres:
+    ports: !reset []
+  clickhouse:
+    ports: !reset []
+  redis:
+    ports: !reset []
+  minio:
+    ports: !reset []
