@@ -655,7 +655,8 @@ async def test_capture_content_on_complete(otel_logging, client, make_resp):
     assert detail_attrs["gen_ai.tool.definitions"][0]["name"] == "get_weather"
 
 
-async def test_capture_content_strips_binary_parts(otel_capture, client, make_resp):
+async def test_capture_content_strips_binary_parts(otel_logging, client, make_resp):
+    span_exporter, _ = otel_logging()
     payload = {
         "choices": [{"message": {"content": "a duck"}, "finish_reason": "stop"}],
         "usage": USAGE,
@@ -681,7 +682,6 @@ async def test_capture_content_strips_binary_parts(otel_capture, client, make_re
         ]
     )
 
-    span_exporter, _ = otel_capture
     (span,) = span_exporter.get_finished_spans()
     attrs = dict(span.attributes or {})
     assert _json_loads(attrs["gen_ai.input.messages"]) == [

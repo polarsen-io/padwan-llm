@@ -5,6 +5,7 @@ __lazy_modules__ = frozenset(
         "padwan_llm._deprecation",
         "padwan_llm.agent",
         "padwan_llm.anthropic",
+        "padwan_llm.audio",
         "padwan_llm.client",
         "padwan_llm.content",
         "padwan_llm.conversation",
