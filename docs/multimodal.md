@@ -24,19 +24,17 @@ Strings are always text — never treated as paths — so message text that ment
 The explicit builders remain for full control:
 
 ```python
-from pathlib import Path
-
 from padwan_llm import audio_part, image_part, text_file_part, text_part
 
 parts = [
     text_part("What is in this screenshot?"),
     image_part("shot.png"),  # reads the file into a base64 data: URL
-    audio_part(Path("voice.wav")),  # reads the file into a base64 audio part
+    audio_part("voice.wav"),  # reads the file into a base64 audio part
     text_file_part("notes.md"),  # inlines a text file, labelled with its name
 ]
 ```
 
-`image_part` accepts a path (`str | Path`) and guesses the MIME type from the file name; pass `mime=` to override. Unknown extensions fall back to `image/png`. `audio_part` accepts a `Path` and guesses the format from the extension; only wav and mp3 are supported (the formats every audio-capable provider accepts), and `fmt=` overrides the guess. `text_file_part` reads the file as UTF-8 (`encoding=` overrides) and prefixes the text with `--- <name> ---` so the model can tell files apart.
+`image_part` accepts a path (`str | Path`) and guesses the MIME type from the file name; pass `mime=` to override. Unknown extensions fall back to `image/png`. `audio_part` accepts a path (`str | Path`) and guesses the format from the extension; only wav and mp3 are supported (the formats every audio-capable provider accepts), and `fmt=` overrides the guess. `text_file_part` reads the file as UTF-8 (`encoding=` overrides) and prefixes the text with `--- <name> ---` so the model can tell files apart.
 
 ## Sending images
 

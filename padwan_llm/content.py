@@ -82,13 +82,14 @@ def image_part(path: str | Path, *, mime: str | None = None) -> ContentImagePart
     return {"type": "image_url", "image_url": {"url": f"data:{resolved};base64,{data}"}}
 
 
-def audio_part(path: Path, *, fmt: AudioFormat | None = None) -> ContentAudioPart:
+def audio_part(path: str | Path, *, fmt: AudioFormat | None = None) -> ContentAudioPart:
     """Read an audio file into a base64 audio content part.
 
     The format is guessed from the file extension when not given; only wav and
     mp3 are supported (the formats every audio-capable provider accepts), so an
     unrecognised extension raises ``ValueError``.
     """
+    path = Path(path)
     if fmt is None:
         mime = mimetypes.guess_type(path.name)[0]
         if mime is None or (fmt := _AUDIO_FORMATS.get(mime)) is None:
