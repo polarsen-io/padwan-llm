@@ -48,8 +48,9 @@ def test_image_part(tmp_path, name, mime_arg, expected_mime):
     [
         pytest.param("voice.wav", None, "wav", id="guess-wav"),
         pytest.param("song.mp3", None, "mp3", id="guess-mp3"),
+        pytest.param("clip.flac", None, "flac", id="guess-flac"),
+        pytest.param("clip.m4a", None, "m4a", id="guess-m4a"),
         pytest.param("clip.flac", "wav", "wav", id="explicit-override"),
-        pytest.param("clip.flac", None, None, id="unsupported-raises"),
         pytest.param("blob.unknownext", None, None, id="unknown-raises"),
     ],
 )
@@ -58,7 +59,7 @@ def test_audio_part(tmp_path, name, fmt_arg, expected):
     path = tmp_path / name
     path.write_bytes(raw)
 
-    ctx = nullcontext() if expected else pytest.raises(ValueError, match="wav and mp3")
+    ctx = nullcontext() if expected else pytest.raises(ValueError, match="Unsupported")
     with ctx:
         part = audio_part(path, fmt=fmt_arg)
         assert part["type"] == "input_audio"
@@ -163,19 +164,25 @@ def test_content_to_gemini_parts_multimodal():
 
 
 @pytest.mark.parametrize(
-    "model, expected",
+    "model, fmt, expected",
     [
-        pytest.param("gpt-audio", True, id="openai-gpt-audio"),
-        pytest.param("gpt-4o-audio-preview", True, id="openai-4o-audio"),
-        pytest.param("gpt-4o", False, id="openai-4o-text-image"),
-        pytest.param("gemini-2.5-flash", True, id="gemini"),
-        pytest.param("voxtral-small-latest", True, id="mistral-voxtral"),
-        pytest.param("mistral-large-latest", False, id="mistral-text"),
-        pytest.param("grok-4", False, id="grok"),
-        pytest.param("claude-sonnet-5", False, id="anthropic"),
-        pytest.param("some-local-model", True, id="unknown-attempt"),
-        pytest.param(None, False, id="none"),
+        pytest.param("gpt-audio", None, True, id="openai-gpt-audio"),
+        pytest.param("gpt-4o-audio-preview", None, True, id="openai-4o-audio"),
+        pytest.param("gpt-4o", None, False, id="openai-4o-text-image"),
+        pytest.param("gpt-audio", "wav", True, id="openai-wav"),
+        pytest.param("gpt-audio", "flac", False, id="openai-no-flac"),
+        pytest.param("gemini-2.5-flash", None, True, id="gemini"),
+        pytest.param("gemini-2.5-flash", "flac", True, id="gemini-flac"),
+        pytest.param("gemini-2.5-flash", "m4a", True, id="gemini-m4a"),
+        pytest.param("voxtral-small-latest", None, True, id="mistral-voxtral"),
+        pytest.param("voxtral-small-latest", "ogg", True, id="mistral-ogg"),
+        pytest.param("voxtral-small-latest", "m4a", False, id="mistral-no-m4a"),
+        pytest.param("mistral-large-latest", None, False, id="mistral-text"),
+        pytest.param("grok-4", None, False, id="grok"),
+        pytest.param("claude-sonnet-5", None, False, id="anthropic"),
+        pytest.param("some-local-model", "aiff", True, id="unknown-attempt"),
+        pytest.param(None, None, False, id="none"),
     ],
 )
-def test_supports_audio(model, expected):
-    assert supports_audio(model) is expected
+def test_supports_audio(model, fmt, expected):
+    assert supports_audio(model, fmt) is expected

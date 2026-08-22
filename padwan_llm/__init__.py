@@ -33,6 +33,7 @@ from .anthropic import (
 from .audio import supports_audio
 from .client import LLMClient, RealtimeClient
 from .content import (
+    AudioFormat,
     ContentAudioPart,
     ContentImagePart,
     ContentPart,
@@ -94,6 +95,7 @@ __all__ = (
     "AnthropicClient",
     "AnthropicModel",
     "AssistantToolMessage",
+    "AudioFormat",
     "ChatMessage",
     "ChatResponse",
     "ChatStream",

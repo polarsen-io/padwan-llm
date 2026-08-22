@@ -7,7 +7,7 @@ __lazy_modules__ = frozenset(
     }
 )
 
-from .audio import supports_audio
+from .audio import AUDIO_FORMATS, supports_audio
 from .client import (
     MISTRAL_ENDPOINT,
     MISTRAL_MODELS,
@@ -20,6 +20,7 @@ from .client import (
 from .vision import supports_vision
 
 __all__ = (
+    "AUDIO_FORMATS",
     "MISTRAL_ENDPOINT",
     "MISTRAL_MODELS",
     "MistralAudioModel",

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Literal, TypedDict
 
 __all__ = (
+    "AudioFormat",
     "ContentAudioPart",
     "ContentImagePart",
     "ContentPart",
@@ -38,11 +39,14 @@ class ContentImagePart(TypedDict):
     image_url: ImageUrl
 
 
+AudioFormat = Literal["wav", "mp3", "flac", "ogg", "aac", "aiff", "m4a"]
+
+
 class InputAudio(TypedDict):
     """The `input_audio` payload of an audio content part."""
 
     data: str
-    format: Literal["wav", "mp3"]
+    format: AudioFormat
 
 
 class ContentAudioPart(TypedDict):
@@ -54,14 +58,21 @@ class ContentAudioPart(TypedDict):
 
 ContentPart = ContentTextPart | ContentImagePart | ContentAudioPart
 
-AudioFormat = Literal["wav", "mp3"]
-
 # Audio MIME types mapped to the wire formats the content-part shape allows.
+# Provider support varies (see supports_audio); this is the builder-side union.
 _AUDIO_FORMATS: dict[str, AudioFormat] = {
     "audio/wav": "wav",
     "audio/x-wav": "wav",
     "audio/mpeg": "mp3",
     "audio/mp3": "mp3",
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
+    "audio/ogg": "ogg",
+    "audio/aac": "aac",
+    "audio/aiff": "aiff",
+    "audio/x-aiff": "aiff",
+    "audio/mp4": "m4a",
+    "audio/x-m4a": "m4a",
 }
 
 
@@ -85,17 +96,18 @@ def image_part(path: str | Path, *, mime: str | None = None) -> ContentImagePart
 def audio_part(path: str | Path, *, fmt: AudioFormat | None = None) -> ContentAudioPart:
     """Read an audio file into a base64 audio content part.
 
-    The format is guessed from the file extension when not given; only wav and
-    mp3 are supported (the formats every audio-capable provider accepts), so an
-    unrecognised extension raises ``ValueError``.
+    The format is guessed from the file extension when not given; an
+    unrecognised extension raises ``ValueError``. Provider support varies by
+    format; check with ``supports_audio(model, fmt)``.
     """
     path = Path(path)
     if fmt is None:
         mime = mimetypes.guess_type(path.name)[0]
         if mime is None or (fmt := _AUDIO_FORMATS.get(mime)) is None:
+            supported = "/".join(dict.fromkeys(_AUDIO_FORMATS.values()))
             raise ValueError(
-                f"Unsupported audio format for {path.name!r}: only wav and mp3 "
-                "are supported (pass fmt= to override)"
+                f"Unsupported audio format for {path.name!r}: expected "
+                f"{supported} (pass fmt= to override)"
             )
     data = base64.b64encode(path.read_bytes()).decode("ascii")
     return {"type": "input_audio", "input_audio": {"data": data, "format": fmt}}
@@ -112,8 +124,8 @@ def content_parts(*items: str | Path | ContentPart) -> list[ContentPart]:
 
     Plain strings become text parts (never treated as paths), so message text
     that mentions a filename is safe. ``Path`` items are read from disk: an
-    image MIME type (by extension) yields an image part, a wav/mp3 audio MIME
-    type an audio part, anything else is inlined as a labelled text file part.
+    image MIME type (by extension) yields an image part, an audio MIME type an
+    audio part, anything else is inlined as a labelled text file part.
     Ready-made part dicts pass through.
     """
     parts: list[ContentPart] = []
@@ -123,7 +135,7 @@ def content_parts(*items: str | Path | ContentPart) -> list[ContentPart]:
             if mime and mime.startswith("image/"):
                 parts.append(image_part(item, mime=mime))
             elif mime and mime.startswith("audio/"):
-                # audio_part raises a clear ValueError on non-wav/mp3 formats,
+                # audio_part raises a clear ValueError on unknown formats,
                 # instead of falling through to a binary UTF-8 decode error.
                 parts.append(audio_part(item))
             else:

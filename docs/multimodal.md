@@ -34,7 +34,7 @@ parts = [
 ]
 ```
 
-`image_part` accepts a path (`str | Path`) and guesses the MIME type from the file name; pass `mime=` to override. Unknown extensions fall back to `image/png`. `audio_part` accepts a path (`str | Path`) and guesses the format from the extension; only wav and mp3 are supported (the formats every audio-capable provider accepts), and `fmt=` overrides the guess. `text_file_part` reads the file as UTF-8 (`encoding=` overrides) and prefixes the text with `--- <name> ---` so the model can tell files apart.
+`image_part` accepts a path (`str | Path`) and guesses the MIME type from the file name; pass `mime=` to override. Unknown extensions fall back to `image/png`. `audio_part` accepts a path (`str | Path`) and guesses the format from the extension (wav, mp3, flac, ogg, aac, aiff, m4a); `fmt=` overrides the guess and unknown extensions raise `ValueError`. Format support varies per provider (see the audio table below). `text_file_part` reads the file as UTF-8 (`encoding=` overrides) and prefixes the text with `--- <name> ---` so the model can tell files apart.
 
 ## Sending images
 
@@ -77,26 +77,29 @@ Each provider package exposes its own `supports_vision` (e.g. `padwan_llm.mistra
 
 ## Checking audio support
 
-`supports_audio` is the audio counterpart of `supports_vision`, with the same dispatch and unknown-model behaviour:
+`supports_audio` is the audio counterpart of `supports_vision`, with the same dispatch and unknown-model behaviour; pass `fmt=` to also check a specific format:
 
 ```python
 from padwan_llm import supports_audio
 
 supports_audio("gpt-audio")  # True
-supports_audio("voxtral-small-latest")  # True
+supports_audio("gpt-audio", "flac")  # False - OpenAI takes wav/mp3 only
+supports_audio("gemini-2.5-flash", "flac")  # True
 supports_audio("grok-4")  # False - no Grok chat model takes audio
 ```
 
-| Provider | Audio input |
-|----------|-------------|
-| OpenAI | Audio-tier chat models only (`gpt-audio`, `*-audio-preview` variants); parts are sent verbatim |
-| Gemini | All current chat models; parts are converted to `inlineData` |
-| Mistral | `voxtral-*` models only; parts are rewritten to Mistral's base64 `input_audio` chunk |
-| Grok | No current chat model |
-| Anthropic | The Messages API has no audio input |
+| Provider | Audio input | Formats |
+|----------|-------------|---------|
+| OpenAI | Audio-tier chat models only (`gpt-audio`, `*-audio-preview` variants); parts are sent verbatim | wav, mp3 |
+| Gemini | All current chat models; parts are converted to `inlineData` | wav, mp3, flac, ogg, aac, aiff, m4a |
+| Mistral | `voxtral-*` models only; parts are rewritten to Mistral's base64 `input_audio` chunk | wav, mp3, flac, ogg |
+| Grok | No current chat model | - |
+| Anthropic | The Messages API has no audio input | - |
+
+Each audio-capable provider package also exposes its accepted formats as `AUDIO_FORMATS` (e.g. `padwan_llm.gemini.AUDIO_FORMATS`).
 
 ## Limitations
 
-- Audio parts carry wav or mp3 only (the formats every audio-capable provider accepts); no video parts, image generation, or audio generation.
+- No video parts, image generation, or audio generation.
 - Content parts are for user messages; assistant messages stay text-only.
 - The Anthropic client passes message content through unconverted, so image and audio parts are not usable with Claude models yet (and the Messages API takes no audio anyway).
