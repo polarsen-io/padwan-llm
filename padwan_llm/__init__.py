@@ -30,11 +30,14 @@ from .anthropic import (
     AnthropicModel,
     is_anthropic_model,
 )
+from .audio import supports_audio
 from .client import LLMClient, RealtimeClient
 from .content import (
+    ContentAudioPart,
     ContentImagePart,
     ContentPart,
     ContentTextPart,
+    audio_part,
     content_parts,
     image_part,
     text_file_part,
@@ -94,6 +97,7 @@ __all__ = (
     "ChatMessage",
     "ChatResponse",
     "ChatStream",
+    "ContentAudioPart",
     "ContentImagePart",
     "ContentPart",
     "ContentTextPart",
@@ -138,6 +142,7 @@ __all__ = (
     "ToolResultMessage",
     "UsageToken",
     "__version__",
+    "audio_part",
     "content_parts",
     "image_part",
     "is_anthropic_model",
@@ -145,6 +150,7 @@ __all__ = (
     "is_grok_model",
     "is_mistral_model",
     "is_openai_model",
+    "supports_audio",
     "supports_vision",
     "text_file_part",
     "text_part",

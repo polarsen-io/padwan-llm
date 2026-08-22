@@ -54,7 +54,8 @@ def _content_to_gemini_parts(content: str | list[ContentPart]) -> list[GeminiPar
     """Convert message content into Gemini `parts`.
 
     Plain text becomes a single text part; multimodal content maps each part,
-    translating `image_url` data URLs into Gemini's `inlineData` shape.
+    translating `image_url` data URLs and `input_audio` base64 payloads into
+    Gemini's `inlineData` shape.
     """
     if isinstance(content, str):
         return [{"text": content}]
@@ -67,6 +68,16 @@ def _content_to_gemini_parts(content: str | list[ContentPart]) -> list[GeminiPar
             header, _, data = url.partition(";base64,")
             mime = header.removeprefix("data:") or "image/png"
             parts.append({"inlineData": {"mimeType": mime, "data": data}})
+        elif part["type"] == "input_audio":
+            audio = part["input_audio"]
+            parts.append(
+                {
+                    "inlineData": {
+                        "mimeType": f"audio/{audio['format']}",
+                        "data": audio["data"],
+                    }
+                }
+            )
     return parts
 
 

@@ -304,6 +304,12 @@ class _OpenAIBase(_OpenAIAuth, LLMClientBase[Retry], OpenAIToolMixin):
             except ValueError as e:
                 raise LLMError(self.provider, f"Stream parse error: {e}") from e
 
+    def _prepare_messages(
+        self, messages: Sequence[ChatMessage]
+    ) -> Sequence[ChatMessage]:
+        """Hook for providers whose message wire format diverges from OpenAI's."""
+        return messages
+
     async def complete_chat(
         self,
         messages: Sequence[ChatMessage],
@@ -314,7 +320,7 @@ class _OpenAIBase(_OpenAIAuth, LLMClientBase[Retry], OpenAIToolMixin):
             raise LLMError(self.provider, "No model specified")
         body: CreateChatCompletionRequest = {
             "model": self.model,
-            "messages": cast(list, messages),
+            "messages": cast(list, self._prepare_messages(messages)),
             "temperature": self.temperature,
         }
         if tools:
@@ -373,7 +379,7 @@ class OpenAIChatStream(ChatStream, OpenAIToolMixin):
             raise LLMError(self.client.provider, "No model specified")
         body: CreateChatCompletionRequest = {
             "model": self.client.model,
-            "messages": cast(list, self.messages),
+            "messages": cast(list, self.client._prepare_messages(self.messages)),
             "temperature": self.client.temperature,
             "stream_options": {"include_usage": True},
         }

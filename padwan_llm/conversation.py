@@ -17,8 +17,8 @@ __all__ = (
 class Message(TypedDict):
     """A single message in a conversation.
 
-    User messages may carry a list of multimodal content parts (text + images);
-    system and assistant messages always use a plain string.
+    User messages may carry a list of multimodal content parts (text, images,
+    audio); system and assistant messages always use a plain string.
     """
 
     role: Literal["system", "user", "assistant"]
