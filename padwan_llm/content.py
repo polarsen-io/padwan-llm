@@ -110,7 +110,7 @@ def text_file_part(path: str | Path, *, encoding: str = "utf-8") -> ContentTextP
 def content_parts(*items: str | Path | ContentPart) -> list[ContentPart]:
     """Build content parts with type inference.
 
-    Plain strings become text parts — never treated as paths, so message text
+    Plain strings become text parts (never treated as paths), so message text
     that mentions a filename is safe. ``Path`` items are read from disk: an
     image MIME type (by extension) yields an image part, a wav/mp3 audio MIME
     type an audio part, anything else is inlined as a labelled text file part.

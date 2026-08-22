@@ -12,8 +12,8 @@ def supports_audio(model: str | None) -> bool:
 
     Dispatches to the provider's curated ``supports_audio`` (same routing order
     as ``LLMClient``). Unknown (e.g. local) models default to ``True`` so the
-    caller attempts the request rather than blocking — the provider surfaces a
-    clear error if it really cannot hear audio.
+    caller attempts the request rather than blocking (the provider surfaces a
+    clear error if it really cannot hear audio).
     """
     if not model:
         return False

@@ -19,7 +19,7 @@ parts = content_parts(
 )
 ```
 
-Strings are always text — never treated as paths — so message text that mentions a filename is safe; wrap files in `Path` to have them read. Files are classified by extension: an image MIME type yields an image part, a wav/mp3 audio MIME type an audio part (other audio formats raise `ValueError`), anything else is inlined as text.
+Strings are always text (never treated as paths), so message text that mentions a filename is safe; wrap files in `Path` to have them read. Files are classified by extension: an image MIME type yields an image part, a wav/mp3 audio MIME type an audio part (other audio formats raise `ValueError`), anything else is inlined as text.
 
 The explicit builders remain for full control:
 
@@ -97,6 +97,6 @@ supports_audio("grok-4")  # False - no Grok chat model takes audio
 
 ## Limitations
 
-- Audio parts carry wav or mp3 only — the formats every audio-capable provider accepts — and no video parts, image generation, or audio generation.
+- Audio parts carry wav or mp3 only (the formats every audio-capable provider accepts); no video parts, image generation, or audio generation.
 - Content parts are for user messages; assistant messages stay text-only.
 - The Anthropic client passes message content through unconverted, so image and audio parts are not usable with Claude models yet (and the Messages API takes no audio anyway).
