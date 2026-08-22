@@ -19,6 +19,11 @@ def _body(**overrides) -> MessagesBody:
     return body
 
 
+def _to_openai(body: MessagesBody, *, model: str | None = None) -> dict[str, Any]:
+    """messages_to_openai untyped, for assertion access to NotRequired keys."""
+    return cast("dict[str, Any]", messages_to_openai(body, model=model))
+
+
 @pytest.mark.parametrize(
     "model, expected_key",
     [
@@ -27,13 +32,13 @@ def _body(**overrides) -> MessagesBody:
     ],
 )
 def test_max_tokens_key_per_backend(model, expected_key):
-    request = messages_to_openai(_body(), model=model)
+    request = _to_openai(_body(), model=model)
     assert request["model"] == model
     assert request[expected_key] == 1024
 
 
 def test_model_kept_when_not_overridden():
-    request = messages_to_openai(_body())
+    request = _to_openai(_body())
     assert request["model"] == "claude-sonnet-5"
 
 
@@ -56,13 +61,13 @@ def test_model_kept_when_not_overridden():
     ],
 )
 def test_system_flattened_to_system_message(system, expected):
-    request = messages_to_openai(_body(system=system), model="glm-4.6")
+    request = _to_openai(_body(system=system), model="glm-4.6")
     assert request["messages"][0] == {"role": "system", "content": expected}
     assert request["messages"][1] == {"role": "user", "content": "hello"}
 
 
 def test_empty_system_omitted():
-    request = messages_to_openai(_body(system=""), model="glm-4.6")
+    request = _to_openai(_body(system=""), model="glm-4.6")
     assert request["messages"] == [{"role": "user", "content": "hello"}]
 
 
@@ -123,7 +128,7 @@ def test_empty_system_omitted():
     ],
 )
 def test_user_content_blocks(blocks, expected):
-    request = messages_to_openai(
+    request = _to_openai(
         _body(messages=[{"role": "user", "content": blocks}]), model="glm-4.6"
     )
     assert request["messages"] == expected
@@ -146,7 +151,7 @@ def test_user_content_blocks(blocks, expected):
 )
 def test_tool_result_becomes_tool_message(content, expected_text):
     block = {"type": "tool_result", "tool_use_id": "toolu_1", "content": content}
-    request = messages_to_openai(
+    request = _to_openai(
         _body(messages=[{"role": "user", "content": [block]}]), model="glm-4.6"
     )
     assert request["messages"] == [
@@ -173,7 +178,7 @@ def test_tool_result_image_forwarded_as_user_message():
         },
         {"type": "text", "text": "what do you see?"},
     ]
-    request = messages_to_openai(
+    request = _to_openai(
         _body(messages=[{"role": "user", "content": blocks}]), model="glm-4.6"
     )
     tool_msg, user_msg = request["messages"]
@@ -215,7 +220,7 @@ def test_assistant_blocks_with_tool_use_and_thinking():
             ],
         },
     ]
-    request = messages_to_openai(_body(messages=messages), model="glm-4.6")
+    request = _to_openai(_body(messages=messages), model="glm-4.6")
     assistant = request["messages"][1]
     assert assistant["content"] == "Checking."
     (tool_call,) = assistant["tool_calls"]
@@ -235,7 +240,7 @@ def test_tools_converted_and_server_tools_skipped():
         },
         {"name": "web_search", "type": "web_search_20250305"},
     ]
-    request = messages_to_openai(_body(tools=tools), model="glm-4.6")
+    request = _to_openai(_body(tools=tools), model="glm-4.6")
     assert request["tools"] == [
         {
             "type": "function",
@@ -250,7 +255,7 @@ def test_tools_converted_and_server_tools_skipped():
 
 def test_all_server_tools_omits_tools_and_tool_choice():
     tools = [{"name": "web_search", "type": "web_search_20250305"}]
-    request = messages_to_openai(
+    request = _to_openai(
         _body(tools=tools, tool_choice={"type": "auto"}), model="glm-4.6"
     )
     assert "tools" not in request
@@ -278,14 +283,14 @@ WEATHER_TOOL = {
     ],
 )
 def test_tool_choice_mapping(tool_choice, expected):
-    request = messages_to_openai(
+    request = _to_openai(
         _body(tools=[WEATHER_TOOL], tool_choice=tool_choice), model="glm-4.6"
     )
     assert request["tool_choice"] == expected
 
 
 def test_disable_parallel_tool_use():
-    request = messages_to_openai(
+    request = _to_openai(
         _body(
             tools=[WEATHER_TOOL],
             tool_choice={"type": "auto", "disable_parallel_tool_use": True},
@@ -296,7 +301,7 @@ def test_disable_parallel_tool_use():
 
 
 def test_sampling_params_and_dropped_fields():
-    request = messages_to_openai(
+    request = _to_openai(
         _body(
             temperature=0.5,
             top_p=0.9,

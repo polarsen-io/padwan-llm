@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING, Any, cast
+
 import pytest
 
 from padwan_llm.anthropic.events import (
@@ -6,6 +8,9 @@ from padwan_llm.anthropic.events import (
     stream_to_anthropic,
 )
 from padwan_llm.errors import LLMError, QuotaExceededError, TooManyRequestsError
+
+if TYPE_CHECKING:
+    from padwan_llm.openai.types import CreateChatCompletionResponse
 
 USAGE = {
     "prompt_tokens": 100,
@@ -52,12 +57,18 @@ async def _collect(chunks, model="claude-sonnet-5"):
     return [event async for event in stream_to_anthropic(_stream(chunks), model=model)]
 
 
+def _to_anthropic(data: dict, *, model: str | None = None) -> dict[str, Any]:
+    """response_to_anthropic untyped, for assertion access to NotRequired keys."""
+    typed = cast("CreateChatCompletionResponse", data)
+    return cast("dict[str, Any]", response_to_anthropic(typed, model=model))
+
+
 # response_to_anthropic
 
 
 def test_text_response():
     data = _completion({"role": "assistant", "content": "Hello!"})
-    resp = response_to_anthropic(data, model="claude-sonnet-5")
+    resp = _to_anthropic(data, model="claude-sonnet-5")
     assert resp["content"] == [{"type": "text", "text": "Hello!"}]
     assert resp["stop_reason"] == "end_turn"
     assert resp["role"] == "assistant"
@@ -71,7 +82,7 @@ def test_text_response():
 
 def test_model_defaults_to_backend():
     data = _completion({"role": "assistant", "content": "Hello!"})
-    assert response_to_anthropic(data)["model"] == "glm-4.6"
+    assert _to_anthropic(data)["model"] == "glm-4.6"
 
 
 @pytest.mark.parametrize(
@@ -95,7 +106,7 @@ def test_tool_call_response(arguments, expected_input):
             }
         ],
     }
-    resp = response_to_anthropic(_completion(message, finish_reason="tool_calls"))
+    resp = _to_anthropic(_completion(message, finish_reason="tool_calls"))
     assert resp["content"] == [
         {
             "type": "tool_use",
@@ -113,7 +124,7 @@ def test_reasoning_becomes_thinking_block():
         "content": "Answer.",
         "reasoning_content": "step by step",
     }
-    resp = response_to_anthropic(_completion(message))
+    resp = _to_anthropic(_completion(message))
     assert resp["content"] == [
         {"type": "thinking", "thinking": "step by step"},
         {"type": "text", "text": "Answer."},
@@ -132,7 +143,7 @@ def test_reasoning_becomes_thinking_block():
 )
 def test_stop_reason_mapping(finish_reason, expected):
     data = _completion({"role": "assistant", "content": "x"}, finish_reason)
-    assert response_to_anthropic(data)["stop_reason"] == expected
+    assert _to_anthropic(data)["stop_reason"] == expected
 
 
 # stream_to_anthropic
