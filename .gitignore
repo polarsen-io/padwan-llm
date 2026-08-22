@@ -169,6 +169,9 @@ CLAUDE.md
 .codex
 .scratch/
 AGENTS.md
+.plan-trame.json
+.playwright-mcp/
+
 
 
 # Test fixtures (binary audio files)

@@ -91,6 +91,11 @@ fix:
 [group('dev')]
 ci: lint check test
 
+# Benchmark import times (add --profile for a per-module breakdown)
+[group('dev')]
+bench-imports *args:
+    ./bin/bench-imports.sh {{ args }}
+
 # Serve docs locally with hot reload
 [group('docs')]
 docs:
