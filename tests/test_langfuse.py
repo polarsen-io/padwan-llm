@@ -14,7 +14,7 @@ from opentelemetry.util.types import AttributeValue
 
 import padwan_llm.langfuse as langfuse_integration
 from padwan_llm import otel
-from padwan_llm._json import dumps as _json_dumps, loads as _json_loads
+from padwan_llm._json import dumps as _json_dumps
 
 
 def _span_params(
@@ -55,57 +55,64 @@ def test_span_adapter_maps_observation_type(operation: str, expected: str):
     assert patch.set_attributes["langfuse.observation.type"] == expected
 
 
-def test_span_adapter_maps_content_and_session():
-    messages = [{"role": "user", "parts": [{"type": "text", "content": "hi"}]}]
-    system = [{"type": "text", "content": "be brief"}]
-    tools = [{"type": "function", "name": "search"}]
-    identifier, params = _span_params(
-        {
-            "gen_ai.operation.name": "chat",
-            "gen_ai.input.messages": _json_dumps(messages),
-            "gen_ai.system_instructions": _json_dumps(system),
-            "gen_ai.tool.definitions": _json_dumps(tools),
-            "gen_ai.output.messages": _json_dumps([{"role": "assistant"}]),
-            "gen_ai.request.model": "gpt-test",
-            "gen_ai.conversation.id": "session-1",
-        }
-    )
+_MESSAGES = [{"role": "user", "parts": [{"type": "text", "content": "hi"}]}]
+_SYSTEM = [{"type": "text", "content": "be brief"}]
+_TOOLS = [{"type": "function", "name": "search"}]
+
+
+@pytest.mark.parametrize(
+    ("attributes", "expected"),
+    [
+        pytest.param(
+            {
+                "gen_ai.operation.name": "chat",
+                "gen_ai.input.messages": _json_dumps(_MESSAGES),
+                "gen_ai.system_instructions": _json_dumps(_SYSTEM),
+                "gen_ai.tool.definitions": _json_dumps(_TOOLS),
+                "gen_ai.output.messages": _json_dumps([{"role": "assistant"}]),
+                "gen_ai.request.model": "gpt-test",
+                "gen_ai.conversation.id": "session-1",
+            },
+            {
+                "langfuse.observation.type": "generation",
+                "langfuse.observation.input": _json_dumps(
+                    {
+                        "messages": _MESSAGES,
+                        "system_instructions": _SYSTEM,
+                        "tools": _TOOLS,
+                    }
+                ),
+                "langfuse.observation.output": _json_dumps([{"role": "assistant"}]),
+                "langfuse.session.id": "session-1",
+            },
+            id="chat_sections_and_session",
+        ),
+        pytest.param(
+            {
+                "gen_ai.operation.name": "execute_tool",
+                "gen_ai.tool.call.arguments": '{"query":"test"}',
+                "gen_ai.tool.call.result": '{"result":"ok"}',
+            },
+            {
+                "langfuse.observation.type": "tool",
+                "langfuse.observation.input": '{"query":"test"}',
+                "langfuse.observation.output": '{"result":"ok"}',
+            },
+            id="tool_call",
+        ),
+    ],
+)
+def test_span_adapter_maps_content(
+    attributes: dict[str, AttributeValue], expected: dict[str, AttributeValue]
+):
+    identifier, params = _span_params(attributes)
 
     result = langfuse_integration._SpanAdapter()(params=params)
 
     assert result is not None
     patch = result.span_patches[identifier]
     assert patch is not None
-    input_value = patch.set_attributes["langfuse.observation.input"]
-    assert isinstance(input_value, str)
-    assert _json_loads(input_value) == {
-        "messages": messages,
-        "system_instructions": system,
-        "tools": tools,
-    }
-    assert patch.set_attributes["langfuse.observation.output"] == _json_dumps(
-        [{"role": "assistant"}]
-    )
-    assert "langfuse.observation.model.name" not in patch.set_attributes
-    assert patch.set_attributes["langfuse.session.id"] == "session-1"
-
-
-def test_span_adapter_maps_tool_content():
-    identifier, params = _span_params(
-        {
-            "gen_ai.operation.name": "execute_tool",
-            "gen_ai.tool.call.arguments": '{"query":"test"}',
-            "gen_ai.tool.call.result": '{"result":"ok"}',
-        }
-    )
-
-    result = langfuse_integration._SpanAdapter()(params=params)
-
-    assert result is not None
-    patch = result.span_patches[identifier]
-    assert patch is not None
-    assert patch.set_attributes["langfuse.observation.input"] == '{"query":"test"}'
-    assert patch.set_attributes["langfuse.observation.output"] == '{"result":"ok"}'
+    assert patch.set_attributes == expected
 
 
 def test_span_adapter_applies_mask_before_mapping():
@@ -142,23 +149,19 @@ def test_span_adapter_ignores_other_instrumentation_scopes():
     assert langfuse_integration._SpanAdapter()(params=params) is None
 
 
-def test_span_filter_includes_padwan_mcp_spans():
+@pytest.mark.parametrize(
+    ("user_filter", "expected"),
+    [
+        pytest.param(None, True, id="padwan_mcp_span_included"),
+        pytest.param(lambda _span: False, False, id="user_filter_denies"),
+    ],
+)
+def test_span_filter(user_filter, expected: bool):
     span = MagicMock(spec=ReadableSpan)
     span.instrumentation_scope = InstrumentationScope("padwan_llm")
     span.attributes = {"mcp.method.name": "initialize"}
 
-    assert langfuse_integration._SpanFilter()(span)
-
-
-def test_span_filter_applies_user_filter():
-    span = MagicMock(spec=ReadableSpan)
-    span.instrumentation_scope = InstrumentationScope("padwan_llm")
-    span.attributes = {"gen_ai.operation.name": "chat"}
-
-    def deny(_span: ReadableSpan) -> bool:
-        return False
-
-    assert not langfuse_integration._SpanFilter(deny)(span)
+    assert langfuse_integration._SpanFilter(user_filter)(span) is expected
 
 
 def test_instrument_owns_lifecycle(monkeypatch):
