@@ -38,11 +38,13 @@ _OBSERVATION_TYPES = {
 def _string_attribute(
     attributes: Mapping[str, AttributeValue], name: str
 ) -> str | None:
+    """Return the attribute value only when it is a string."""
     value = attributes.get(name)
     return value if isinstance(value, str) else None
 
 
 def _decode_json(value: str) -> object:
+    """Parse a JSON attribute, falling back to the raw string."""
     try:
         return _json_loads(value)
     except ValueError:
@@ -50,6 +52,8 @@ def _decode_json(value: str) -> object:
 
 
 def _input_attribute(attributes: Mapping[str, AttributeValue]) -> str | None:
+    """Build the observation input from GenAI messages, system instructions,
+    and tool definitions, or fall back to tool-call arguments."""
     messages = _string_attribute(attributes, "gen_ai.input.messages")
     system = _string_attribute(attributes, "gen_ai.system_instructions")
     tools = _string_attribute(attributes, "gen_ai.tool.definitions")
@@ -68,6 +72,7 @@ def _input_attribute(attributes: Mapping[str, AttributeValue]) -> str | None:
 
 
 def _output_attribute(attributes: Mapping[str, AttributeValue]) -> str | None:
+    """Pick the observation output from GenAI messages or a tool-call result."""
     return _string_attribute(attributes, "gen_ai.output.messages") or _string_attribute(
         attributes, "gen_ai.tool.call.result"
     )
@@ -77,6 +82,7 @@ def _output_attribute(attributes: Mapping[str, AttributeValue]) -> str | None:
 def _mapped_attributes(
     span: OtelSpanData, attributes: Mapping[str, AttributeValue]
 ) -> dict[str, AttributeValue]:
+    """Derive `langfuse.*` attributes missing from a Padwan span."""
     if span.instrumentation_scope_name != _PADWAN_SCOPE:
         return {}
     mapped: dict[str, AttributeValue] = {}
@@ -102,6 +108,7 @@ def _mapped_attributes(
 def _apply_patch(
     attributes: Mapping[str, AttributeValue], patch: OtelSpanPatch | None
 ) -> dict[str, AttributeValue]:
+    """Return the attributes with a user span patch applied."""
     patched = dict(attributes)
     if patch is None:
         return patched
@@ -113,6 +120,8 @@ def _apply_patch(
 
 @dataclass(frozen=True)
 class _SpanAdapter:
+    """Langfuse `mask_otel_spans` hook enriching Padwan spans after the user mask."""
+
     user_mask: MaskOtelSpansFunction | None = None
 
     def __call__(self, *, params: MaskOtelSpansParams) -> MaskOtelSpansResult | None:
@@ -145,6 +154,8 @@ class _SpanAdapter:
 
 @dataclass(frozen=True)
 class _SpanFilter:
+    """Langfuse `should_export_span` hook also accepting Padwan spans."""
+
     user_filter: Callable[[ReadableSpan], bool] | None = None
 
     def __call__(self, span: ReadableSpan) -> bool:
