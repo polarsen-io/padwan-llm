@@ -655,6 +655,51 @@ async def test_capture_content_on_complete(otel_logging, client, make_resp):
     assert detail_attrs["gen_ai.tool.definitions"][0]["name"] == "get_weather"
 
 
+async def test_capture_content_strips_binary_parts(otel_capture, client, make_resp):
+    payload = {
+        "choices": [{"message": {"content": "a duck"}, "finish_reason": "stop"}],
+        "usage": USAGE,
+    }
+    client._session.post.return_value = make_resp(200, payload)
+
+    await client.complete_chat(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "what is this?"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,UElORw=="},
+                    },
+                    {
+                        "type": "input_audio",
+                        "input_audio": {"data": "UklGRg==", "format": "wav"},
+                    },
+                ],
+            }
+        ]
+    )
+
+    span_exporter, _ = otel_capture
+    (span,) = span_exporter.get_finished_spans()
+    attrs = dict(span.attributes or {})
+    assert _json_loads(attrs["gen_ai.input.messages"]) == [
+        {
+            "role": "user",
+            "parts": [
+                {"type": "text", "content": "what is this?"},
+                {"type": "image_url"},
+                {"type": "input_audio"},
+            ],
+        }
+    ]
+    for value in attrs.values():
+        if isinstance(value, str):
+            assert "UklGRg==" not in value
+            assert "UElORw==" not in value
+
+
 async def test_capture_content_on_stream(
     otel_logging, client, make_sse_event, make_sse_resp
 ):
