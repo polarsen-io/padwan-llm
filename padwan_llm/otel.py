@@ -24,6 +24,7 @@ from .anthropic import AnthropicClient
 from .errors import Provider
 from .gemini import GeminiClient
 from .grok import GrokClient
+from .logs import log
 from .mcp import _PROTOCOL_VERSION, McpStdio, McpStreamable
 from .mistral import MistralClient
 from .models import ToolCall, ToolDefinition, UsageToken
@@ -123,7 +124,52 @@ _BATCH_METHODS: dict[type[LLMClientBase], tuple[str, ...]] = {
     ),
 }
 
-_originals: dict[type, dict[str, Any]] = {}
+
+@dataclass(frozen=True)
+class _Patch:
+    """One installed method wrapper, with what is needed to restore it."""
+
+    owner: type
+    name: str
+    original: Any
+    installed: Any
+    was_local: bool
+
+
+# Patches installed by instrument(); non-empty means instrumentation is active
+_patches: list[_Patch] = []
+
+
+def _install(plan: Sequence[tuple[type, str, Callable[[Any], Any]]]) -> None:
+    """Wrap and install every planned method, rolling back on failure."""
+    installed: list[_Patch] = []
+    try:
+        for owner, name, wrap in plan:
+            original = getattr(owner, name)
+            patch = _Patch(owner, name, original, wrap(original), name in vars(owner))
+            setattr(owner, name, patch.installed)
+            installed.append(patch)
+    except BaseException:
+        _restore(installed)
+        raise
+    _patches.extend(installed)
+
+
+def _restore(patches: Sequence[_Patch]) -> None:
+    """Undo patches in reverse order, leaving foreign wrappers untouched."""
+    for patch in reversed(patches):
+        if getattr(patch.owner, patch.name, None) is not patch.installed:
+            log.warning(
+                "not restoring %s.%s: patched by someone else after instrument()",
+                patch.owner.__name__,
+                patch.name,
+            )
+            continue
+        if patch.was_local:
+            setattr(patch.owner, patch.name, patch.original)
+        else:
+            delattr(patch.owner, patch.name)
+
 
 # chat span of the in-flight complete_chat, for provider-specific enrichment
 _active_chat_span: ContextVar[trace.Span | None] = ContextVar(
@@ -178,8 +224,11 @@ def instrument(
     capture_content: bool = False,
 ) -> None:
     """Emit opt-in OTel GenAI telemetry for all provider clients."""
-    if _originals:
-        return
+    if _patches:
+        raise RuntimeError(
+            "padwan_llm OpenTelemetry instrumentation is already active; "
+            "call uninstrument() first"
+        )
     tracer = trace.get_tracer("padwan_llm", __version__, tracer_provider)
     meter = metrics.get_meter("padwan_llm", __version__, meter_provider)
     inst = _Instruments(
@@ -247,99 +296,68 @@ def instrument(
         ),
         capture_content=capture_content,
     )
+    plan: list[tuple[type, str, Callable[[Any], Any]]] = []
     for cls in _CLIENT_CLASSES:
-        methods: dict[str, Any] = {
-            "complete_chat": cls.complete_chat,
-            "stream_chat": cls.stream_chat,
-        }
-        setattr(cls, "complete_chat", _wrap_complete_chat(cls.complete_chat, inst))
-        setattr(cls, "stream_chat", _wrap_stream_chat(cls.stream_chat, inst))
+        plan.append((cls, "complete_chat", lambda fn: _wrap_complete_chat(fn, inst)))
+        plan.append((cls, "stream_chat", lambda fn: _wrap_stream_chat(fn, inst)))
         for name in _BATCH_METHODS.get(cls, ()):
-            methods[name] = getattr(cls, name)
-            setattr(cls, name, _wrap_operation(methods[name], inst, name))
-        _originals[cls] = methods
+            plan.append(
+                (cls, name, lambda fn, name=name: _wrap_operation(fn, inst, name))
+            )
 
-    _originals[MistralClient]["fetch_embeddings"] = MistralClient.fetch_embeddings
-    setattr(
-        MistralClient,
-        "fetch_embeddings",
-        _wrap_operation(
-            MistralClient.fetch_embeddings, inst, "embeddings", model_param="model"
-        ),
+    plan.append(
+        (
+            MistralClient,
+            "fetch_embeddings",
+            lambda fn: _wrap_operation(fn, inst, "embeddings", model_param="model"),
+        )
     )
 
     # OpenAI vendor extras live only on raw request and response payloads.
-    _originals[OpenAIClient]["complete"] = OpenAIClient.complete
-    _originals[OpenAIClient]["stream"] = OpenAIClient.stream
-    setattr(OpenAIClient, "complete", _wrap_openai_complete(OpenAIClient.complete))
-    setattr(OpenAIClient, "stream", _wrap_openai_stream(OpenAIClient.stream))
+    plan.append((OpenAIClient, "complete", _wrap_openai_complete))
+    plan.append((OpenAIClient, "stream", _wrap_openai_stream))
 
-    _originals[AgentSession] = {
-        "_dispatch_one": AgentSession._dispatch_one,
-        "stream": AgentSession.stream,
-    }
-    setattr(
-        AgentSession,
-        "_dispatch_one",
-        _wrap_execute_tool(AgentSession._dispatch_one, inst),
+    plan.append(
+        (AgentSession, "_dispatch_one", lambda fn: _wrap_execute_tool(fn, inst))
     )
-    setattr(AgentSession, "stream", _wrap_invoke_agent(AgentSession.stream, inst))
+    plan.append((AgentSession, "stream", lambda fn: _wrap_invoke_agent(fn, inst)))
 
     for mcp_cls in (McpStreamable, McpStdio):
-        methods = {
-            "__aenter__": mcp_cls.__aenter__,
-            "__aexit__": mcp_cls.__aexit__,
-            "_initialize": mcp_cls._initialize,
-            "_refresh_tools": mcp_cls._refresh_tools,
-            "_call": mcp_cls._call,
-            "ping": mcp_cls.ping,
-        }
-        _originals[mcp_cls] = methods
-        setattr(mcp_cls, "__aenter__", _wrap_mcp_enter(methods["__aenter__"], inst))
-        setattr(mcp_cls, "__aexit__", _wrap_mcp_exit(methods["__aexit__"], inst))
+        plan.append((mcp_cls, "__aenter__", lambda fn: _wrap_mcp_enter(fn, inst)))
+        plan.append((mcp_cls, "__aexit__", lambda fn: _wrap_mcp_exit(fn, inst)))
         for name, method in (
             ("_initialize", "initialize"),
             ("_refresh_tools", "tools/list"),
             ("ping", "ping"),
+            ("_call", "tools/call"),
         ):
-            setattr(
-                mcp_cls,
-                name,
-                _wrap_mcp_operation(methods[name], inst, method),
+            plan.append(
+                (
+                    mcp_cls,
+                    name,
+                    lambda fn, method=method: _wrap_mcp_operation(fn, inst, method),
+                )
             )
-        setattr(
-            mcp_cls,
-            "_call",
-            _wrap_mcp_operation(methods["_call"], inst, "tools/call"),
-        )
 
-    _originals[RealtimeClientBase] = {
-        "__aenter__": RealtimeClientBase.__aenter__,
-        "__aexit__": RealtimeClientBase.__aexit__,
-    }
-    setattr(
-        RealtimeClientBase,
-        "__aenter__",
-        _wrap_realtime_enter(RealtimeClientBase.__aenter__, inst),
+    plan.append(
+        (RealtimeClientBase, "__aenter__", lambda fn: _wrap_realtime_enter(fn, inst))
     )
-    setattr(
-        RealtimeClientBase,
-        "__aexit__",
-        _wrap_realtime_exit(RealtimeClientBase.__aexit__, inst),
+    plan.append(
+        (RealtimeClientBase, "__aexit__", lambda fn: _wrap_realtime_exit(fn, inst))
     )
+
+    _install(plan)
 
 
 def is_instrumented() -> bool:
     """Return whether Padwan OpenTelemetry instrumentation is active."""
-    return bool(_originals)
+    return bool(_patches)
 
 
 def uninstrument() -> None:
     """Restore the original client methods."""
-    for cls, methods in _originals.items():
-        for name, fn in methods.items():
-            setattr(cls, name, fn)
-    _originals.clear()
+    _restore(_patches)
+    _patches.clear()
 
 
 def _request_attrs(
