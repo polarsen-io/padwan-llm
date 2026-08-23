@@ -2,10 +2,11 @@ import json
 
 import pytest
 
-from padwan_llm import LLMClient
-from padwan_llm.conversation import AssistantToolMessage, ToolResultMessage
+from padwan_llm import LLMClient, content_parts
+from padwan_llm.conversation import AssistantToolMessage, Message, ToolResultMessage
 
 from .conftest import (
+    AUDIO_FIXTURE,
     PROMPT,
     TOOL_PROMPT,
     WEATHER_TOOL,
@@ -61,6 +62,31 @@ async def test_stream_chat(model: str) -> None:
     assert len(chunks) >= 1
     assert stream.usage is not None
     assert stream.usage["total"] > 0
+
+
+@pytest.mark.skipif(not AUDIO_FIXTURE.exists(), reason="audio fixture not found")
+@pytest.mark.parametrize(
+    "model",
+    [
+        pytest.param("gemini-2.5-flash", id="gemini", marks=skip_no_gemini),
+        pytest.param("gpt-audio", id="openai", marks=skip_no_openai),
+        pytest.param("voxtral-small-latest", id="mistral", marks=skip_no_mistral),
+    ],
+)
+async def test_complete_chat_audio(model: str) -> None:
+    messages = [
+        Message(
+            role="user",
+            content=content_parts(
+                "Describe what you hear in one short sentence.", AUDIO_FIXTURE
+            ),
+        )
+    ]
+    async with LLMClient(model=model) as client:
+        response, usage = await client.complete_chat(messages)
+
+    assert response["content"]
+    assert usage["total"] > 0
 
 
 @pytest.mark.parametrize(

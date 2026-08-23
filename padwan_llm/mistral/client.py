@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import dataclasses
 import mimetypes
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, get_args
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, get_args
 
 from .._base import Provider, env_api_key
 from ..errors import LLMError
@@ -12,6 +12,7 @@ from ..openai.client import _check_resp, _OpenAIBase
 from ._deprecations import DEPRECATED
 
 if TYPE_CHECKING:
+    from ..conversation import ChatMessage
     from .types import EmbeddingRequest, EmbeddingResponse, TranscriptionResponse
 
 MistralModel = Literal[
@@ -106,6 +107,25 @@ class MistralClient(_OpenAIBase):
     _deprecations: ClassVar[Mapping[str, str]] = DEPRECATED
     model: str | None = "mistral-large-latest"
     base_url: str = MISTRAL_ENDPOINT
+
+    def _prepare_messages(
+        self, messages: Sequence[ChatMessage]
+    ) -> Sequence[ChatMessage]:
+        """Rewrite audio parts to Mistral's `input_audio` chunk (plain base64 string)."""
+        prepared: list[ChatMessage] = []
+        for msg in messages:
+            content = msg.get("content")
+            if not isinstance(content, list):
+                prepared.append(msg)
+                continue
+            converted: list[Any] = [
+                {"type": "input_audio", "input_audio": part["input_audio"]["data"]}
+                if part["type"] == "input_audio"
+                else part
+                for part in content
+            ]
+            prepared.append(cast("ChatMessage", {**msg, "content": converted}))
+        return prepared
 
     async def fetch_embeddings(
         self,

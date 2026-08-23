@@ -1,6 +1,7 @@
 # Python 3.15 defers provider components until first use.
 __lazy_modules__ = frozenset(
     {
+        "padwan_llm.gemini.audio",
         "padwan_llm.gemini.batch",
         "padwan_llm.gemini.client",
         "padwan_llm.gemini.realtime",
@@ -8,6 +9,7 @@ __lazy_modules__ = frozenset(
     }
 )
 
+from .audio import AUDIO_FORMATS, supports_audio
 from .batch import BatchJob, BatchRequest, BatchResult
 from .client import (
     GEMINI_ENDPOINT,
@@ -28,6 +30,7 @@ from .realtime import (
 from .vision import supports_vision
 
 __all__ = (
+    "AUDIO_FORMATS",
     "GeminiClient",
     "GeminiModel",
     "GEMINI_MODELS",
@@ -44,5 +47,6 @@ __all__ = (
     "BatchJob",
     "BatchRequest",
     "BatchResult",
+    "supports_audio",
     "supports_vision",
 )

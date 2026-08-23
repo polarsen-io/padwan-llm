@@ -1,6 +1,7 @@
 # Python 3.15 defers provider components until first use.
 __lazy_modules__ = frozenset(
     {
+        "padwan_llm.openai.audio",
         "padwan_llm.openai.batch",
         "padwan_llm.openai.client",
         "padwan_llm.openai.realtime",
@@ -8,6 +9,7 @@ __lazy_modules__ = frozenset(
     }
 )
 
+from .audio import AUDIO_FORMATS, supports_audio
 from .batch import BatchJob, BatchRequest, BatchResult
 from .client import (
     OPENAI_CHAT_MODELS,
@@ -30,6 +32,7 @@ from .realtime import (
 from .vision import supports_vision
 
 __all__ = (
+    "AUDIO_FORMATS",
     "DEFAULT_REALTIME_MODEL",
     "NO_TURN_DETECTION",
     "OPENAI_CHAT_MODELS",
@@ -47,5 +50,6 @@ __all__ = (
     "RealtimeServerEvent",
     "RealtimeVoice",
     "is_openai_model",
+    "supports_audio",
     "supports_vision",
 )

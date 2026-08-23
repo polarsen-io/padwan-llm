@@ -1,6 +1,7 @@
 # Python 3.15 defers provider components until first use.
 __lazy_modules__ = frozenset(
     {
+        "padwan_llm.grok.audio",
         "padwan_llm.grok.batch",
         "padwan_llm.grok.client",
         "padwan_llm.grok.realtime",
@@ -8,6 +9,7 @@ __lazy_modules__ = frozenset(
     }
 )
 
+from .audio import supports_audio
 from .batch import GrokBatchJob, GrokBatchRequest, GrokBatchResult
 from .client import GROK_ENDPOINT, GROK_MODELS, GrokClient, GrokModel, is_grok_model
 from .realtime import (
@@ -31,5 +33,6 @@ __all__ = (
     "GrokRealtimeClient",
     "GrokVoice",
     "is_grok_model",
+    "supports_audio",
     "supports_vision",
 )
