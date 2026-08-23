@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787466097530,
+  "lastUpdate": 1787491847464,
   "repoUrl": "https://github.com/polarsen-io/padwan-llm",
   "entries": {
     "Import Performance": [
@@ -84,6 +84,48 @@ window.BENCHMARK_DATA = {
             "value": 232.3,
             "unit": "ms",
             "range": 4.86
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "julien.brayere@obitrain.com",
+            "name": "Julien Brayere",
+            "username": "Andarius"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cbeec528ea996530aca98fdcda6ee1943cc3d81a",
+          "message": "fix: close half-read SSE streams before returning connections to the pool (#46)\n\n* fix: close half-read SSE streams before returning connections to the pool\n\nA stream that breaks on [DONE] (or is abandoned by its consumer) left the\nSSE response half-read; the pooled connection could then hang the next\nstream request. Abort the extension in a finally across all providers.\n\n* refactor: dedupe the SSE stream loop into LLMClientBase._iter_sse\n\next.close() alone releases the pooled connection (verified against a live\nSSE backend on HTTP/1.1 and HTTP/2), so drop the raw-response teardown and\nthe mock-only regression test. Providers wrap the shared iterator in\naclosing so an abandoned stream closes deterministically.",
+          "timestamp": "2026-08-23T15:30:06+02:00",
+          "tree_id": "0433f9b8ccda881b64b9afdfce3de0d876aa4458",
+          "url": "https://github.com/polarsen-io/padwan-llm/commit/cbeec528ea996530aca98fdcda6ee1943cc3d81a"
+        },
+        "date": 1787491846516,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "padwan_llm (facade)",
+            "value": 228.07,
+            "unit": "ms",
+            "range": 1.62
+          },
+          {
+            "name": "padwan_llm.openai",
+            "value": 229.37,
+            "unit": "ms",
+            "range": 2.23
+          },
+          {
+            "name": "padwan_llm.otel",
+            "value": 242.42,
+            "unit": "ms",
+            "range": 2.51
           }
         ]
       }
