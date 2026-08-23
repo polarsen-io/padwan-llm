@@ -142,6 +142,45 @@ for manual push-to-talk. See the realtime sections of
 [docs/clients/gemini.md](docs/clients/gemini.md), and
 [docs/clients/grok.md](docs/clients/grok.md).
 
+### OpenTelemetry instrumentation
+
+Opt-in GenAI spans and metrics for every provider client, following the OTel
+GenAI semantic conventions. Requires the `otel` extra
+(`pip install "padwan-llm[otel]"`):
+
+```python
+from padwan_llm import otel
+
+otel.instrument()  # uses the global tracer/meter providers
+```
+
+For a managed trace backend, the Langfuse adapter configures both sides and maps
+Padwan chat, agent, tool, embedding, and MCP spans to Langfuse observations:
+
+```bash
+pip install "padwan-llm[langfuse]"
+```
+
+```python
+from padwan_llm.langfuse import instrument
+
+telemetry = instrument()  # uses the standard LANGFUSE_* environment variables
+```
+
+Chat calls emit a `chat <model>` client span (provider, model, server address,
+token usage including reasoning tokens, thinking duration, finish reasons,
+requested tool names) plus the `gen_ai.client.operation.duration` and
+`gen_ai.client.token.usage` histograms. Agent tool execution emits
+`execute_tool` spans; embeddings, batch operations, and realtime sessions get
+their own spans. See [docs/observability.md](docs/observability.md) for the
+full attribute list.
+
+`just e2e-otel` runs the e2e suite against a local Grafana stack with a
+ready-made GenAI dashboard
+([bin/observability/dashboards](bin/observability/dashboards)):
+
+<img alt="Grafana GenAI dashboard" src="docs/static/grafana-dashboard.png" width="800"/>
+
 ## One-Shot Command
 
 ```bash

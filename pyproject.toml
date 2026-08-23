@@ -7,12 +7,13 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "niquests>=3.21.0",
-    "typing_extensions>=4.10; python_version < '3.14'",
     "qh3>=1.7.1",
     "urllib3-future>=2.19.908",
 ]
 
 [project.optional-dependencies]
+langfuse = ["langfuse>=4.9", "opentelemetry-api>=1.44"]
+otel = ["opentelemetry-api>=1.44"]
 realtime = ["niquests[ws]>=3.21.0"]
 
 [project.scripts]
@@ -29,6 +30,8 @@ module-name = "padwan_llm"
 
 [dependency-groups]
 dev = [
+    "opentelemetry-exporter-otlp-proto-http>=1.44",
+    "opentelemetry-sdk>=1.44",
     "prek>=0.2.30",
     "pyright>=1.1.400",
     "pytest>=8.0.0",
@@ -74,7 +77,10 @@ exclude = ["bin"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --cov=padwan_llm --cov-report=term-missing -m 'not e2e'"
-markers = ["e2e: end-to-end tests requiring real API keys"]
+markers = [
+    "e2e: end-to-end tests requiring real API keys",
+    "otel_expect_error: test whose spans are expected to end in ERROR status under --otel",
+]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [

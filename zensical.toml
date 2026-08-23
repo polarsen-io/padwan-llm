@@ -24,6 +24,7 @@ nav = [
   { "Multimodal" = "multimodal.md" },
   { "MCP" = "mcp.md" },
   { "Agents" = "agents.md" },
+  { "Observability" = "observability.md" },
 ]
 
 [project.theme]

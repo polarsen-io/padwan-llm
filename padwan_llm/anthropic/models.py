@@ -6,7 +6,9 @@ __all__ = (
     "AnthropicContentBlock",
     "AnthropicMessage",
     "AnthropicTool",
+    "AnthropicToolChoice",
     "AnthropicUsage",
+    "CountTokensResponse",
     "MessagesBody",
     "MessagesResponse",
     "StopReason",
@@ -14,11 +16,25 @@ __all__ = (
 
 
 class AnthropicTool(TypedDict):
-    """A tool definition in Anthropic Messages API format."""
+    """A tool definition in Anthropic Messages API format.
+
+    Server tools (web search, code execution, ...) arrive with an
+    API-versioned `type` instead of an `input_schema`.
+    """
 
     name: str
-    description: str
-    input_schema: dict[str, Any]
+    description: NotRequired[str]
+    input_schema: NotRequired[dict[str, Any]]
+    type: NotRequired[str]
+    cache_control: NotRequired[dict[str, Any]]
+
+
+class AnthropicToolChoice(TypedDict):
+    """The `tool_choice` field of a Messages API request."""
+
+    type: Literal["auto", "any", "tool", "none"]
+    name: NotRequired[str]
+    disable_parallel_tool_use: NotRequired[bool]
 
 
 class AnthropicContentBlock(TypedDict, total=False):
@@ -34,6 +50,7 @@ class AnthropicContentBlock(TypedDict, total=False):
     source: dict[str, Any]
     thinking: str
     signature: str
+    cache_control: dict[str, Any]
 
 
 class AnthropicMessage(TypedDict):
@@ -55,14 +72,25 @@ StopReason = Literal[
 
 
 class MessagesBody(TypedDict):
-    """Request body for POST /v1/messages."""
+    """Request body for POST /v1/messages.
+
+    Covers both what `AnthropicClient` sends and what Anthropic-API callers
+    (e.g. Claude Code behind the compat proxy) may send inbound.
+    """
 
     model: str
     max_tokens: int
     messages: list[AnthropicMessage]
-    system: NotRequired[str]
+    system: NotRequired[str | list[AnthropicContentBlock]]
     tools: NotRequired[list[AnthropicTool]]
+    tool_choice: NotRequired[AnthropicToolChoice]
     stream: NotRequired[bool]
+    stop_sequences: NotRequired[list[str]]
+    temperature: NotRequired[float]
+    top_p: NotRequired[float]
+    top_k: NotRequired[int]
+    metadata: NotRequired[dict[str, Any]]
+    thinking: NotRequired[dict[str, Any]]
 
 
 class AnthropicUsage(TypedDict, total=False):
@@ -83,4 +111,11 @@ class MessagesResponse(TypedDict, total=False):
     model: str
     content: list[AnthropicContentBlock]
     stop_reason: StopReason | None
+    stop_sequence: str | None
     usage: AnthropicUsage
+
+
+class CountTokensResponse(TypedDict):
+    """Response body of POST /v1/messages/count_tokens."""
+
+    input_tokens: int

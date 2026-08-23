@@ -17,6 +17,12 @@ class UsageToken(TypedDict):
     input: int
     output: int
     cached: NotRequired[int]
+    reasoning: NotRequired[int]
+    """Reasoning/thought tokens, when the provider reports them separately.
+    OpenAI-style APIs count them inside `output`; Gemini reports them outside
+    `output` (candidatesTokenCount)."""
+    cache_write: NotRequired[int]
+    """Provider-managed prompt-cache writes, counted inside `input`."""
 
 
 # Tool calling
