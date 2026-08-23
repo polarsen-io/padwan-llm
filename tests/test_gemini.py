@@ -243,6 +243,7 @@ class TestGeminiStream:
         c.base_url = "https://generativelanguage.googleapis.com/v1beta/"
         c.temperature = 0.2
         c._sse_url = GeminiClient._sse_url.__get__(c)
+        c._iter_sse = GeminiClient._iter_sse.__get__(c)
         c._build_gen_config = MagicMock(return_value={"temperature": 0.2})
         c.session = AsyncMock()
         return c

@@ -7,6 +7,7 @@ import dataclasses
 import math
 import typing
 from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import aclosing
 from dataclasses import field
 from functools import partial
 from http import HTTPStatus
@@ -439,19 +440,9 @@ class GeminiClient(_GeminiAuth, LLMClientBase[Retry], GeminiToolMixin):
             json=payload,
         )
         _check_resp_status(resp)
-        ext = resp.extension
-        if ext is None:
-            raise LLMError(self.provider, "SSE extension not available on response")
-        while not ext.closed:
-            event = await ext.next_payload()
-            if event is None:
-                break
-            if not event.data:
-                continue
-            try:
-                yield event.json()
-            except ValueError as e:
-                raise LLMError(self.provider, f"Stream parse error: {e}") from e
+        async with aclosing(self._iter_sse(resp)) as events:
+            async for payload in events:
+                yield payload
 
     async def complete_chat(
         self,
