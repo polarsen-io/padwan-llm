@@ -111,7 +111,7 @@ def make_sse_resp():
         async def _close():
             ext.closed = True
 
-        ext.close = AsyncMock(side_effect=_close)
+        ext.close = _close
         resp.extension = ext
         return resp
 

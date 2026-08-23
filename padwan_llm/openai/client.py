@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import typing
 from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import aclosing
 from dataclasses import field
 from functools import partial
 from http import HTTPStatus
@@ -288,32 +289,9 @@ class _OpenAIBase(_OpenAIAuth, LLMClientBase[Retry], OpenAIToolMixin):
             json={**body, "stream": True},
         )
         _check_resp_status(resp)
-        ext = resp.extension
-        if ext is None:
-            raise LLMError(self.provider, "SSE extension not available on response")
-        try:
-            while not ext.closed:
-                event = await ext.next_payload()
-                if event is None:
-                    break
-                if not event.data:
-                    continue
-                if event.data == "[DONE]":
-                    break
-                try:
-                    yield cast("CreateChatCompletionStreamResponse", event.json())
-                except ValueError as e:
-                    raise LLMError(self.provider, f"Stream parse error: {e}") from e
-        finally:
-            # close a half-read SSE response (abort + connection teardown +
-            # pool release); a leaked lease starves later stream requests
-            if not ext.closed:
-                await ext.close()
-                if (raw := resp.raw) is not None:
-                    await raw.close()
-                    release_conn = getattr(raw, "release_conn", None)
-                    if release_conn is not None:
-                        release_conn()
+        async with aclosing(self._iter_sse(resp, done_sentinel="[DONE]")) as events:
+            async for payload in events:
+                yield cast("CreateChatCompletionStreamResponse", payload)
 
     def _prepare_messages(
         self, messages: Sequence[ChatMessage]
