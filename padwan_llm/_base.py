@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# Python 3.15 defers niquests until first use; older runtimes ignore this.
+__lazy_modules__ = frozenset({"niquests", "urllib3.util.retry"})
+
 import abc
 import os
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
@@ -8,7 +11,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 import niquests
-from niquests.typing import JSONEncoderType
 from urllib3.util.retry import Retry
 
 from ._deprecation import warn_if_deprecated
@@ -18,6 +20,8 @@ from .models import ChatResponse, ToolCall, ToolDefinition, UsageToken
 
 if TYPE_CHECKING:
     from types import TracebackType
+
+    from niquests.typing import JSONEncoderType
 
 __all__ = (
     "NO_TURN_DETECTION",

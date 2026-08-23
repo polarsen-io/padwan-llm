@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# Python 3.15 defers niquests until first use; older runtimes ignore this.
+__lazy_modules__ = frozenset({"niquests", "urllib3.util.retry"})
+
 import dataclasses
 import math
 import typing

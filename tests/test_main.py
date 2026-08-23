@@ -22,7 +22,7 @@ async def test_run(capsys: pytest.CaptureFixture[str]):
     mock_client.__aexit__ = AsyncMock(return_value=False)
     mock_client.stream_chat.return_value = _fake_stream("Hello", " world")
 
-    with patch("padwan_llm.__main__.LLMClient", return_value=mock_client):
+    with patch("padwan_llm.client.LLMClient", return_value=mock_client):
         await _run("gpt-4o-mini", "hi")
 
     captured = capsys.readouterr()
@@ -43,7 +43,7 @@ def test_main(
 ):
     monkeypatch.setattr("sys.argv", ["padwan-llm", "hello"])
     with patch(
-        "padwan_llm.__main__.asyncio.run",
+        "asyncio.run",
         side_effect=side_effect or _close_coroutine,
     ) as mock_run:
         if exit_code:

@@ -20,8 +20,6 @@ __lazy_modules__ = frozenset(
     }
 )
 
-from importlib.metadata import version as _pkg_version
-
 from ._base import ChatStream, LLMClientBase, OnThought, RealtimeClientBase
 from ._deprecation import ModelDeprecationWarning
 from .agent import AgentSession, ConversationStore, OnMcpConnect, ToolCallContext
@@ -159,4 +157,17 @@ __all__ = (
     "text_part",
 )
 
-__version__: str = _pkg_version("padwan-llm")
+
+# Bare annotation: declares the name for type checkers, resolved via __getattr__.
+__version__: str
+
+
+def __getattr__(name: str) -> str:
+    # Lazy __version__: importlib.metadata is too costly to pay on every import.
+    if name != "__version__":
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from importlib.metadata import version
+
+    value = version("padwan-llm")
+    globals()["__version__"] = value
+    return value

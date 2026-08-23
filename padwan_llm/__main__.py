@@ -1,15 +1,13 @@
 import argparse
-import asyncio
 import json
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ._base import OnThought
-from .client import LLMClient
-from .conversation import Message
+if TYPE_CHECKING:
+    from ._base import OnThought
 
 
-def _make_thought_streamer() -> OnThought:
+def _make_thought_streamer() -> "OnThought":
     def on_thought(chunk: str) -> None:
         sys.stderr.write(chunk)
         sys.stderr.flush()
@@ -26,6 +24,10 @@ async def _run(
     debug: bool = False,
     pretty: bool = False,
 ) -> None:
+    # Deferred so they resolve under main()'s lazy-imports mode (3.15+).
+    from .client import LLMClient
+    from .conversation import Message
+
     on_thought: OnThought | None = _make_thought_streamer() if stream_thinking else None
     client = LLMClient(model=model, base_url=base_url, on_thought=on_thought)
     messages: list[Message] = [Message(role="user", content=prompt)]
@@ -60,6 +62,21 @@ async def _run(
 
 
 def main() -> None:
+    # PEP 810 (3.15+): defer this process's import work to first use; scoped to
+    # the CLI run so importing this module has no global side effect.
+    set_lazy = getattr(sys, "set_lazy_imports", None)
+    if set_lazy is None:
+        _main()
+        return
+    prev_lazy: str = getattr(sys, "get_lazy_imports")()
+    set_lazy("all")
+    try:
+        _main()
+    finally:
+        set_lazy(prev_lazy)
+
+
+def _main() -> None:
     parser = argparse.ArgumentParser(
         prog="padwan-llm",
         description="One-shot LLM query",
@@ -105,6 +122,8 @@ def main() -> None:
         if not isinstance(extra_params, dict):
             print("Error: --extra-params must be a JSON object", file=sys.stderr)
             raise SystemExit(1)
+
+    import asyncio
 
     try:
         asyncio.run(

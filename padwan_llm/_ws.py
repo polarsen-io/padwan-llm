@@ -1,3 +1,6 @@
+# Python 3.15 defers niquests until first use; older runtimes ignore this.
+__lazy_modules__ = frozenset({"niquests"})
+
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any

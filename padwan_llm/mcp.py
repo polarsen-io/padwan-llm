@@ -1,3 +1,6 @@
+# Python 3.15 defers niquests until first use; older runtimes ignore this.
+__lazy_modules__ = frozenset({"niquests"})
+
 import asyncio
 import enum
 import functools
@@ -8,7 +11,6 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from http import HTTPStatus
-from importlib.metadata import version as _pkg_version
 from typing import (
     Any,
     Literal,
@@ -28,8 +30,6 @@ from ._json import dumps as _json_dumps, loads as _json_loads
 from .logs import log
 from .models import ToolDefinition
 
-__version__ = _pkg_version("padwan-llm")
-
 __all__ = (
     "McpStdio",
     "McpStreamable",
@@ -40,6 +40,15 @@ __all__ = (
 )
 
 type OnAuth = Callable[["McpStreamable"], str | Awaitable[str]]
+
+
+@functools.cache
+def _client_version() -> str:
+    # Deferred: importlib.metadata is too costly to pay at import time.
+    from importlib.metadata import version
+
+    return version("padwan-llm")
+
 
 _JSONRPC = "2.0"
 _PROTOCOL_VERSION = "2025-11-25"
@@ -261,7 +270,7 @@ class McpStreamable:
     instance; must return a bearer token string or raise to abort.
     When ``None`` (default), 401 raises ``RuntimeError``."""
     client_name: str = "padwan-llm"
-    client_version: str = __version__
+    client_version: str = field(default_factory=_client_version)
     name_prefix: str | None = None
     """Optional namespace for this transport's tools. When set, every
     discovered tool is renamed to ``f"{name_prefix}__{wire_name}"`` so
@@ -583,7 +592,7 @@ class McpStdio:
     cwd: str | None = None
     on_progress: Callable[[ProgressEvent], Any] | None = None
     client_name: str = "padwan-llm"
-    client_version: str = __version__
+    client_version: str = field(default_factory=_client_version)
     name_prefix: str | None = None
     """Optional namespace for this transport's tools (see
     `McpStreamable.name_prefix`)."""

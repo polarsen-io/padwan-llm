@@ -1,3 +1,6 @@
+# Python 3.15 defers niquests until first use; older runtimes ignore this.
+__lazy_modules__ = frozenset({"niquests"})
+
 import base64
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
