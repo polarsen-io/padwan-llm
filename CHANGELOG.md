@@ -1,3 +1,24 @@
+## 0.9.0 (2026-08-23)
+
+Observability release: opt-in OpenTelemetry GenAI instrumentation with a Langfuse adapter, plus an Anthropic Messages API compat layer over OpenAI backends and audio input content parts across providers.
+
+### Features
+
+- **OpenTelemetry GenAI instrumentation** — opt-in `padwan_llm.otel.instrument()` wraps every provider client following the GenAI semantic conventions: chat completions and streams, batch operations, embeddings, realtime sessions, agent turns and tool execution, and MCP tool calls. Emits spans plus the `gen_ai.client.operation.duration` / `gen_ai.client.token.usage` histograms, capturing reasoning tokens, thinking time, tool and conversation attributes. Content capture (prompts, responses, tool arguments/results) is off by default (`capture_content=True` to opt in). Runtime dependency is `opentelemetry-api` only, behind the `otel` extra; patching is transactional with rollback and `uninstrument()` restores the original methods (#42).
+- **Langfuse adapter** — `padwan_llm.langfuse.instrument()` configures Padwan instrumentation and the Langfuse exporter together, mapping spans to Langfuse observation types (generation, embedding, agent, tool) with input/output, session-id, and cost attributes; respects `mask_otel_spans` redaction before deriving inputs/outputs. Behind the `langfuse` extra (#42).
+- **Anthropic Messages API compat layer** — `padwan_llm.anthropic.compat.messages_to_openai` translates Messages API requests (system blocks, tool use, tool choice, images) to OpenAI chat-completion requests, and `padwan_llm.anthropic.events` converts responses, SSE streams, and errors back to Anthropic shapes — the building blocks for serving the Messages API over any OpenAI-compatible backend (#42).
+- **Audio input content parts** — `ContentAudioPart` (OpenAI `input_audio` shape) with an `audio_part` builder; `content_parts` routes `audio/*` files automatically. OpenAI and Grok receive parts verbatim, Gemini converts to `inlineData`, Mistral rewrites to its base64 chunk. `supports_audio(model, fmt=None)` is format-aware per provider, and audio-capable providers expose `AUDIO_FORMATS` (#43).
+
+### Performance
+
+- Provider modules load lazily on Python 3.15 (`__lazy_modules__`), cutting `import padwan_llm` time; a new CI workflow benchmarks import times and fails on regressions (#42).
+
+### Dev
+
+- Local observability stack: a single docker-compose bundling Langfuse and the Grafana OTel-LGTM all-in-one, with a pre-provisioned GenAI dashboard and a `docs/observability.md` guide (#42).
+
+**Full Changelog**: https://github.com/polarsen-io/padwan-llm/compare/0.8.0...0.9.0
+
 ## 0.8.0 (2026-08-19)
 
 Two big additions to the unified client — a native Anthropic chat provider and multi-provider realtime voice — alongside multimodal content building blocks, runtime model-deprecation warnings, typed response decoding, and Python 3.15 support.
