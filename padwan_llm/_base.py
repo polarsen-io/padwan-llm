@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import abc
 import os
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Self
@@ -127,6 +127,32 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
                 self.provider, "Client not initialized. Use async context manager."
             )
         return self._session
+
+    async def _iter_sse(
+        self, resp: niquests.Response, done_sentinel: str | None = None
+    ) -> AsyncGenerator[dict]:
+        """Yield parsed JSON payloads from an SSE response, stopping at
+        *done_sentinel* and closing a half-read stream so its pooled
+        connection is released (a leaked lease starves later requests)."""
+        ext = resp.extension
+        if ext is None:
+            raise LLMError(self.provider, "SSE extension not available on response")
+        try:
+            while not ext.closed:
+                event = await ext.next_payload()
+                if event is None:
+                    break
+                if not event.data:
+                    continue
+                if event.data == done_sentinel:
+                    break
+                try:
+                    yield event.json()
+                except ValueError as e:
+                    raise LLMError(self.provider, f"Stream parse error: {e}") from e
+        finally:
+            if not ext.closed:
+                await ext.close()
 
     def _sse_url(self, path: str) -> str:
         """Build a full SSE-scheme URL for the given path.

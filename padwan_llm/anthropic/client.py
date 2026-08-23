@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import typing
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from contextlib import aclosing
 from dataclasses import field
 from functools import partial
 from typing import ClassVar, Literal, cast, get_args
@@ -172,25 +173,16 @@ class AnthropicClient(LLMClientBase[Retry], AnthropicToolMixin):
             self._sse_url("/messages"), json={**body, "stream": True}
         )
         _check_resp_status(resp)
-        ext = resp.extension
-        if ext is None:
-            raise LLMError(self.provider, "SSE extension not available on response")
-        while not ext.closed:
-            event = await ext.next_payload()
-            if event is None:
-                break
-            if not event.data:
-                continue
-            try:
-                payload = event.json()
-            except ValueError as e:
-                raise LLMError(self.provider, f"Stream parse error: {e}") from e
-            if payload.get("type") == "error":
-                error = payload.get("error", {})
-                raise LLMError(
-                    self.provider, error.get("message", "stream error"), body=payload
-                )
-            yield payload
+        async with aclosing(self._iter_sse(resp)) as events:
+            async for payload in events:
+                if payload.get("type") == "error":
+                    error = payload.get("error", {})
+                    raise LLMError(
+                        self.provider,
+                        error.get("message", "stream error"),
+                        body=payload,
+                    )
+                yield payload
 
     def build_body(
         self,

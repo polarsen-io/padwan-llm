@@ -343,6 +343,7 @@ class TestOpenAIStream:
         c.model = "gpt-4o"
         c.base_url = "https://api.openai.com/v1/"
         c._sse_url = OpenAIClient._sse_url.__get__(c)
+        c._iter_sse = OpenAIClient._iter_sse.__get__(c)
         c.session = AsyncMock()
         return c
 
