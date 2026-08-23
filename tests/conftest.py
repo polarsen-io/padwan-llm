@@ -107,6 +107,11 @@ def make_sse_resp():
             return None
 
         ext.next_payload = _next
+
+        async def _close():
+            ext.closed = True
+
+        ext.close = AsyncMock(side_effect=_close)
         resp.extension = ext
         return resp
 

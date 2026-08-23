@@ -175,22 +175,35 @@ class AnthropicClient(LLMClientBase[Retry], AnthropicToolMixin):
         ext = resp.extension
         if ext is None:
             raise LLMError(self.provider, "SSE extension not available on response")
-        while not ext.closed:
-            event = await ext.next_payload()
-            if event is None:
-                break
-            if not event.data:
-                continue
-            try:
-                payload = event.json()
-            except ValueError as e:
-                raise LLMError(self.provider, f"Stream parse error: {e}") from e
-            if payload.get("type") == "error":
-                error = payload.get("error", {})
-                raise LLMError(
-                    self.provider, error.get("message", "stream error"), body=payload
-                )
-            yield payload
+        try:
+            while not ext.closed:
+                event = await ext.next_payload()
+                if event is None:
+                    break
+                if not event.data:
+                    continue
+                try:
+                    payload = event.json()
+                except ValueError as e:
+                    raise LLMError(self.provider, f"Stream parse error: {e}") from e
+                if payload.get("type") == "error":
+                    error = payload.get("error", {})
+                    raise LLMError(
+                        self.provider,
+                        error.get("message", "stream error"),
+                        body=payload,
+                    )
+                yield payload
+        finally:
+            # close a half-read SSE response (abort + connection teardown +
+            # pool release); a leaked lease starves later stream requests
+            if not ext.closed:
+                await ext.close()
+                if (raw := resp.raw) is not None:
+                    await raw.close()
+                    release_conn = getattr(raw, "release_conn", None)
+                    if release_conn is not None:
+                        release_conn()
 
     def build_body(
         self,

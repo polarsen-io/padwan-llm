@@ -1,5 +1,7 @@
 import json
+import typing
 from contextlib import nullcontext
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -382,6 +384,37 @@ class TestOpenAIStream:
             )
         ]
         assert chunks == [chunk]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "early_break",
+        [
+            pytest.param(False, id="done_sentinel"),
+            pytest.param(True, id="consumer_abandons"),
+        ],
+    )
+    async def test_half_read_stream_closes_extension(
+        self, client, make_sse_event, make_sse_resp, early_break
+    ):
+        """A stream left half-read must abort its SSE connection, or the pooled
+        connection hangs the next stream request."""
+        done_ev = MagicMock()
+        done_ev.data = "[DONE]"
+        done_ev.json = MagicMock(side_effect=ValueError)
+        events = [
+            make_sse_event(json.dumps({"choices": [{"delta": {"content": "hi"}}]})),
+            done_ev,
+        ]
+        resp = make_sse_resp(events)
+        client.session.post.return_value = resp
+        gen = aiter(OpenAIClient.stream(client, {"model": "gpt-4o", "messages": []}))
+        async for _ in gen:
+            if early_break:
+                break
+        if early_break:
+            await cast("typing.AsyncGenerator", gen).aclose()
+        resp.extension.close.assert_awaited_once()
+        assert resp.extension.closed
 
     @pytest.mark.asyncio
     async def test_skips_keepalive_frames(self, client, make_sse_event, make_sse_resp):

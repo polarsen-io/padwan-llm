@@ -291,18 +291,29 @@ class _OpenAIBase(_OpenAIAuth, LLMClientBase[Retry], OpenAIToolMixin):
         ext = resp.extension
         if ext is None:
             raise LLMError(self.provider, "SSE extension not available on response")
-        while not ext.closed:
-            event = await ext.next_payload()
-            if event is None:
-                break
-            if not event.data:
-                continue
-            if event.data == "[DONE]":
-                break
-            try:
-                yield cast("CreateChatCompletionStreamResponse", event.json())
-            except ValueError as e:
-                raise LLMError(self.provider, f"Stream parse error: {e}") from e
+        try:
+            while not ext.closed:
+                event = await ext.next_payload()
+                if event is None:
+                    break
+                if not event.data:
+                    continue
+                if event.data == "[DONE]":
+                    break
+                try:
+                    yield cast("CreateChatCompletionStreamResponse", event.json())
+                except ValueError as e:
+                    raise LLMError(self.provider, f"Stream parse error: {e}") from e
+        finally:
+            # close a half-read SSE response (abort + connection teardown +
+            # pool release); a leaked lease starves later stream requests
+            if not ext.closed:
+                await ext.close()
+                if (raw := resp.raw) is not None:
+                    await raw.close()
+                    release_conn = getattr(raw, "release_conn", None)
+                    if release_conn is not None:
+                        release_conn()
 
     def _prepare_messages(
         self, messages: Sequence[ChatMessage]
