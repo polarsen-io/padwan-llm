@@ -1,3 +1,13 @@
+## 0.9.1 (2026-08-23)
+
+Patch release: streaming no longer leaks pooled connections when a stream ends on the `[DONE]` sentinel or is abandoned mid-read.
+
+### Fixes
+
+- **Half-read SSE streams starved the connection pool** — a stream that ended on the `[DONE]` sentinel (or was abandoned by its consumer, e.g. a client abort) left its response half-read, keeping the pooled connection leased until garbage collection; a sequence of streams on one client exhausted the pool and the next `stream()` call hung forever. The duplicated per-provider SSE loops are now a single `LLMClientBase._iter_sse` helper that closes the SSE extension in a `finally`, wrapped in `contextlib.aclosing` so an abandoned stream releases its connection deterministically (#46).
+
+**Full Changelog**: https://github.com/polarsen-io/padwan-llm/compare/0.9.0...0.9.1
+
 ## 0.9.0 (2026-08-23)
 
 Observability release: opt-in OpenTelemetry GenAI instrumentation with a Langfuse adapter, plus an Anthropic Messages API compat layer over OpenAI backends and audio input content parts across providers.
