@@ -385,6 +385,34 @@ class TestOpenAIStream:
         assert chunks == [chunk]
 
     @pytest.mark.asyncio
+    async def test_cleanup_failure_does_not_corrupt_stream(
+        self, client, make_sse_event, make_sse_resp
+    ):
+        """Aborting an already-finished HTTP/2 stream raises KeyError inside
+        urllib3-future; the consumer must still get a clean stream end and the
+        connection must still be torn down and released."""
+        chunk = {"choices": [{"delta": {"content": "hi"}}]}
+        done_ev = MagicMock()
+        done_ev.data = "[DONE]"
+        done_ev.json = MagicMock(side_effect=ValueError)
+        resp = make_sse_resp([make_sse_event(json.dumps(chunk)), done_ev])
+
+        async def _h2_abort_quirk():
+            raise KeyError(1)
+
+        resp.extension.close = _h2_abort_quirk
+        client.session.post.return_value = resp
+        chunks = [
+            c
+            async for c in OpenAIClient.stream(
+                client, {"model": "gpt-4o", "messages": []}
+            )
+        ]
+        assert chunks == [chunk]
+        resp.raw.close.assert_awaited_once()
+        resp.raw.release_conn.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_skips_keepalive_frames(self, client, make_sse_event, make_sse_resp):
         chunk = {"choices": [{"delta": {"content": "ok"}}]}
         events = [

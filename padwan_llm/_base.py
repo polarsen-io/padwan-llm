@@ -14,6 +14,7 @@ from urllib3.util.retry import Retry
 from ._deprecation import warn_if_deprecated
 from .conversation import ChatMessage
 from .errors import LLMError, Provider
+from .logs import log
 from .models import ChatResponse, ToolCall, ToolDefinition, UsageToken
 
 if TYPE_CHECKING:
@@ -152,7 +153,24 @@ class LLMClientBase[RetryT: Retry](abc.ABC):
                     raise LLMError(self.provider, f"Stream parse error: {e}") from e
         finally:
             if not ext.closed:
-                await ext.close()
+                # Best-effort: aborting an already-finished HTTP/2 stream raises
+                # inside urllib3-future (KeyError on the stream id); a cleanup
+                # failure must never corrupt an otherwise successful stream.
+                try:
+                    await ext.close()
+                except Exception as e:
+                    log.debug("SSE extension close failed: %s", e)
+                if (raw := resp.raw) is not None:
+                    try:
+                        await raw.close()
+                    except Exception as e:
+                        log.debug("SSE raw close failed: %s", e)
+                    release_conn = getattr(raw, "release_conn", None)
+                    if release_conn is not None:
+                        try:
+                            release_conn()
+                        except Exception as e:
+                            log.debug("SSE connection release failed: %s", e)
 
     def _sse_url(self, path: str) -> str:
         """Build a full SSE-scheme URL for the given path.

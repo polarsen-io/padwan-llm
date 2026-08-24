@@ -113,6 +113,10 @@ def make_sse_resp():
 
         ext.close = _close
         resp.extension = ext
+        raw = MagicMock()
+        raw.close = AsyncMock()
+        raw.release_conn = MagicMock()
+        resp.raw = raw
         return resp
 
     return _make
