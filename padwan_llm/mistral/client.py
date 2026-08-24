@@ -49,6 +49,8 @@ MistralModel = Literal[
     "magistral-medium-latest",
     "labs-leanstral-1-5",
     "labs-leanstral-1-5-1",
+    "glm-5-2",
+    "zai-glm-5-2",
 ]
 
 MistralEmbeddingModel = Literal["mistral-embed", "codestral-embed"]
