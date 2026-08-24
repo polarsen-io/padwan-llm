@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787583004872,
+  "lastUpdate": 1787583055755,
   "repoUrl": "https://github.com/polarsen-io/padwan-llm",
   "entries": {
     "Import Performance": [
@@ -380,6 +380,48 @@ window.BENCHMARK_DATA = {
             "value": 242.97,
             "unit": "ms",
             "range": 2.35
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "julien.brayere@obitrain.com",
+            "name": "Julien Brayere",
+            "username": "Andarius"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "943aabe4da8e06752e31853089e969c24ce38d7e",
+          "message": "fix: best-effort SSE cleanup; tolerate HTTP/2 abort quirk (#48)\n\nClosing an already-finished HTTP/2 stream raises KeyError inside\nurllib3-future; the unguarded finally corrupted every successful stream\nover h2 backends (missing message end, spurious error event). Cleanup is\nnow best-effort per step and restores the raw-response teardown and pool\nrelease that the 0.9.1 refactor dropped (the ext-only close leaves the\nlease held until GC on HTTP/1.1).",
+          "timestamp": "2026-08-24T16:49:18+02:00",
+          "tree_id": "2d5f3f865af799f7e26f91ef5ae080070a843a02",
+          "url": "https://github.com/polarsen-io/padwan-llm/commit/943aabe4da8e06752e31853089e969c24ce38d7e"
+        },
+        "date": 1787583054559,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "padwan_llm (facade)",
+            "value": 58.71,
+            "unit": "ms",
+            "range": 2.28
+          },
+          {
+            "name": "padwan_llm.openai",
+            "value": 218.23,
+            "unit": "ms",
+            "range": 6.12
+          },
+          {
+            "name": "padwan_llm.otel",
+            "value": 271.52,
+            "unit": "ms",
+            "range": 23.46
           }
         ]
       }
