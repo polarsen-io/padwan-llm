@@ -1,3 +1,7 @@
+## 0.9.2 (2026-08-24)
+
+- **SSE cleanup is now best-effort across all streaming clients (OpenAI-compatible, Anthropic, Gemini).** 0.9.1's stream cleanup was unguarded: over HTTP/2 backends, closing a stream the server had already half-closed raised an exception (`jh2.StreamClosedError`, see jawah/urllib3.future#406) that corrupted every successful streamed response, and on HTTP/1.1 the connection lease could stay held until garbage collection, starving the pool after ~10 back-to-back streams. Each cleanup step (extension close, raw response teardown, pool release) is now guarded and failures are logged at debug level. (#48)
+
 ## 0.9.1 (2026-08-23)
 
 Patch release: streaming no longer leaks pooled connections when a stream ends on the `[DONE]` sentinel or is abandoned mid-read.
