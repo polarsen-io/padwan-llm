@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787637829459,
+  "lastUpdate": 1787640357009,
   "repoUrl": "https://github.com/polarsen-io/padwan-llm",
   "entries": {
     "Import Performance": [
@@ -336,6 +336,48 @@ window.BENCHMARK_DATA = {
             "value": 189.84,
             "unit": "ms",
             "range": 1.92
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bot@polarsen.io",
+            "name": "Polarsen-bot",
+            "username": "Polarsen-bot"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a378470482e05fa814b73efa9f2dcdc2ac0fe55c",
+          "message": "chore: weekly LLM SDK refresh (#49)\n\n* chore: weekly LLM SDK refresh\n\n- Bump openai, google-genai, xai-sdk, mcp to latest\n- Regenerate OpenAI/Mistral OpenAPI TypedDicts\n- Include provider model drift report\n\n* chore: add glm-5-2 and zai-glm-5-2 to MistralModel\n\nCo-authored-by: Andarius <5070712+Andarius@users.noreply.github.com>\n\n* fix: restore Anthropic compatibility and Mistral routing\n\n* chore: require Anthropic 1.0\n\n---------\n\nCo-authored-by: Polarsen-bot <248777799+Polarsen-bot@users.noreply.github.com>\nCo-authored-by: copilot-swe-agent[bot] <198982749+Copilot@users.noreply.github.com>\nCo-authored-by: Andarius <5070712+Andarius@users.noreply.github.com>\nCo-authored-by: julien <julien.brayere@obitrain.com>",
+          "timestamp": "2026-08-25T08:45:17+02:00",
+          "tree_id": "87cf71a9e658d44441468efec7110e4e3708dbf7",
+          "url": "https://github.com/polarsen-io/padwan-llm/commit/a378470482e05fa814b73efa9f2dcdc2ac0fe55c"
+        },
+        "date": 1787640355893,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "padwan_llm (facade)",
+            "value": 218.04,
+            "unit": "ms",
+            "range": 2.85
+          },
+          {
+            "name": "padwan_llm.openai",
+            "value": 217.4,
+            "unit": "ms",
+            "range": 5.78
+          },
+          {
+            "name": "padwan_llm.otel",
+            "value": 228.43,
+            "unit": "ms",
+            "range": 2.6
           }
         ]
       }
