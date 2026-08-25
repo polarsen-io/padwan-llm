@@ -1,3 +1,11 @@
+## 0.9.4 (2026-08-25)
+
+### Changes
+
+- **Anthropic SDK 1.0 support.** Requires `anthropic>=1.0.0`, aligns the native request type with the new SDK, and preserves legacy sampling fields in the Anthropic-to-OpenAI compatibility layer. (#49)
+- **Mistral-hosted GLM 5.2 routing.** Adds both live model IDs, `glm-5-2` and `zai-glm-5-2`, and routes both prefixes through the Mistral client. (#49)
+- **Provider SDK refresh.** Updates Google GenAI to 2.19.0 and OpenAI to 3.3.1, with regenerated OpenAI and Mistral API types. (#49)
+
 ## 0.9.3 (2026-08-25)
 
 ### Changes
