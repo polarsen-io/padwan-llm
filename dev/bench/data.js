@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787583995551,
+  "lastUpdate": 1787636966289,
   "repoUrl": "https://github.com/polarsen-io/padwan-llm",
   "entries": {
     "Import Performance": [
@@ -252,6 +252,48 @@ window.BENCHMARK_DATA = {
             "value": 238.08,
             "unit": "ms",
             "range": 3.21
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "julien.brayere@obitrain.com",
+            "name": "Julien Brayere",
+            "username": "Andarius"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "918b5dba5b0a112bd30cc3dc9ba4eaf3660bf852",
+          "message": "chore: require urllib3-future 2.24.904 (#51)\n\nCarries the upstream fix for the HTTP/2 stream reset raising on\nalready-closed SSE streams (jawah/urllib3.future#406).",
+          "timestamp": "2026-08-25T07:48:42+02:00",
+          "tree_id": "ca67fc1f0cbffb68f8fdce475bb137cf0f9a845a",
+          "url": "https://github.com/polarsen-io/padwan-llm/commit/918b5dba5b0a112bd30cc3dc9ba4eaf3660bf852"
+        },
+        "date": 1787636964937,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "padwan_llm (facade)",
+            "value": 216.05,
+            "unit": "ms",
+            "range": 2.73
+          },
+          {
+            "name": "padwan_llm.openai",
+            "value": 216.05,
+            "unit": "ms",
+            "range": 8.72
+          },
+          {
+            "name": "padwan_llm.otel",
+            "value": 226.9,
+            "unit": "ms",
+            "range": 2.17
           }
         ]
       }
