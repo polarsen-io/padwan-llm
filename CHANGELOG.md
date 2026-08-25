@@ -1,3 +1,9 @@
+## 0.9.3 (2026-08-25)
+
+### Changes
+
+- **urllib3-future floor raised to 2.24.904.** Carries the upstream fix for the HTTP/2 stream reset raising on already-closed SSE streams (jawah/urllib3.future#406), so streams no longer rely solely on 0.9.2's best-effort cleanup for that case. (#51)
+
 ## 0.9.2 (2026-08-24)
 
 - **SSE cleanup is now best-effort across all streaming clients (OpenAI-compatible, Anthropic, Gemini).** 0.9.1's stream cleanup was unguarded: over HTTP/2 backends, closing a stream the server had already half-closed raised an exception (`jh2.StreamClosedError`, see jawah/urllib3.future#406) that corrupted every successful streamed response, and on HTTP/1.1 the connection lease could stay held until garbage collection, starving the pool after ~10 back-to-back streams. Each cleanup step (extension close, raw response teardown, pool release) is now guarded and failures are logged at debug level. (#48)
