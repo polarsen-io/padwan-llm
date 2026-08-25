@@ -6,11 +6,11 @@ from .._json import dumps as _json_dumps
 from ..logs import log
 from ..openai.client import is_openai_model
 from .models import (
+    AnthropicCompatBody,
     AnthropicContentBlock,
     AnthropicMessage,
     AnthropicTool,
     AnthropicToolChoice,
-    MessagesBody,
 )
 
 if TYPE_CHECKING:
@@ -236,7 +236,7 @@ def _apply_tool_choice(
 
 
 def messages_to_openai(
-    body: MessagesBody, *, model: str | None = None
+    body: AnthropicCompatBody, *, model: str | None = None
 ) -> CreateChatCompletionRequest:
     """Translate an Anthropic Messages API request to an OpenAI chat completions body.
 

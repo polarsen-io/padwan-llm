@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal, NotRequired, TypedDict
 
 __all__ = (
+    "AnthropicCompatBody",
     "AnthropicContentBlock",
     "AnthropicMessage",
     "AnthropicTool",
@@ -72,11 +73,7 @@ StopReason = Literal[
 
 
 class MessagesBody(TypedDict):
-    """Request body for POST /v1/messages.
-
-    Covers both what `AnthropicClient` sends and what Anthropic-API callers
-    (e.g. Claude Code behind the compat proxy) may send inbound.
-    """
+    """Request body for POST /v1/messages."""
 
     model: str
     max_tokens: int
@@ -86,11 +83,16 @@ class MessagesBody(TypedDict):
     tool_choice: NotRequired[AnthropicToolChoice]
     stream: NotRequired[bool]
     stop_sequences: NotRequired[list[str]]
-    temperature: NotRequired[float]
-    top_p: NotRequired[float]
-    top_k: NotRequired[int]
     metadata: NotRequired[dict[str, Any]]
     thinking: NotRequired[dict[str, Any]]
+
+
+class AnthropicCompatBody(MessagesBody, total=False):
+    """Messages body accepting legacy sampling fields for the compat proxy."""
+
+    temperature: float
+    top_p: float
+    top_k: int
 
 
 class AnthropicUsage(TypedDict, total=False):
