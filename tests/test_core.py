@@ -173,6 +173,18 @@ def test_llm_error(cause: Exception | None):
         pytest.param(is_gemini_model, "gpt-4o", False, id="gemini-miss"),
         pytest.param(is_mistral_model, "codestral-latest", True, id="mistral-set"),
         pytest.param(is_mistral_model, "mistral-custom", True, id="mistral-prefix"),
+        pytest.param(
+            is_mistral_model,
+            "zai-glm-5-2",
+            True,
+            id="mistral-zai-glm-prefix",
+        ),
+        pytest.param(
+            is_mistral_model,
+            "glm-5-2",
+            True,
+            id="mistral-glm-prefix",
+        ),
         pytest.param(is_mistral_model, "gpt-4o", False, id="mistral-miss"),
         pytest.param(is_grok_model, "grok-4-1-fast-reasoning", True, id="grok-4.1"),
         pytest.param(is_grok_model, "grok-build-latest", True, id="grok-build"),
@@ -195,6 +207,8 @@ def test_is_model(func, model, expected: bool):
         pytest.param(
             "mistral-large-latest", MistralClient, nullcontext(), id="mistral"
         ),
+        pytest.param("glm-5-2", MistralClient, nullcontext(), id="mistral-glm"),
+        pytest.param("zai-glm-5-2", MistralClient, nullcontext(), id="mistral-zai-glm"),
         pytest.param("gpt-5.6-sol", OpenAIClient, nullcontext(), id="openai-gpt5.6"),
         pytest.param("grok-3", GrokClient, nullcontext(), id="grok"),
         pytest.param("grok-build-latest", GrokClient, nullcontext(), id="grok-build"),

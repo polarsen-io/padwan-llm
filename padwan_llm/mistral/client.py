@@ -82,6 +82,8 @@ _MISTRAL_PREFIXES = (
     "magistral-",
     "voxtral-",
     "labs-",
+    "glm-",
+    "zai-glm-",
 )
 
 

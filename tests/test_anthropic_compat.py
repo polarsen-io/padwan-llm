@@ -4,13 +4,13 @@ from typing import Any, cast
 import pytest
 
 from padwan_llm.anthropic.compat import messages_to_openai
-from padwan_llm.anthropic.models import MessagesBody
+from padwan_llm.anthropic.models import AnthropicCompatBody
 
 BASE64_PNG = "iVBORw0KGgo="
 
 
-def _body(**overrides) -> MessagesBody:
-    body: MessagesBody = {
+def _body(**overrides) -> AnthropicCompatBody:
+    body: AnthropicCompatBody = {
         "model": "claude-sonnet-5",
         "max_tokens": 1024,
         "messages": [{"role": "user", "content": "hello"}],
@@ -19,7 +19,9 @@ def _body(**overrides) -> MessagesBody:
     return body
 
 
-def _to_openai(body: MessagesBody, *, model: str | None = None) -> dict[str, Any]:
+def _to_openai(
+    body: AnthropicCompatBody, *, model: str | None = None
+) -> dict[str, Any]:
     """messages_to_openai untyped, for assertion access to NotRequired keys."""
     return cast("dict[str, Any]", messages_to_openai(body, model=model))
 
