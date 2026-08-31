@@ -95,6 +95,7 @@ GeminiModel = Literal[
     "gemini-3.1-flash-lite-preview",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
+    "gemini-3.5-transcribe",
     "gemini-3.6-flash",
     "gemini-3.7-flash",
     "gemini-3-pro-preview",
@@ -105,6 +106,7 @@ GeminiModel = Literal[
     "gemini-flash-latest",
     "gemini-flash-lite-latest",
     "gemini-omni-flash-preview",
+    "gemini-omni-1.1-flash",
     "gemini-pro-latest",
 ]
 
