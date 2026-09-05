@@ -585,6 +585,216 @@ async def test_agent_mcp_call_enriches_tool_span_without_duplicate(otel_setup):
     assert "mcp.client.operation.duration" in _metric_names(reader)
 
 
+@pytest.mark.parametrize(
+    ("streaming", "payloads", "expected_reasons", "expected_tools"),
+    [
+        pytest.param(
+            False,
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "tool_calls": [
+                                {"function": {"name": "get_weather", "arguments": "{}"}}
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+                "usage": USAGE,
+                "service_tier": "flex",
+            },
+            ("tool_calls",),
+            ("get_weather",),
+            id="complete",
+        ),
+        pytest.param(
+            True,
+            [
+                {"choices": [{"delta": {"content": "Hel"}}]},
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {"index": 0, "function": {"name": "get_weather"}}
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "choices": [{"delta": {}, "finish_reason": "tool_calls"}],
+                    "usage": USAGE,
+                    "service_tier": "flex",
+                },
+            ],
+            ("tool_calls",),
+            ("get_weather",),
+            id="stream",
+        ),
+    ],
+)
+async def test_raw_openai_call_opens_span(
+    otel_setup,
+    client,
+    make_resp,
+    make_sse_event,
+    make_sse_resp,
+    streaming,
+    payloads,
+    expected_reasons,
+    expected_tools,
+):
+    """Raw `complete()`/`stream()` outside the chat API still produce a span."""
+    exporter, reader = otel_setup
+    body = {
+        "model": "gpt-4o-mini",
+        "messages": [{"role": "user", "content": "hey"}],
+        "service_tier": "flex",
+    }
+    if streaming:
+        events = [make_sse_event(_json_dumps(c)) for c in payloads]
+        client._session.post.return_value = make_sse_resp(events)
+        chunks = [c async for c in client.stream(body)]
+        assert len(chunks) == len(payloads)
+    else:
+        client._session.post.return_value = make_resp(200, payloads)
+        await client.complete(body)
+
+    (span,) = exporter.get_finished_spans()
+    assert span.name == "chat gpt-4o-mini"
+    attrs = dict(span.attributes or {})
+    assert attrs["gen_ai.request.model"] == "gpt-4o-mini"
+    assert attrs["gen_ai.usage.input_tokens"] == 10
+    assert attrs["gen_ai.usage.output_tokens"] == 20
+    assert attrs["gen_ai.response.finish_reasons"] == expected_reasons
+    assert attrs["padwan_llm.response.tool_names"] == expected_tools
+    assert attrs["openai.request.service_tier"] == "flex"
+    assert attrs["openai.response.service_tier"] == "flex"
+    assert attrs.get("gen_ai.request.stream", False) is streaming
+    assert {"gen_ai.client.operation.duration", "gen_ai.client.token.usage"} <= (
+        _metric_names(reader)
+    )
+
+
+@pytest.mark.parametrize(
+    "streaming", [pytest.param(False, id="complete"), pytest.param(True, id="stream")]
+)
+async def test_raw_openai_call_captures_content(
+    otel_logging, client, make_resp, make_sse_event, make_sse_resp, streaming
+):
+    span_exporter, log_exporter = otel_logging()
+    tool = {
+        "name": "get_weather",
+        "description": "Get the weather",
+        "parameters": {"type": "object", "properties": {}},
+    }
+    body = {
+        "model": "gpt-4o",
+        "messages": [
+            {"role": "system", "content": "be brief"},
+            {"role": "user", "content": "hey"},
+        ],
+        "tools": [{"type": "function", "function": tool}],
+    }
+    tool_call = {
+        "id": "call_1",
+        "function": {"name": "get_weather", "arguments": '{"city": "Paris"}'},
+    }
+    if streaming:
+        chunks = [
+            {"choices": [{"delta": {"content": "Sure"}}]},
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_1",
+                                    "function": {
+                                        "name": "get_weather",
+                                        "arguments": '{"city": ',
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {"index": 0, "function": {"arguments": '"Paris"}'}}
+                            ]
+                        }
+                    }
+                ]
+            },
+            {"choices": [{"delta": {}, "finish_reason": "tool_calls"}], "usage": USAGE},
+        ]
+        client._session.post.return_value = make_sse_resp(
+            [make_sse_event(_json_dumps(c)) for c in chunks]
+        )
+        async for _ in client.stream(body):
+            pass
+    else:
+        payload = {
+            "choices": [
+                {
+                    "message": {"content": "Sure", "tool_calls": [tool_call]},
+                    "finish_reason": "tool_calls",
+                }
+            ],
+            "usage": USAGE,
+        }
+        client._session.post.return_value = make_resp(200, payload)
+        await client.complete(body)
+
+    (span,) = span_exporter.get_finished_spans()
+    attrs = dict(span.attributes or {})
+    assert _json_loads(attrs["gen_ai.input.messages"]) == [
+        {"role": "system", "parts": [{"type": "text", "content": "be brief"}]},
+        {"role": "user", "parts": [{"type": "text", "content": "hey"}]},
+    ]
+    assert _json_loads(attrs["gen_ai.tool.definitions"]) == [
+        {"type": "function", **tool}
+    ]
+    assert _json_loads(attrs["gen_ai.output.messages"]) == [
+        {
+            "role": "assistant",
+            "parts": [
+                {"type": "text", "content": "Sure"},
+                {
+                    "type": "tool_call",
+                    "id": "call_1",
+                    "name": "get_weather",
+                    "arguments": '{"city": "Paris"}',
+                },
+            ],
+            "finish_reason": "tool_calls",
+        }
+    ]
+    (log,) = log_exporter.get_finished_logs()
+    log_attrs = dict(log.log_record.attributes or {})
+    assert log_attrs["gen_ai.usage.input_tokens"] == 10
+    assert "gen_ai.output.messages" in log_attrs
+
+
+async def test_raw_openai_error_ends_span(otel_setup, client, make_resp):
+    exporter, _ = otel_setup
+    client._session.post.return_value = make_resp(500, {"error": "boom"})
+    with pytest.raises(LLMError):
+        await client.complete({"model": "gpt-4o", "messages": []})
+    (span,) = exporter.get_finished_spans()
+    assert span.status.status_code is StatusCode.ERROR
+    assert dict(span.attributes or {})["error.type"] == "LLMError"
+
+
 @pytest.fixture
 def otel_logging():
     """Instrument with in-memory span and log exporters via a capture-aware factory."""
