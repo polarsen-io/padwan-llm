@@ -679,6 +679,112 @@ async def test_raw_openai_call_opens_span(
     )
 
 
+@pytest.mark.parametrize(
+    "streaming", [pytest.param(False, id="complete"), pytest.param(True, id="stream")]
+)
+async def test_raw_openai_call_captures_content(
+    otel_logging, client, make_resp, make_sse_event, make_sse_resp, streaming
+):
+    span_exporter, log_exporter = otel_logging()
+    tool = {
+        "name": "get_weather",
+        "description": "Get the weather",
+        "parameters": {"type": "object", "properties": {}},
+    }
+    body = {
+        "model": "gpt-4o",
+        "messages": [
+            {"role": "system", "content": "be brief"},
+            {"role": "user", "content": "hey"},
+        ],
+        "tools": [{"type": "function", "function": tool}],
+    }
+    tool_call = {
+        "id": "call_1",
+        "function": {"name": "get_weather", "arguments": '{"city": "Paris"}'},
+    }
+    if streaming:
+        chunks = [
+            {"choices": [{"delta": {"content": "Sure"}}]},
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_1",
+                                    "function": {
+                                        "name": "get_weather",
+                                        "arguments": '{"city": ',
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {"index": 0, "function": {"arguments": '"Paris"}'}}
+                            ]
+                        }
+                    }
+                ]
+            },
+            {"choices": [{"delta": {}, "finish_reason": "tool_calls"}], "usage": USAGE},
+        ]
+        client._session.post.return_value = make_sse_resp(
+            [make_sse_event(_json_dumps(c)) for c in chunks]
+        )
+        async for _ in client.stream(body):
+            pass
+    else:
+        payload = {
+            "choices": [
+                {
+                    "message": {"content": "Sure", "tool_calls": [tool_call]},
+                    "finish_reason": "tool_calls",
+                }
+            ],
+            "usage": USAGE,
+        }
+        client._session.post.return_value = make_resp(200, payload)
+        await client.complete(body)
+
+    (span,) = span_exporter.get_finished_spans()
+    attrs = dict(span.attributes or {})
+    assert _json_loads(attrs["gen_ai.input.messages"]) == [
+        {"role": "system", "parts": [{"type": "text", "content": "be brief"}]},
+        {"role": "user", "parts": [{"type": "text", "content": "hey"}]},
+    ]
+    assert _json_loads(attrs["gen_ai.tool.definitions"]) == [
+        {"type": "function", **tool}
+    ]
+    assert _json_loads(attrs["gen_ai.output.messages"]) == [
+        {
+            "role": "assistant",
+            "parts": [
+                {"type": "text", "content": "Sure"},
+                {
+                    "type": "tool_call",
+                    "id": "call_1",
+                    "name": "get_weather",
+                    "arguments": '{"city": "Paris"}',
+                },
+            ],
+            "finish_reason": "tool_calls",
+        }
+    ]
+    (log,) = log_exporter.get_finished_logs()
+    log_attrs = dict(log.log_record.attributes or {})
+    assert log_attrs["gen_ai.usage.input_tokens"] == 10
+    assert "gen_ai.output.messages" in log_attrs
+
+
 async def test_raw_openai_error_ends_span(otel_setup, client, make_resp):
     exporter, _ = otel_setup
     client._session.post.return_value = make_resp(500, {"error": "boom"})

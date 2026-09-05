@@ -783,6 +783,34 @@ def _raw_finish_reasons(data: Any) -> list[str]:
     ]
 
 
+def _raw_content_attrs(body: Any) -> dict[str, str]:
+    """Input content attributes of a raw OpenAI chat body."""
+    if not isinstance(body, dict):
+        return {}
+    attrs = _capture_input(body.get("messages") or (), separate_system=False)
+    tools = [
+        {"type": "function", **(tool.get("function") or tool)}
+        for tool in body.get("tools") or ()
+    ]
+    if tools:
+        attrs["gen_ai.tool.definitions"] = _json_dumps(tools)
+    return attrs
+
+
+def _merge_tool_call_delta(calls: dict[int, ToolCall], call: dict[str, Any]) -> None:
+    """Fold one streamed tool_calls delta into the calls accumulated so far."""
+    entry = calls.setdefault(
+        call.get("index", len(calls)),
+        cast(ToolCall, {"id": "", "function": {"name": "", "arguments": ""}}),
+    )
+    if call.get("id"):
+        entry["id"] = call["id"]
+    function = call.get("function") or {}
+    if function.get("name"):
+        entry["function"]["name"] = function["name"]
+    entry["function"]["arguments"] += function.get("arguments") or ""
+
+
 def _wrap_openai_complete(original: Any, inst: _Instruments) -> Any:
     """Enrich the active chat span, or open one for a raw `complete()` call."""
 
@@ -796,8 +824,12 @@ def _wrap_openai_complete(original: Any, inst: _Instruments) -> Any:
                 _set_openai_response_attrs(active, result[0])
             return result
         attrs = _raw_request_attrs(self, body)
-        span = _start_span(inst, attrs, _raw_temperature(body))
+        temperature = _raw_temperature(body)
+        span = _start_span(inst, attrs, temperature)
         _set_openai_request_attrs(span, body)
+        content_attrs = _raw_content_attrs(body) if inst.capture_content else {}
+        for key, value in content_attrs.items():
+            span.set_attribute(key, value)
         start = time.perf_counter()
         token = _active_chat_span.set(span)
         with trace.use_span(
@@ -809,6 +841,12 @@ def _wrap_openai_complete(original: Any, inst: _Instruments) -> Any:
             try:
                 result = await original(self, body, *args, **kwargs)
             except BaseException as e:
+                if inst.capture_content:
+                    _emit_inference_details(
+                        inst,
+                        span,
+                        {**attrs, **content_attrs, "error.type": type(e).__qualname__},
+                    )
                 _record_end(inst, span, attrs, start, error=e)
                 raise
             finally:
@@ -816,13 +854,31 @@ def _wrap_openai_complete(original: Any, inst: _Instruments) -> Any:
         data, usage = result
         _set_openai_response_attrs(span, data)
         message = (data.get("choices") or [{}])[0].get("message") or {}
+        finish_reasons = _raw_finish_reasons(data)
+        if inst.capture_content:
+            output = _capture_output(
+                message.get("content"),
+                message.get("tool_calls"),
+                finish_reasons[0] if finish_reasons else None,
+            )
+            span.set_attribute("gen_ai.output.messages", output)
+            detail_attrs: dict[str, Any] = {
+                **attrs,
+                **content_attrs,
+                **_usage_attrs(usage),
+                "gen_ai.output.messages": output,
+                "gen_ai.response.finish_reasons": finish_reasons,
+            }
+            if temperature is not None:
+                detail_attrs["gen_ai.request.temperature"] = temperature
+            _emit_inference_details(inst, span, detail_attrs)
         _record_end(
             inst,
             span,
             attrs,
             start,
             usage=usage,
-            finish_reasons=_raw_finish_reasons(data) or None,
+            finish_reasons=finish_reasons or None,
             tool_names=_tool_names(message.get("tool_calls")),
         )
         return result
@@ -847,14 +903,19 @@ def _wrap_openai_stream(original: Any, inst: _Instruments) -> Any:
             return
         attrs = _raw_request_attrs(self, body)
         attrs["gen_ai.request.stream"] = True
-        span = _start_span(inst, attrs, _raw_temperature(body))
+        temperature = _raw_temperature(body)
+        span = _start_span(inst, attrs, temperature)
         _set_openai_request_attrs(span, body)
+        content_attrs = _raw_content_attrs(body) if inst.capture_content else {}
+        for key, value in content_attrs.items():
+            span.set_attribute(key, value)
         start = time.perf_counter()
         first: float | None = None
         previous = start
         usage: UsageToken | None = None
         reasons: list[str] = []
-        tool_names: dict[int, str] = {}
+        calls: dict[int, ToolCall] = {}
+        text: list[str] = []
         error: BaseException | None = None
         token = _active_chat_span.set(span)
         with trace.use_span(
@@ -880,13 +941,11 @@ def _wrap_openai_stream(original: Any, inst: _Instruments) -> Any:
                         usage = _raw_usage(chunk) or usage
                         reasons.extend(_raw_finish_reasons(chunk))
                         for choice in chunk.get("choices") or ():
-                            for call in (choice.get("delta") or {}).get(
-                                "tool_calls"
-                            ) or ():
-                                if name := (call.get("function") or {}).get("name"):
-                                    tool_names[call.get("index", len(tool_names))] = (
-                                        name
-                                    )
+                            delta = choice.get("delta") or {}
+                            if inst.capture_content and delta.get("content"):
+                                text.append(delta["content"])
+                            for call in delta.get("tool_calls") or ():
+                                _merge_tool_call_delta(calls, call)
                     yield chunk
             except GeneratorExit:
                 raise
@@ -895,6 +954,26 @@ def _wrap_openai_stream(original: Any, inst: _Instruments) -> Any:
                 raise
             finally:
                 _active_chat_span.reset(token)
+                if inst.capture_content:
+                    output = _capture_output(
+                        "".join(text),
+                        list(calls.values()),
+                        reasons[0] if reasons else None,
+                    )
+                    span.set_attribute("gen_ai.output.messages", output)
+                    detail_attrs: dict[str, Any] = {
+                        **attrs,
+                        **content_attrs,
+                        **_usage_attrs(usage),
+                        "gen_ai.output.messages": output,
+                    }
+                    if reasons:
+                        detail_attrs["gen_ai.response.finish_reasons"] = reasons
+                    if temperature is not None:
+                        detail_attrs["gen_ai.request.temperature"] = temperature
+                    if error is not None:
+                        detail_attrs["error.type"] = type(error).__qualname__
+                    _emit_inference_details(inst, span, detail_attrs)
                 _record_end(
                     inst,
                     span,
@@ -902,7 +981,7 @@ def _wrap_openai_stream(original: Any, inst: _Instruments) -> Any:
                     start,
                     usage=usage,
                     finish_reasons=reasons or None,
-                    tool_names=tuple(tool_names.values()) or None,
+                    tool_names=_tool_names(list(calls.values())),
                     error=error,
                 )
 
