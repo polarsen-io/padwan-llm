@@ -1,4 +1,5 @@
 import base64
+import mimetypes
 from contextlib import nullcontext
 
 import pytest
@@ -50,6 +51,7 @@ def test_image_part(tmp_path, name, mime_arg, expected_mime):
         pytest.param("song.mp3", None, "mp3", id="guess-mp3"),
         pytest.param("clip.flac", None, "flac", id="guess-flac"),
         pytest.param("clip.m4a", None, "m4a", id="guess-m4a"),
+        pytest.param("clip.aif", None, "aiff", id="mime-alias"),
         pytest.param("clip.flac", "wav", "wav", id="explicit-override"),
         pytest.param("blob.unknownext", None, None, id="unknown-raises"),
     ],
@@ -65,6 +67,41 @@ def test_audio_part(tmp_path, name, fmt_arg, expected):
         assert part["type"] == "input_audio"
         assert part["input_audio"]["format"] == expected
         assert base64.b64decode(part["input_audio"]["data"]) == raw
+
+
+@pytest.mark.parametrize(
+    ("name", "mime", "expected"),
+    [
+        pytest.param("clip.m4a", "audio/mp4a-latm", "m4a", id="m4a-host-alias"),
+        pytest.param("clip.M4A", "audio/mp4a-latm", "m4a", id="uppercase-suffix"),
+        pytest.param("clip.aac", "audio/x-aac", "aac", id="aac-host-alias"),
+        pytest.param("clip.wav", None, "wav", id="missing-mime"),
+        pytest.param(
+            "clip.flac", "application/octet-stream", "flac", id="generic-mime"
+        ),
+    ],
+)
+def test_audio_inference_ignores_host_mime_for_supported_extensions(
+    tmp_path, monkeypatch, name, mime, expected
+):
+    path = tmp_path / name
+    raw = b"\xff\x00 binary audio"
+    path.write_bytes(raw)
+    mimetypes.init()
+    if mime is None:
+        monkeypatch.delitem(mimetypes.types_map, path.suffix.lower(), raising=False)
+    else:
+        monkeypatch.setitem(mimetypes.types_map, path.suffix.lower(), mime)
+    part = {
+        "type": "input_audio",
+        "input_audio": {
+            "data": base64.b64encode(raw).decode("ascii"),
+            "format": expected,
+        },
+    }
+
+    assert audio_part(path) == part
+    assert content_parts(path) == [part]
 
 
 def test_text_file_part(tmp_path):

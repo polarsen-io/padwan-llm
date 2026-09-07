@@ -34,7 +34,7 @@ parts = [
 ]
 ```
 
-`image_part` accepts a path (`str | Path`) and guesses the MIME type from the file name; pass `mime=` to override. Unknown extensions fall back to `image/png`. `audio_part` accepts a path (`str | Path`) and guesses the format from the extension (wav, mp3, flac, ogg, aac, aiff, m4a); `fmt=` overrides the guess and unknown extensions raise `ValueError`. Format support varies per provider (see the audio table below). `text_file_part` reads the file as UTF-8 (`encoding=` overrides) and prefixes the text with `--- <name> ---` so the model can tell files apart.
+`image_part` accepts a path (`str | Path`) and guesses the MIME type from the file name; pass `mime=` to override. Unknown extensions fall back to `image/png`. `audio_part` accepts a path (`str | Path`) and guesses the format from the extension (wav, mp3, flac, ogg, aac, aiff, m4a); `fmt=` overrides the guess and unknown extensions raise `ValueError`. Supported audio extensions take precedence over host MIME mappings. Format support varies per provider (see the audio table below). `text_file_part` reads the file as UTF-8 (`encoding=` overrides) and prefixes the text with `--- <name> ---` so the model can tell files apart.
 
 ## Sending images
 
