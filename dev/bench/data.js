@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788206358276,
+  "lastUpdate": 1788794991995,
   "repoUrl": "https://github.com/polarsen-io/padwan-llm",
   "entries": {
     "Import Performance": [
@@ -462,6 +462,48 @@ window.BENCHMARK_DATA = {
             "value": 223.66,
             "unit": "ms",
             "range": 1.65
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bot@polarsen.io",
+            "name": "Polarsen-bot",
+            "username": "Polarsen-bot"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dfb179f56a73ce2140875182c26c5f23d5d33b12",
+          "message": "chore: weekly LLM SDK refresh (#56)\n\n* chore: weekly LLM SDK refresh\n\n- Bump openai, google-genai, xai-sdk, mcp to latest\n- Regenerate OpenAI/Mistral OpenAPI TypedDicts\n- Include provider model drift report\n\n* chore: add drifted provider model literals\n\nCo-authored-by: Andarius <5070712+Andarius@users.noreply.github.com>\n\n---------\n\nCo-authored-by: Polarsen-bot <248777799+Polarsen-bot@users.noreply.github.com>\nCo-authored-by: copilot-swe-agent[bot] <198982749+Copilot@users.noreply.github.com>\nCo-authored-by: Andarius <5070712+Andarius@users.noreply.github.com>",
+          "timestamp": "2026-09-07T17:29:17+02:00",
+          "tree_id": "ef67670966be1a7f8044e9ecc1895a39c9828f8f",
+          "url": "https://github.com/polarsen-io/padwan-llm/commit/dfb179f56a73ce2140875182c26c5f23d5d33b12"
+        },
+        "date": 1788794991008,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "padwan_llm (facade)",
+            "value": 182.53,
+            "unit": "ms",
+            "range": 2.05
+          },
+          {
+            "name": "padwan_llm.openai",
+            "value": 181.51,
+            "unit": "ms",
+            "range": 1.83
+          },
+          {
+            "name": "padwan_llm.otel",
+            "value": 192.23,
+            "unit": "ms",
+            "range": 2.63
           }
         ]
       }
