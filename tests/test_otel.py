@@ -20,7 +20,7 @@ from opentelemetry.sdk.metrics.export import (
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from opentelemetry.trace import StatusCode
+from opentelemetry.trace import StatusCode, get_current_span
 
 from padwan_llm import McpStreamable, McpTool, otel
 from padwan_llm._base import RealtimeClientBase
@@ -793,6 +793,279 @@ async def test_raw_openai_error_ends_span(otel_setup, client, make_resp):
     (span,) = exporter.get_finished_spans()
     assert span.status.status_code is StatusCode.ERROR
     assert dict(span.attributes or {})["error.type"] == "LLMError"
+
+
+@pytest.mark.parametrize(
+    "streaming", [pytest.param(False, id="complete"), pytest.param(True, id="stream")]
+)
+@pytest.mark.parametrize(
+    "capture_content",
+    [pytest.param(False, id="metadata"), pytest.param(True, id="content")],
+)
+async def test_raw_choices_preserve_function_and_custom_tools(
+    otel_logging,
+    client,
+    make_resp,
+    make_sse_event,
+    make_sse_resp,
+    streaming,
+    capture_content,
+):
+    exporter, log_exporter = otel_logging(capture_content=capture_content)
+    function_call = {
+        "id": "call_0",
+        "type": "function",
+        "function": {"name": "weather", "arguments": '{"city":"Paris"}'},
+    }
+    custom_call = {
+        "id": "call_1",
+        "type": "custom",
+        "custom": {"name": "python", "input": "print(42)"},
+    }
+    body = {
+        "model": "gpt-4o",
+        "n": 2,
+        "messages": [
+            {"role": "assistant", "tool_calls": [custom_call]},
+            {"role": "tool", "tool_call_id": "call_1", "content": "42"},
+            {"role": "user", "content": "Continue"},
+        ],
+    }
+    if streaming:
+        chunks = [
+            {
+                "choices": [
+                    {
+                        "index": 1,
+                        "delta": {
+                            "content": "Bonjour",
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_1",
+                                    "type": "custom",
+                                    "custom": {"name": "python", "input": "print("},
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "index": 0,
+                        "delta": {
+                            "content": "Hello",
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_0",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "weather",
+                                        "arguments": '{"city":',
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                ]
+            },
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "function": {"arguments": '"Paris"}'},
+                                }
+                            ]
+                        },
+                        "finish_reason": "tool_calls",
+                    },
+                    {
+                        "index": 1,
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "custom": {"input": "42)"},
+                                }
+                            ]
+                        },
+                        "finish_reason": "length",
+                    },
+                ]
+            },
+            {"choices": [], "usage": USAGE},
+        ]
+        client._session.post.return_value = make_sse_resp(
+            [make_sse_event(_json_dumps(chunk)) for chunk in chunks]
+        )
+        assert [chunk async for chunk in client.stream(body)] == chunks
+    else:
+        payload = {
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"content": "Hello", "tool_calls": [function_call]},
+                    "finish_reason": "tool_calls",
+                },
+                {
+                    "index": 1,
+                    "message": {"content": "Bonjour", "tool_calls": [custom_call]},
+                    "finish_reason": "length",
+                },
+            ],
+            "usage": USAGE,
+        }
+        client._session.post.return_value = make_resp(200, payload)
+        data, usage = await client.complete(body)
+        assert data == payload
+        assert usage == {"total": 30, "input": 10, "output": 20}
+
+    (span,) = exporter.get_finished_spans()
+    attrs = dict(span.attributes or {})
+    assert attrs["padwan_llm.response.tool_names"] == ("weather", "python")
+    assert attrs["gen_ai.response.finish_reasons"] == ("tool_calls", "length")
+    assert attrs["gen_ai.usage.input_tokens"] == 10
+    assert attrs["gen_ai.usage.output_tokens"] == 20
+    if capture_content:
+        output = _json_loads(attrs["gen_ai.output.messages"])
+        assert output == [
+            {
+                "role": "assistant",
+                "parts": [
+                    {"type": "text", "content": "Hello"},
+                    {
+                        "type": "tool_call",
+                        "id": "call_0",
+                        "name": "weather",
+                        "arguments": '{"city":"Paris"}',
+                    },
+                ],
+                "finish_reason": "tool_calls",
+            },
+            {
+                "role": "assistant",
+                "parts": [
+                    {"type": "text", "content": "Bonjour"},
+                    {
+                        "type": "tool_call",
+                        "id": "call_1",
+                        "name": "python",
+                        "arguments": "print(42)",
+                    },
+                ],
+                "finish_reason": "length",
+            },
+        ]
+        assert _json_loads(attrs["gen_ai.input.messages"])[0]["parts"] == [
+            output[1]["parts"][1]
+        ]
+        (log,) = log_exporter.get_finished_logs()
+        logged = dict(log.log_record.attributes or {})["gen_ai.output.messages"]
+        assert _json_loads(_json_dumps(logged)) == output
+    else:
+        assert "gen_ai.output.messages" not in attrs
+        assert "gen_ai.input.messages" not in attrs
+        assert not log_exporter.get_finished_logs()
+
+
+@pytest.mark.parametrize(
+    ("ending", "expectation", "error_type"),
+    [
+        pytest.param("exhaust", nullcontext(), None, id="exhaust"),
+        pytest.param("close", nullcontext(), None, id="close"),
+        pytest.param(
+            "error",
+            pytest.raises(RuntimeError, match="disconnected"),
+            "RuntimeError",
+            id="error",
+        ),
+        pytest.param(
+            "cancel",
+            pytest.raises(asyncio.CancelledError),
+            "CancelledError",
+            id="cancel",
+        ),
+    ],
+)
+async def test_raw_stream_ends_across_tasks(
+    otel_setup, client, make_sse_event, make_sse_resp, ending, expectation, error_type
+):
+    exporter, _ = otel_setup
+    chunk = {"choices": [{"index": 0, "delta": {"content": "Hello"}}]}
+    response = make_sse_resp([make_sse_event(_json_dumps(chunk))])
+    client._session.post.return_value = response
+    stream = client.stream({"model": "gpt-4o", "messages": []})
+    assert await asyncio.create_task(anext(stream)) == chunk
+
+    with expectation:
+        if ending == "close":
+            await asyncio.create_task(stream.aclose())
+        elif ending == "cancel":
+            waiting = asyncio.Event()
+
+            async def wait_for_chunk():
+                waiting.set()
+                await asyncio.Event().wait()
+
+            response.extension.next_payload = wait_for_chunk
+            task = asyncio.create_task(anext(stream))
+            await waiting.wait()
+            task.cancel()
+            await task
+        else:
+            if ending == "error":
+                response.extension.next_payload = AsyncMock(
+                    side_effect=RuntimeError("disconnected")
+                )
+            sentinel = object()
+            assert await asyncio.create_task(anext(stream, sentinel)) is sentinel
+
+    (span,) = exporter.get_finished_spans()
+    assert dict(span.attributes or {}).get("error.type") == error_type
+    assert span.status.status_code is (
+        StatusCode.ERROR if error_type else StatusCode.UNSET
+    )
+    assert response.extension.closed
+    if ending != "exhaust":
+        response.raw.close.assert_awaited_once()
+        response.raw.release_conn.assert_called_once()
+
+
+async def test_raw_stream_restores_caller_context(
+    otel_setup, client, make_resp, make_sse_event, make_sse_resp
+):
+    exporter, reader = otel_setup
+    payload = {
+        "choices": [{"message": {"content": "Done"}, "finish_reason": "stop"}],
+        "usage": USAGE,
+    }
+    client._session.post.side_effect = [
+        make_sse_resp(
+            [
+                make_sse_event(
+                    _json_dumps({"choices": [{"delta": {"content": "Hello"}}]})
+                )
+            ]
+        ),
+        make_resp(200, payload),
+    ]
+    parent = get_current_span()
+    stream = client.stream({"model": "stream-model", "messages": []})
+    try:
+        await anext(stream)
+        assert get_current_span() is parent
+        await client.complete({"model": "complete-model", "messages": []})
+    finally:
+        await stream.aclose()
+
+    spans = exporter.get_finished_spans()
+    assert [span.name for span in spans] == ["chat complete-model", "chat stream-model"]
+    assert spans[0].parent == spans[1].parent
+    assert _histogram_count(reader, "gen_ai.client.operation.duration") == 2
+    assert get_current_span() is parent
 
 
 @pytest.fixture
