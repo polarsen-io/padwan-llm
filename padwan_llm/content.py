@@ -75,6 +75,10 @@ _AUDIO_FORMATS: dict[str, AudioFormat] = {
     "audio/x-m4a": "m4a",
 }
 
+_AUDIO_EXTENSIONS: dict[str, AudioFormat] = {
+    f".{fmt}": fmt for fmt in _AUDIO_FORMATS.values()
+}
+
 
 def text_part(text: str) -> ContentTextPart:
     """Wrap plain text as a text content part."""
@@ -102,6 +106,8 @@ def audio_part(path: str | Path, *, fmt: AudioFormat | None = None) -> ContentAu
     """
     path = Path(path)
     if fmt is None:
+        fmt = _AUDIO_EXTENSIONS.get(path.suffix.lower())
+    if fmt is None:
         mime = mimetypes.guess_type(path.name)[0]
         if mime is None or (fmt := _AUDIO_FORMATS.get(mime)) is None:
             supported = "/".join(dict.fromkeys(_AUDIO_FORMATS.values()))
@@ -120,19 +126,14 @@ def text_file_part(path: str | Path, *, encoding: str = "utf-8") -> ContentTextP
 
 
 def content_parts(*items: str | Path | ContentPart) -> list[ContentPart]:
-    """Build content parts with type inference.
-
-    Plain strings become text parts (never treated as paths), so message text
-    that mentions a filename is safe. ``Path`` items are read from disk: an
-    image MIME type (by extension) yields an image part, an audio MIME type an
-    audio part, anything else is inlined as a labelled text file part.
-    Ready-made part dicts pass through.
-    """
+    """Infer multimodal parts from Path inputs, treating strings as plain text."""
     parts: list[ContentPart] = []
     for item in items:
         if isinstance(item, Path):
             mime = mimetypes.guess_type(item.name)[0]
-            if mime and mime.startswith("image/"):
+            if fmt := _AUDIO_EXTENSIONS.get(item.suffix.lower()):
+                parts.append(audio_part(item, fmt=fmt))
+            elif mime and mime.startswith("image/"):
                 parts.append(image_part(item, mime=mime))
             elif mime and mime.startswith("audio/"):
                 # audio_part raises a clear ValueError on unknown formats,
