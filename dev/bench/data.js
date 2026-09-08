@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788853648207,
+  "lastUpdate": 1788853688324,
   "repoUrl": "https://github.com/polarsen-io/padwan-llm",
   "entries": {
     "Import Performance": [
@@ -1010,6 +1010,48 @@ window.BENCHMARK_DATA = {
             "value": 234.1,
             "unit": "ms",
             "range": 0.93
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "julien.brayere@obitrain.com",
+            "name": "Julien Brayere",
+            "username": "Andarius"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9524251e84392e30831c6cdcf13e279d101f3ec7",
+          "message": "fix: infer supported audio formats from file extensions (#57)",
+          "timestamp": "2026-09-08T09:46:54+02:00",
+          "tree_id": "c5099efdb624191865fd018695a2a28320770833",
+          "url": "https://github.com/polarsen-io/padwan-llm/commit/9524251e84392e30831c6cdcf13e279d101f3ec7"
+        },
+        "date": 1788853687199,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "padwan_llm (facade)",
+            "value": 53.93,
+            "unit": "ms",
+            "range": 2.03
+          },
+          {
+            "name": "padwan_llm.openai",
+            "value": 201.18,
+            "unit": "ms",
+            "range": 1.86
+          },
+          {
+            "name": "padwan_llm.otel",
+            "value": 234.14,
+            "unit": "ms",
+            "range": 4.09
           }
         ]
       }
