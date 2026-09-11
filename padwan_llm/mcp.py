@@ -268,6 +268,9 @@ class McpStreamable:
     multiple transports can coexist without colliding. Leave as ``None``
     to use bare wire names; `AgentSession` will fall back to `auto_prefix`
     if (and only if) it detects a collision at runtime."""
+    _otel_mcp_session_start: float | None = field(
+        init=False, default=None, repr=False, compare=False
+    )
     _tools: list[McpTool] = field(init=False, default_factory=list)
     _http: niquests.AsyncSession = field(
         init=False, default_factory=niquests.AsyncSession
@@ -588,6 +591,9 @@ class McpStdio:
     """Optional namespace for this transport's tools (see
     `McpStreamable.name_prefix`)."""
 
+    _otel_mcp_session_start: float | None = field(
+        init=False, default=None, repr=False, compare=False
+    )
     _tools: list[McpTool] = field(init=False, default_factory=list)
     _process: asyncio.subprocess.Process | None = field(init=False, default=None)
     _next_id: int = field(init=False, default=0)

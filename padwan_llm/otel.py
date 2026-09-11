@@ -2,8 +2,9 @@ import functools
 import inspect
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import aclosing
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 from urllib.parse import urlsplit
 
@@ -27,8 +28,9 @@ from .grok import GrokClient
 from .logs import log
 from .mcp import _PROTOCOL_VERSION, McpStdio, McpStreamable
 from .mistral import MistralClient
-from .models import ToolCall, ToolDefinition, UsageToken
+from .models import ToolCall, ToolCallFunction, ToolDefinition, UsageToken
 from .openai import OpenAIClient
+from .openai.types import ChatCompletionMessageCustomToolCall
 
 __all__ = ("instrument", "is_instrumented", "uninstrument")
 
@@ -313,9 +315,10 @@ def instrument(
         )
     )
 
-    # OpenAI vendor extras live only on raw request and response payloads.
-    plan.append((OpenAIClient, "complete", _wrap_openai_complete))
-    plan.append((OpenAIClient, "stream", _wrap_openai_stream))
+    # OpenAI vendor extras live only on raw request and response payloads; a raw
+    # call outside complete_chat/stream_chat gets its own span.
+    plan.append((OpenAIClient, "complete", lambda fn: _wrap_openai_complete(fn, inst)))
+    plan.append((OpenAIClient, "stream", lambda fn: _wrap_openai_stream(fn, inst)))
 
     plan.append(
         (AgentSession, "_dispatch_one", lambda fn: _wrap_execute_tool(fn, inst))
@@ -398,6 +401,15 @@ def _content_parts(content: Any) -> list[dict[str, Any]]:
     return parts
 
 
+type _CapturedToolCall = ToolCall | ChatCompletionMessageCustomToolCall
+
+
+def _tool_call_function(call: _CapturedToolCall) -> ToolCallFunction:
+    if "custom" in call:
+        return {"name": call["custom"]["name"], "arguments": call["custom"]["input"]}
+    return call["function"]
+
+
 def _capture_input(messages: Sequence[Any], *, separate_system: bool) -> dict[str, str]:
     """Serialize input messages as semconv span attributes."""
     system: list[dict[str, Any]] = []
@@ -423,12 +435,13 @@ def _capture_input(messages: Sequence[Any], *, separate_system: bool) -> dict[st
             continue
         parts = _content_parts(m.get("content"))
         for tc in m.get("tool_calls") or ():
+            function = _tool_call_function(tc)
             parts.append(
                 {
                     "type": "tool_call",
                     "id": tc["id"],
-                    "name": tc["function"]["name"],
-                    "arguments": tc["function"]["arguments"],
+                    "name": function["name"],
+                    "arguments": function["arguments"],
                 }
             )
         msgs.append({"role": role, "parts": parts})
@@ -467,27 +480,36 @@ def _emit_inference_details(
     )
 
 
-def _capture_output(
+def _output_message(
     content: str | None,
-    tool_calls: Sequence[ToolCall] | None,
+    tool_calls: Sequence[_CapturedToolCall] | None,
     finish_reason: str | None,
-) -> str:
+) -> dict[str, Any]:
     parts: list[dict[str, Any]] = []
     if content:
         parts.append({"type": "text", "content": content})
     for tc in tool_calls or ():
+        function = _tool_call_function(tc)
         parts.append(
             {
                 "type": "tool_call",
                 "id": tc["id"],
-                "name": tc["function"]["name"],
-                "arguments": tc["function"]["arguments"],
+                "name": function["name"],
+                "arguments": function["arguments"],
             }
         )
     msg: dict[str, Any] = {"role": "assistant", "parts": parts}
     if finish_reason:
         msg["finish_reason"] = finish_reason
-    return _json_dumps([msg])
+    return msg
+
+
+def _capture_output(
+    content: str | None,
+    tool_calls: Sequence[_CapturedToolCall] | None,
+    finish_reason: str | None,
+) -> str:
+    return _json_dumps([_output_message(content, tool_calls, finish_reason)])
 
 
 def _usage_attrs(usage: UsageToken | None) -> dict[str, int]:
@@ -536,8 +558,14 @@ class _ThoughtTimer:
             self.wrapped(text)
 
 
-def _tool_names(tool_calls: Sequence[ToolCall] | None) -> tuple[str, ...] | None:
-    return tuple(tc["function"]["name"] for tc in tool_calls) if tool_calls else None
+def _tool_names(
+    tool_calls: Sequence[_CapturedToolCall] | None,
+) -> tuple[str, ...] | None:
+    return (
+        tuple(_tool_call_function(tc)["name"] for tc in tool_calls)
+        if tool_calls
+        else None
+    )
 
 
 def _record_end(
@@ -739,36 +767,295 @@ def _set_openai_response_attrs(span: trace.Span, data: Any) -> None:
         span.set_attribute("openai.response.system_fingerprint", fingerprint)
 
 
-def _wrap_openai_complete(original: Any) -> Any:
-    """Capture OpenAI attributes from raw non-streaming payloads."""
+def _raw_request_attrs(client: Any, body: Any) -> dict[str, Any]:
+    attrs = _request_attrs(client)
+    if isinstance(body, dict) and (model := body.get("model")):
+        attrs["gen_ai.request.model"] = model
+    return attrs
+
+
+def _raw_temperature(body: Any) -> float | None:
+    temperature = body.get("temperature") if isinstance(body, dict) else None
+    return float(temperature) if isinstance(temperature, int | float) else None
+
+
+def _raw_usage(chunk: Any) -> UsageToken | None:
+    """Usage from a raw OpenAI payload (final stream chunk or completion)."""
+    usage = chunk.get("usage") if isinstance(chunk, dict) else None
+    if not usage:
+        return None
+    token: UsageToken = {
+        "total": usage.get("total_tokens", 0),
+        "input": usage.get("prompt_tokens", 0),
+        "output": usage.get("completion_tokens", 0),
+    }
+    if (
+        cached := (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+    ) is not None:
+        token["cached"] = cached
+    if reasoning := (usage.get("completion_tokens_details") or {}).get(
+        "reasoning_tokens"
+    ):
+        token["reasoning"] = reasoning
+    return token
+
+
+def _raw_finish_reasons(data: Any) -> list[str]:
+    if not isinstance(data, dict):
+        return []
+    return [
+        reason
+        for choice in data.get("choices") or ()
+        if (reason := choice.get("finish_reason"))
+    ]
+
+
+def _raw_content_attrs(body: Any) -> dict[str, str]:
+    """Input content attributes of a raw OpenAI chat body."""
+    if not isinstance(body, dict):
+        return {}
+    attrs = _capture_input(body.get("messages") or (), separate_system=False)
+    tools = [
+        {"type": "function", **(tool.get("function") or tool)}
+        for tool in body.get("tools") or ()
+    ]
+    if tools:
+        attrs["gen_ai.tool.definitions"] = _json_dumps(tools)
+    return attrs
+
+
+@dataclass
+class _RawChoice:
+    text: list[str] = field(default_factory=list)
+    calls: dict[int, ToolCall] = field(default_factory=dict)
+    finish_reason: str | None = None
+
+
+def _merge_tool_call_delta(
+    calls: dict[int, ToolCall], call: dict[str, Any], *, capture_content: bool
+) -> None:
+    """Fold function or custom tool deltas into the captured call."""
+    entry = calls.setdefault(
+        call.get("index", len(calls)),
+        {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
+    )
+    if call.get("id"):
+        entry["id"] = call["id"]
+    function = call.get("function") or call.get("custom") or {}
+    if function.get("name"):
+        entry["function"]["name"] += function["name"]
+    if capture_content:
+        entry["function"]["arguments"] += (
+            function.get("arguments") or function.get("input") or ""
+        )
+
+
+def _wrap_openai_complete(original: Any, inst: _Instruments) -> Any:
+    """Enrich the active chat span, or open one for a raw `complete()` call."""
 
     @functools.wraps(original)
     async def wrapper(self: Any, body: Any, *args: Any, **kwargs: Any) -> Any:
-        span = _active_chat_span.get()
-        if span is not None and span.is_recording():
-            _set_openai_request_attrs(span, body)
-        result = await original(self, body, *args, **kwargs)
-        if span is not None and span.is_recording():
-            _set_openai_response_attrs(span, result[0])
+        if (active := _active_chat_span.get()) is not None:
+            if active.is_recording():
+                _set_openai_request_attrs(active, body)
+            result = await original(self, body, *args, **kwargs)
+            if active.is_recording():
+                _set_openai_response_attrs(active, result[0])
+            return result
+        attrs = _raw_request_attrs(self, body)
+        temperature = _raw_temperature(body)
+        span = _start_span(inst, attrs, temperature)
+        _set_openai_request_attrs(span, body)
+        content_attrs = _raw_content_attrs(body) if inst.capture_content else {}
+        for key, value in content_attrs.items():
+            span.set_attribute(key, value)
+        start = time.perf_counter()
+        token = _active_chat_span.set(span)
+        with trace.use_span(
+            span,
+            end_on_exit=False,
+            record_exception=False,
+            set_status_on_exception=False,
+        ):
+            try:
+                result = await original(self, body, *args, **kwargs)
+            except BaseException as e:
+                if inst.capture_content:
+                    _emit_inference_details(
+                        inst,
+                        span,
+                        {**attrs, **content_attrs, "error.type": type(e).__qualname__},
+                    )
+                _record_end(inst, span, attrs, start, error=e)
+                raise
+            finally:
+                _active_chat_span.reset(token)
+        data, usage = result
+        _set_openai_response_attrs(span, data)
+        choices = data.get("choices") or []
+        tool_calls = [
+            call
+            for choice in choices
+            for call in (choice.get("message") or {}).get("tool_calls") or ()
+        ]
+        finish_reasons = _raw_finish_reasons(data)
+        if inst.capture_content:
+            output = _json_dumps(
+                [
+                    _output_message(
+                        (choice.get("message") or {}).get("content"),
+                        (choice.get("message") or {}).get("tool_calls"),
+                        choice.get("finish_reason"),
+                    )
+                    for choice in choices
+                ]
+            )
+            span.set_attribute("gen_ai.output.messages", output)
+            detail_attrs: dict[str, Any] = {
+                **attrs,
+                **content_attrs,
+                **_usage_attrs(usage),
+                "gen_ai.output.messages": output,
+                "gen_ai.response.finish_reasons": finish_reasons,
+            }
+            if temperature is not None:
+                detail_attrs["gen_ai.request.temperature"] = temperature
+            _emit_inference_details(inst, span, detail_attrs)
+        _record_end(
+            inst,
+            span,
+            attrs,
+            start,
+            usage=usage,
+            finish_reasons=finish_reasons or None,
+            tool_names=_tool_names(tool_calls),
+        )
         return result
 
     return wrapper
 
 
-def _wrap_openai_stream(original: Any) -> Any:
-    """Capture OpenAI attributes from raw streaming payloads."""
+def _wrap_openai_stream(original: Any, inst: _Instruments) -> Any:
+    """Enrich the active chat span, or open one for a raw `stream()` call."""
 
     @functools.wraps(original)
     async def wrapper(
         self: Any, body: Any, *args: Any, **kwargs: Any
     ) -> AsyncIterator[Any]:
-        span = _active_chat_span.get()
-        if span is not None and span.is_recording():
-            _set_openai_request_attrs(span, body)
-        async for chunk in original(self, body, *args, **kwargs):
-            if span is not None and span.is_recording():
-                _set_openai_response_attrs(span, chunk)
-            yield chunk
+        if (active := _active_chat_span.get()) is not None:
+            if active.is_recording():
+                _set_openai_request_attrs(active, body)
+            async for chunk in original(self, body, *args, **kwargs):
+                if active.is_recording():
+                    _set_openai_response_attrs(active, chunk)
+                yield chunk
+            return
+        attrs = _raw_request_attrs(self, body)
+        attrs["gen_ai.request.stream"] = True
+        temperature = _raw_temperature(body)
+        span = _start_span(inst, attrs, temperature)
+        _set_openai_request_attrs(span, body)
+        content_attrs = _raw_content_attrs(body) if inst.capture_content else {}
+        for key, value in content_attrs.items():
+            span.set_attribute(key, value)
+        start = time.perf_counter()
+        first: float | None = None
+        previous = start
+        usage: UsageToken | None = None
+        choices: dict[int, _RawChoice] = {}
+        error: BaseException | None = None
+        try:
+            async with aclosing(original(self, body, *args, **kwargs)) as chunks:
+                while True:
+                    with trace.use_span(
+                        span,
+                        end_on_exit=False,
+                        record_exception=False,
+                        set_status_on_exception=False,
+                    ):
+                        token = _active_chat_span.set(span)
+                        try:
+                            chunk = await anext(chunks)
+                        except StopAsyncIteration:
+                            break
+                        finally:
+                            _active_chat_span.reset(token)
+                    now = time.perf_counter()
+                    if first is None:
+                        first = now
+                        span.set_attribute(
+                            "gen_ai.response.time_to_first_chunk", first - start
+                        )
+                        inst.time_to_first_chunk.record(first - start, attrs)
+                    else:
+                        inst.time_per_output_chunk.record(now - previous, attrs)
+                    previous = now
+                    if isinstance(chunk, dict):
+                        _set_openai_response_attrs(span, chunk)
+                        usage = _raw_usage(chunk) or usage
+                        for choice in chunk.get("choices") or ():
+                            captured = choices.setdefault(
+                                choice.get("index", 0), _RawChoice()
+                            )
+                            if reason := choice.get("finish_reason"):
+                                captured.finish_reason = reason
+                            delta = choice.get("delta") or {}
+                            if inst.capture_content and delta.get("content"):
+                                captured.text.append(delta["content"])
+                            for call in delta.get("tool_calls") or ():
+                                _merge_tool_call_delta(
+                                    captured.calls,
+                                    call,
+                                    capture_content=inst.capture_content,
+                                )
+                    yield chunk
+        except GeneratorExit:
+            raise
+        except BaseException as e:
+            error = e
+            raise
+        finally:
+            ordered = [choices[index] for index in sorted(choices)]
+            reasons = [
+                choice.finish_reason for choice in ordered if choice.finish_reason
+            ]
+            if inst.capture_content:
+                output = _json_dumps(
+                    [
+                        _output_message(
+                            "".join(choice.text),
+                            [choice.calls[index] for index in sorted(choice.calls)],
+                            choice.finish_reason,
+                        )
+                        for choice in ordered
+                    ]
+                )
+                span.set_attribute("gen_ai.output.messages", output)
+                detail_attrs: dict[str, Any] = {
+                    **attrs,
+                    **content_attrs,
+                    **_usage_attrs(usage),
+                    "gen_ai.output.messages": output,
+                }
+                if reasons:
+                    detail_attrs["gen_ai.response.finish_reasons"] = reasons
+                if temperature is not None:
+                    detail_attrs["gen_ai.request.temperature"] = temperature
+                if error is not None:
+                    detail_attrs["error.type"] = type(error).__qualname__
+                _emit_inference_details(inst, span, detail_attrs)
+            _record_end(
+                inst,
+                span,
+                attrs,
+                start,
+                usage=usage,
+                finish_reasons=reasons or None,
+                tool_names=_tool_names(
+                    [call for choice in ordered for call in choice.calls.values()]
+                ),
+                error=error,
+            )
 
     return wrapper
 
@@ -962,7 +1249,7 @@ def _wrap_mcp_enter(original: Any, inst: _Instruments) -> Any:
             attrs["error.type"] = type(e).__qualname__
             inst.mcp_session_duration.record(time.perf_counter() - start, attrs)
             raise
-        setattr(self, "_otel_mcp_session_start", start)
+        self._otel_mcp_session_start = start
         return result
 
     return wrapper
@@ -971,7 +1258,7 @@ def _wrap_mcp_enter(original: Any, inst: _Instruments) -> Any:
 def _wrap_mcp_exit(original: Any, inst: _Instruments) -> Any:
     @functools.wraps(original)
     async def wrapper(self: McpStreamable | McpStdio, *args: Any) -> None:
-        start = getattr(self, "_otel_mcp_session_start", None)
+        start = self._otel_mcp_session_start
         attrs = _mcp_attrs(self)
         error = args[1] if len(args) > 1 else None
         try:
@@ -980,7 +1267,7 @@ def _wrap_mcp_exit(original: Any, inst: _Instruments) -> Any:
             error = e
             raise
         finally:
-            setattr(self, "_otel_mcp_session_start", None)
+            self._otel_mcp_session_start = None
             if start is not None:
                 if error is not None:
                     attrs["error.type"] = type(error).__qualname__
