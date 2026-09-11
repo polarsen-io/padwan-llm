@@ -317,6 +317,105 @@ async def test_stream_cancellation_records_error(otel_setup, client):
     assert dict(span.attributes or {})["error.type"] == "CancelledError"
 
 
+@pytest.mark.parametrize(
+    ("ending", "expectation", "error_type"),
+    [
+        pytest.param("exhaust", nullcontext(), None, id="exhaust"),
+        pytest.param("close", nullcontext(), None, id="close"),
+        pytest.param(
+            "error",
+            pytest.raises(RuntimeError, match="disconnected"),
+            "RuntimeError",
+            id="error",
+        ),
+        pytest.param(
+            "cancel",
+            pytest.raises(asyncio.CancelledError),
+            "CancelledError",
+            id="cancel",
+        ),
+    ],
+)
+async def test_chat_stream_ends_across_tasks(
+    otel_setup, client, make_sse_event, make_sse_resp, ending, expectation, error_type
+):
+    exporter, reader = otel_setup
+    chunk = {"choices": [{"index": 0, "delta": {"content": "Hello"}}]}
+    response = make_sse_resp([make_sse_event(_json_dumps(chunk))])
+    client._session.post.return_value = response
+    stream = client.stream_chat([{"role": "user", "content": "hey"}]).__aiter__()
+    assert await asyncio.create_task(anext(stream)) == "Hello"
+
+    with expectation:
+        if ending == "close":
+            await asyncio.create_task(stream.aclose())
+        elif ending == "cancel":
+            waiting = asyncio.Event()
+
+            async def wait_for_chunk():
+                waiting.set()
+                await asyncio.Event().wait()
+
+            response.extension.next_payload = wait_for_chunk
+            task = asyncio.create_task(anext(stream))
+            await waiting.wait()
+            task.cancel()
+            await task
+        else:
+            if ending == "error":
+                response.extension.next_payload = AsyncMock(
+                    side_effect=RuntimeError("disconnected")
+                )
+            sentinel = object()
+            assert await asyncio.create_task(anext(stream, sentinel)) is sentinel
+
+    (span,) = exporter.get_finished_spans()
+    assert dict(span.attributes or {}).get("error.type") == error_type
+    assert span.status.status_code is (
+        StatusCode.ERROR if error_type else StatusCode.UNSET
+    )
+
+    assert span.context is not None
+    points = _histogram_points(reader, "gen_ai.client.operation.duration")
+    assert {exemplar.span_id for point in points for exemplar in point.exemplars} == {
+        span.context.span_id
+    }
+
+
+async def test_chat_stream_restores_caller_context(
+    otel_setup, client, make_resp, make_sse_event, make_sse_resp
+):
+    exporter, reader = otel_setup
+    payload = {
+        "choices": [{"message": {"content": "Done"}, "finish_reason": "stop"}],
+        "usage": USAGE,
+    }
+    client._session.post.side_effect = [
+        make_sse_resp(
+            [
+                make_sse_event(
+                    _json_dumps({"choices": [{"delta": {"content": "Hello"}}]})
+                )
+            ]
+        ),
+        make_resp(200, payload),
+    ]
+    parent = get_current_span()
+    stream = client.stream_chat([{"role": "user", "content": "hey"}]).__aiter__()
+    try:
+        await anext(stream)
+        assert get_current_span() is parent
+        await client.complete_chat([{"role": "user", "content": "next"}])
+    finally:
+        await stream.aclose()
+
+    spans = exporter.get_finished_spans()
+    assert [span.name for span in spans] == ["chat gpt-4o", "chat gpt-4o"]
+    assert spans[0].parent == spans[1].parent
+    assert _histogram_count(reader, "gen_ai.client.operation.duration") == 2
+    assert get_current_span() is parent
+
+
 async def test_instrument_raises_when_already_active(otel_setup):
     with pytest.raises(RuntimeError, match="already active"):
         otel.instrument()

@@ -1461,15 +1461,22 @@ class _InstrumentedChatStream(ChatStream):
         previous = start
         chunks: list[str] = []
         error: BaseException | None = None
-        chat_token = _active_chat_span.set(span)
-        with trace.use_span(
-            span,
-            end_on_exit=False,
-            record_exception=False,
-            set_status_on_exception=False,
-        ):
-            try:
-                async for chunk in self._inner:
+        try:
+            iterator = aiter(self._inner)
+            while True:
+                with trace.use_span(
+                    span,
+                    end_on_exit=False,
+                    record_exception=False,
+                    set_status_on_exception=False,
+                ):
+                    chat_token = _active_chat_span.set(span)
+                    try:
+                        chunk = await anext(iterator)
+                    except StopAsyncIteration:
+                        break
+                    finally:
+                        _active_chat_span.reset(chat_token)
                     now = time.perf_counter()
                     if first is None:
                         first = now
@@ -1486,13 +1493,19 @@ class _InstrumentedChatStream(ChatStream):
                     previous = now
                     if self._input_attrs is not None:
                         chunks.append(chunk)
-                    yield chunk
-            except GeneratorExit:
-                raise
-            except BaseException as e:
-                error = e
-                raise
-            finally:
+                yield chunk
+        except GeneratorExit:
+            raise
+        except BaseException as e:
+            error = e
+            raise
+        finally:
+            with trace.use_span(
+                span,
+                end_on_exit=False,
+                record_exception=False,
+                set_status_on_exception=False,
+            ):
                 self.usage = self._inner.usage
                 self.tool_calls = self._inner.tool_calls
                 reason = getattr(self._inner, "finish_reason", None)
@@ -1525,4 +1538,3 @@ class _InstrumentedChatStream(ChatStream):
                     thinking=self._thinking,
                     error=error,
                 )
-                _active_chat_span.reset(chat_token)
