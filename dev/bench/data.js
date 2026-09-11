@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788853688324,
+  "lastUpdate": 1789158483167,
   "repoUrl": "https://github.com/polarsen-io/padwan-llm",
   "entries": {
     "Import Performance": [
@@ -546,6 +546,48 @@ window.BENCHMARK_DATA = {
             "value": 190.25,
             "unit": "ms",
             "range": 1.84
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "julien.brayere@obitrain.com",
+            "name": "Julien Brayere",
+            "username": "Andarius"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "61604486f616e2485066be2690b77fb48b2b8cd5",
+          "message": "fix(otel): trace raw OpenAI complete()/stream() calls (#55)\n\n* fix(otel): open a span for raw OpenAI complete()/stream() calls\n\nRaw OpenAIClient.complete()/stream() only enriched a chat span opened by\ncomplete_chat()/stream_chat(); callers using the raw API (padwan-proxy) got\nno telemetry at all. They now open their own span when none is active, with\nusage, finish reasons, tool names, time to first chunk and error status.\n\n* feat(otel): capture content on raw OpenAI complete()/stream() calls\n\nWith capture_content, raw calls now record gen_ai.input.messages,\ngen_ai.tool.definitions and gen_ai.output.messages (text and tool calls,\naccumulated from stream deltas) and emit the inference details log event,\nas the chat API already did.\n\n* fix(otel): preserve raw choices and isolate streaming context\n\n- Capture custom tool calls and keep response choices separate.\n- Restore caller context between chunks and close interrupted streams.\n- Declare typed MCP session timestamps and add regression coverage.",
+          "timestamp": "2026-09-11T22:27:25+02:00",
+          "tree_id": "c72877df84d110a169bd4eb2cf63fbd8f989ab58",
+          "url": "https://github.com/polarsen-io/padwan-llm/commit/61604486f616e2485066be2690b77fb48b2b8cd5"
+        },
+        "date": 1789158481730,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "padwan_llm (facade)",
+            "value": 210.16,
+            "unit": "ms",
+            "range": 1.92
+          },
+          {
+            "name": "padwan_llm.openai",
+            "value": 210.76,
+            "unit": "ms",
+            "range": 1.46
+          },
+          {
+            "name": "padwan_llm.otel",
+            "value": 224.8,
+            "unit": "ms",
+            "range": 2.92
           }
         ]
       }
