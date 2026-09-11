@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789161271102,
+  "lastUpdate": 1789161309323,
   "repoUrl": "https://github.com/polarsen-io/padwan-llm",
   "entries": {
     "Import Performance": [
@@ -1178,6 +1178,48 @@ window.BENCHMARK_DATA = {
             "value": 243.59,
             "unit": "ms",
             "range": 3.78
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "julien.brayere@obitrain.com",
+            "name": "Julien Brayere",
+            "username": "Andarius"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a9aaaa21efce1d22b15979632a0359d7f50bde3c",
+          "message": "fix(otel): restore caller context between chat stream chunks (#58)\n\n- Limit active chat context to advancing the provider iterator.\n- Preserve metric trace links and cover cross-task stream lifecycle.",
+          "timestamp": "2026-09-11T23:13:51+02:00",
+          "tree_id": "b62648d77284041dccdfb215ba8ae6efc435a4ca",
+          "url": "https://github.com/polarsen-io/padwan-llm/commit/a9aaaa21efce1d22b15979632a0359d7f50bde3c"
+        },
+        "date": 1789161307975,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "padwan_llm (facade)",
+            "value": 54.37,
+            "unit": "ms",
+            "range": 1.29
+          },
+          {
+            "name": "padwan_llm.openai",
+            "value": 208.97,
+            "unit": "ms",
+            "range": 5.08
+          },
+          {
+            "name": "padwan_llm.otel",
+            "value": 240.61,
+            "unit": "ms",
+            "range": 7.86
           }
         ]
       }
