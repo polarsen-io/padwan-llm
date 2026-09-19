@@ -31,7 +31,6 @@ from typing import Any
 
 import niquests
 from openai.types import ChatModel
-from piou import Cli, MaybePath, Option
 
 from padwan_llm.anthropic.client import ANTHROPIC_MODELS, ANTHROPIC_VERSION
 from padwan_llm.gemini.client import GEMINI_MODELS
@@ -44,6 +43,7 @@ from padwan_llm.mistral.client import (
 )
 from padwan_llm.openai.client import _OPENAI_PREFIXES, OPENAI_MODELS
 from padwan_llm.openai.realtime import _VOICES, DEFAULT_REALTIME_MODEL
+from padwan_llm.typesafe import TYPESAFE_MODELS
 
 # Trailing date or dated-preview stamps used by upstream to expose pinned model
 # versions. The project prefers stable aliases such as "*-latest" where possible.
@@ -462,6 +462,29 @@ def _anthropic_live_models() -> RemoteModels:
     return RemoteModels(keep)
 
 
+def _typesafe_live_models() -> RemoteModels:
+    """Fetch the account's advertised TypeSafe model names."""
+    api_key = os.environ.get("TYPESAFE_API_KEY")
+    if not api_key:
+        return RemoteModels(set(), skipped="TYPESAFE_API_KEY is not configured")
+    try:
+        data = _json_get(
+            "https://api.typesafe.ai/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+    except FetchError as e:
+        return RemoteModels(set(), error=str(e))
+    if not isinstance(data, dict) or not isinstance(data.get("models"), list):
+        return RemoteModels(set(), error="response has no models list")
+    models: set[str] = set()
+    for item in data["models"]:
+        name = _string(item.get("name")) if isinstance(item, dict) else None
+        if name is None:
+            return RemoteModels(set(), error="response contains an invalid model name")
+        models.add(name)
+    return RemoteModels(models)
+
+
 def _diff(live: set[str], known: set[str]) -> Diff:
     return Diff(added=live - known, removed=known - live)
 
@@ -716,17 +739,7 @@ def _write_deprecations(
     )
 
 
-cli = Cli(
-    description="Check provider model drift against the project's model Literals."
-)
-
-
-@cli.main(help="Generate a Markdown drift report.")
-def check(
-    out: MaybePath | None = Option(
-        None, "--out", help="Write the Markdown report to this path."
-    ),
-) -> None:
+def check(out: Path | None = None) -> None:
     openai_sdk = _openai_sdk_aliases()
     openai_sdk_diff = _diff(openai_sdk, OPENAI_MODELS)
     openai_live = _openai_live_aliases()
@@ -811,6 +824,18 @@ def check(
                 "for enrolled accounts.",
             ),
         ),
+        _live_check(
+            "TypeSafe (JEV)",
+            "GET https://api.typesafe.ai/v1/models",
+            "padwan_llm/typesafe/client.py::TypeSafeModel",
+            "https://docs.typesafe.ai/models",
+            _typesafe_live_models(),
+            TYPESAFE_MODELS,
+            notes=(
+                "The endpoint currently lists aliases; pinned version IDs may "
+                "remain valid without appearing here. Absence is not a retirement notice.",
+            ),
+        ),
     ]
 
     # Refresh the runtime deprecation map only when the live check actually ran,
@@ -829,4 +854,18 @@ def check(
 
 
 if __name__ == "__main__":
+    from piou import Cli, MaybePath, Option
+
+    cli = Cli(
+        description="Check provider model drift against the project's model Literals."
+    )
+
+    @cli.main(help="Generate a Markdown drift report.")
+    def main(
+        out: MaybePath | None = Option(
+            None, "--out", help="Write the Markdown report to this path."
+        ),
+    ) -> None:
+        check(out)
+
     cli.run()

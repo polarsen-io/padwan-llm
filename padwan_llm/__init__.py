@@ -16,6 +16,7 @@ __lazy_modules__ = frozenset(
         "padwan_llm.mistral",
         "padwan_llm.models",
         "padwan_llm.openai",
+        "padwan_llm.typesafe",
         "padwan_llm.vision",
     }
 )
@@ -89,6 +90,20 @@ from .openai import (
     RealtimeServerEvent,
     is_openai_model,
 )
+from .typesafe import (
+    TYPESAFE_MODELS,
+    ChoiceAnswer,
+    ChoiceQuestion,
+    NoulAnswer,
+    NoulCriteria,
+    NoulQuestion,
+    ScoreAnswer,
+    ScoreQuestion,
+    SystemOneResponse,
+    TypeSafeClient,
+    TypeSafeModel,
+    TypeSafeUsage,
+)
 from .vision import supports_vision
 
 __all__ = (
@@ -98,6 +113,7 @@ __all__ = (
     "MISTRAL_MODELS",
     "OPENAI_CHAT_MODELS",
     "OPENAI_MODELS",
+    "TYPESAFE_MODELS",
     "AgentOutput",
     "AgentSession",
     "AnthropicClient",
@@ -107,6 +123,8 @@ __all__ = (
     "ChatMessage",
     "ChatResponse",
     "ChatStream",
+    "ChoiceAnswer",
+    "ChoiceQuestion",
     "ContentAudioPart",
     "ContentImagePart",
     "ContentPart",
@@ -139,6 +157,9 @@ __all__ = (
     "OpenAIClient",
     "OpenAIModel",
     "OpenAIRealtimeClient",
+    "NoulAnswer",
+    "NoulCriteria",
+    "NoulQuestion",
     "OutputError",
     "ProgressEvent",
     "Provider",
@@ -146,11 +167,17 @@ __all__ = (
     "RealtimeClientBase",
     "RealtimeConnection",
     "RealtimeServerEvent",
+    "ScoreAnswer",
+    "ScoreQuestion",
+    "SystemOneResponse",
     "ToolCall",
     "ToolCallContext",
     "ToolCallFunction",
     "ToolDefinition",
     "ToolResultMessage",
+    "TypeSafeClient",
+    "TypeSafeModel",
+    "TypeSafeUsage",
     "UsageToken",
     "__version__",
     "audio_part",

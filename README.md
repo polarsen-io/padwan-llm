@@ -198,6 +198,9 @@ Auto-detected providers: **OpenAI**, **Gemini**, **Mistral**, **Grok**, **Anthro
 
 Any OpenAI-compatible API (Groq, Together AI, Ollama, vLLM, ...) is supported via `OpenAIClient` with a custom `base_url`.
 
+**TypeSafe (JEV)** structured evaluations use the standalone
+[`TypeSafeClient`](docs/clients/typesafe.md), with Noul, Choice, and Score questions.
+
 ## Testing
 
 Unit tests run by default (no API keys needed):
@@ -223,6 +226,7 @@ GEMINI_API_KEY=...
 MISTRAL_API_KEY=...
 GROK_API_KEY=...
 ANTHROPIC_API_KEY=...
+TYPESAFE_API_KEY=...
 ```
 
 ### Unified gateway (one URL + one token)

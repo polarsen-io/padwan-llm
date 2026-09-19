@@ -67,6 +67,7 @@ Each provider looks for its API key in environment variables:
 | Mistral  | `MISTRAL_API_KEY`   |
 | Grok     | `GROK_API_KEY`      |
 | Anthropic | `ANTHROPIC_API_KEY` |
+| TypeSafe (JEV) | `TYPESAFE_API_KEY` |
 
 ```python
 # No need to pass api_key if environment variable is set
@@ -81,7 +82,8 @@ async with LLMClient("gpt-4o") as client:
 
 ## Streaming
 
-All clients support streaming responses:
+Chat clients support streaming responses. For JEV's structured evaluations, use
+the standalone [TypeSafe client](clients/typesafe.md).
 
 ```python
 from padwan_llm import LLMClient, Message

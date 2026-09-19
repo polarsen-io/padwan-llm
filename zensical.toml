@@ -20,6 +20,7 @@ nav = [
     { "Mistral" = "clients/mistral.md" },
     { "Grok" = "clients/grok.md" },
     { "Anthropic" = "clients/anthropic.md" },
+    { "TypeSafe (JEV)" = "clients/typesafe.md" },
   ] },
   { "Multimodal" = "multimodal.md" },
   { "MCP" = "mcp.md" },
